@@ -10,9 +10,9 @@ import { useKnowledge } from './hooks/useKnowledge';
 import DriveUploadModal from './components/DriveUploadModal';
 import { googleDriveService } from '../Drive/services/googleDriveService'; // Import service
 
-export default function Knowledge({ isSelectorMode = false, onSelect }) {
+export default function Knowledge({ isSelectorMode = false, onSelect = () => { } }) {
     const { userRole, activeGroup } = useApp();
-    const { knowledge, createKnowledgeItem: addResource, updateKnowledgeItem: updateResource, deleteKnowledgeItem: deleteResource, loading } = useKnowledge();
+    const { knowledge, createKnowledgeItem: addResource, updateKnowledgeItem: updateResource, deleteKnowledgeItem: deleteResource, addKnowledgeComment, loading } = useKnowledge();
 
     const [selectedKnowledgeId, setSelectedKnowledgeId] = useState(null);
     const [selectedIds, setSelectedIds] = useState(new Set()); // For multi-select
@@ -193,6 +193,25 @@ export default function Knowledge({ isSelectorMode = false, onSelect }) {
 
     const handleUpdateKnowledge = async (entryId, field, value) => {
         await updateResource(entryId, { [field]: value });
+    };
+
+    const handleDeleteKnowledge = async (id) => {
+        if (window.confirm('¿Estás seguro de que quieres eliminar este recurso?')) {
+            await deleteResource(id);
+            setSelectedKnowledgeId(null);
+        }
+    };
+
+    const handleTogglePin = async (e, id) => {
+        e.stopPropagation();
+        const item = knowledge.find(k => k.id === id);
+        if (item) {
+            await updateResource(id, { is_pinned: !item.is_pinned });
+        }
+    };
+
+    const handleAddKnowledgeComment = async (id, text) => {
+        await addKnowledgeComment(id, text);
     };
 
     const handleOpenLink = (url) => {
