@@ -307,6 +307,34 @@ export const AppProvider = ({ children }) => {
         }
     };
 
+    const requestPasswordReset = async (email) => {
+        try {
+            setLoading(true);
+            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: `${window.location.origin}/reset-password`,
+            });
+            if (error) throw error;
+            setLoading(false);
+            return { success: true };
+        } catch (err) {
+            setLoading(false);
+            return { success: false, error: err.message };
+        }
+    };
+
+    const updatePassword = async (newPassword) => {
+        try {
+            setLoading(true);
+            const { error } = await supabase.auth.updateUser({ password: newPassword });
+            if (error) throw error;
+            setLoading(false);
+            return { success: true };
+        } catch (err) {
+            setLoading(false);
+            return { success: false, error: err.message };
+        }
+    };
+
     const logout = async () => {
         try {
             await supabase.auth.signOut();
@@ -330,6 +358,8 @@ export const AppProvider = ({ children }) => {
         login,
         logout,
         register,
+        requestPasswordReset,
+        updatePassword,
         currentUser,
         userProfile: currentUser,
         realUser: currentUser,

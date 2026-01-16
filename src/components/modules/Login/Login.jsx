@@ -2,12 +2,12 @@
 
 import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
-import { BookOpen, Lock, User, ArrowRight, AlertCircle, ShieldCheck } from 'lucide-react';
+import { BookOpen, Lock, User, ArrowRight, AlertCircle, ShieldCheck, Mail } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 
 export default function Login() {
-    const { login, register } = useApp();
+    const { login, register, requestPasswordReset } = useApp();
     const router = useRouter(); // Initialize router
     const [isLogin, setIsLogin] = useState(true);
     const [email, setEmail] = useState('');
@@ -16,6 +16,7 @@ export default function Login() {
     const [error, setError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isForgotPassword, setIsForgotPassword] = useState(false);
 
     // Rate Limiting State
     const [attempts, setAttempts] = useState(0);
@@ -25,6 +26,23 @@ export default function Login() {
         e.preventDefault();
         setError('');
         setSuccessMsg('');
+
+        if (isForgotPassword) {
+            setIsLoading(true);
+            try {
+                const result = await requestPasswordReset(email);
+                if (result.success) {
+                    setSuccessMsg('Se ha enviado un correo para restablecer tu contraseña. Revisa tu bandeja de entrada.');
+                } else {
+                    setError(result.error || 'Error al enviar el correo.');
+                }
+            } catch (err) {
+                setError('Ocurrió un error inesperado.');
+            } finally {
+                setIsLoading(false);
+            }
+            return;
+        }
 
         // Check Lockout
         if (lockedUntil) {
@@ -46,7 +64,6 @@ export default function Login() {
 
                 if (result && result.success) {
                     setIsLoading(false);
-                    // Use window.location for immediate hard navigation to ensure fresh context
                     window.location.href = '/dashboard';
                     return;
                 }
@@ -70,10 +87,7 @@ export default function Login() {
                         router.push('/waiting-approval');
                         return;
                     }
-
                     setSuccessMsg('Registro exitoso. Iniciando sesión...');
-                    // If active (first admin), it will auto login via context state change
-                    // helping the UX specific to "First User"
                 } else {
                     setError(message || 'Error en el registro');
                 }
@@ -87,6 +101,7 @@ export default function Login() {
 
     const toggleMode = () => {
         setIsLogin(!isLogin);
+        setIsForgotPassword(false);
         setError('');
         setSuccessMsg('');
     };
@@ -141,58 +156,106 @@ export default function Login() {
                 <div className="p-8">
                     <form onSubmit={handleSubmit} className="space-y-5">
 
-                        {!isLogin && (
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Nombre Completo</label>
-                                <div className="relative group">
-                                    <User className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 group-focus-within:text-indigo-500 transition-colors" />
-                                    <input
-                                        type="text"
-                                        value={name}
-                                        onChange={(e) => setName(e.target.value)}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-700 font-medium"
-                                        placeholder="Tu Nombre"
-                                        required={!isLogin}
-                                    />
+                        {isForgotPassword ? (
+                            <>
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Correo Electrónico</label>
+                                    <div className="relative group">
+                                        <Mail className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 group-focus-within:text-indigo-500 transition-colors" />
+                                        <input
+                                            type="email"
+                                            value={email}
+                                            onChange={(e) => setEmail(e.target.value)}
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-700 font-medium"
+                                            placeholder="ejemplo@unizar.es"
+                                            required
+                                        />
+                                    </div>
                                 </div>
-                            </div>
-                        )}
-
-                        <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Correo Electrónico</label>
-                            <div className="relative group">
-                                <User className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 group-focus-within:text-indigo-500 transition-colors" />
-                                <input
-                                    type="email"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-700 font-medium"
-                                    placeholder="ejemplo@unizar.es"
-                                    required
-                                />
-                            </div>
-                        </div>
-
-                        <div className="space-y-1.5">
-                            <div className="flex justify-between items-center px-1">
-                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Contraseña</label>
-                                {isLogin && (
-                                    <a href="#" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">¿Olvidaste tu contraseña?</a>
+                                <button
+                                    type="submit"
+                                    disabled={isLoading}
+                                    className="w-full font-bold py-3.5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 text-white"
+                                >
+                                    {isLoading ? (
+                                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    ) : (
+                                        <>
+                                            <span>Enviar enlace de recuperación</span>
+                                            <ArrowRight className="w-4 h-4" />
+                                        </>
+                                    )}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setIsForgotPassword(false); setError(''); setSuccessMsg(''); }}
+                                    className="w-full text-indigo-600 hover:text-indigo-700 text-sm font-medium transition-colors"
+                                >
+                                    Volver al Login
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                {!isLogin && (
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Nombre Completo</label>
+                                        <div className="relative group">
+                                            <User className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 group-focus-within:text-indigo-500 transition-colors" />
+                                            <input
+                                                type="text"
+                                                value={name}
+                                                onChange={(e) => setName(e.target.value)}
+                                                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-700 font-medium"
+                                                placeholder="Tu Nombre"
+                                                required={!isLogin}
+                                            />
+                                        </div>
+                                    </div>
                                 )}
-                            </div>
-                            <div className="relative group">
-                                <Lock className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 group-focus-within:text-indigo-500 transition-colors" />
-                                <input
-                                    type="password"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-700 font-medium"
-                                    placeholder="••••••••"
-                                    required
-                                    minLength={6}
-                                />
-                            </div>
-                        </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Correo Electrónico</label>
+                                    <div className="relative group">
+                                        <User className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 group-focus-within:text-indigo-500 transition-colors" />
+                                        <input
+                                            type="email"
+                                            value={email}
+                                            onChange={(e) => setEmail(e.target.value)}
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-700 font-medium"
+                                            placeholder="ejemplo@unizar.es"
+                                            required
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <div className="flex justify-between items-center px-1">
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Contraseña</label>
+                                        {isLogin && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { setIsForgotPassword(true); setError(''); setSuccessMsg(''); }}
+                                                className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+                                            >
+                                                ¿Olvidaste tu contraseña?
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="relative group">
+                                        <Lock className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 group-focus-within:text-indigo-500 transition-colors" />
+                                        <input
+                                            type="password"
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-700 font-medium"
+                                            placeholder="••••••••"
+                                            required
+                                            minLength={6}
+                                        />
+                                    </div>
+                                </div>
+                            </>
+                        )}
 
                         {error && (
                             <motion.div
@@ -216,21 +279,23 @@ export default function Login() {
                             </motion.div>
                         )}
 
-                        <button
-                            type="submit"
-                            disabled={isLoading}
-                            className={`w-full font-bold py-3.5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed
-                                ${lockedUntil ? 'bg-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 text-white'}`}
-                        >
-                            {isLoading ? (
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            ) : (
-                                <>
-                                    <span>{isLogin ? 'Iniciar Sesión' : 'Crear Cuenta'}</span>
-                                    <ArrowRight className="w-4 h-4" />
-                                </>
-                            )}
-                        </button>
+                        {!isForgotPassword && (
+                            <button
+                                type="submit"
+                                disabled={isLoading}
+                                className={`w-full font-bold py-3.5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed
+                                    ${lockedUntil ? 'bg-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 text-white'}`}
+                            >
+                                {isLoading ? (
+                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                    <>
+                                        <span>{isLogin ? 'Iniciar Sesión' : 'Crear Cuenta'}</span>
+                                        <ArrowRight className="w-4 h-4" />
+                                    </>
+                                )}
+                            </button>
+                        )}
                     </form>
 
                     <div className="mt-8 pt-6 border-t border-gray-100">
