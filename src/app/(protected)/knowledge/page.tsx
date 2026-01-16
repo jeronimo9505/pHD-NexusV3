@@ -5,5 +5,5 @@ export const metadata = {
 };
 
 export default function KnowledgePage() {
-    return <Knowledge />;
+    return <Knowledge onSelect={() => { }} />;
 }
