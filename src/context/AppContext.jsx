@@ -311,7 +311,7 @@ export const AppProvider = ({ children }) => {
         try {
             setLoading(true);
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: `${window.location.origin}/reset-password`,
+                redirectTo: `https://v11-phd-nexus-v2.vercel.app/reset-password`,
             });
             if (error) throw error;
             setLoading(false);
