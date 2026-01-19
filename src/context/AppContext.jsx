@@ -136,17 +136,22 @@ export const AppProvider = ({ children }) => {
                 setUserRole(role);
 
                 // 4. Load Group Data from Supabase
-                const [tasksRes, reportsRes, knowledgeRes, membersRes, driveReportsRes] = await Promise.all([
+                const [tasksRes, reportsRes, knowledgeRes, membersRes, driveReportsRes, announcementsRes] = await Promise.all([
                     supabase.from('tasks').select('*').eq('group_id', currentGroupId),
                     supabase.from('reports').select('*').eq('group_id', currentGroupId),
                     supabase.from('knowledge_items').select('*').eq('group_id', currentGroupId),
                     supabase.from('group_members').select('*, profiles(*)').eq('group_id', currentGroupId),
-                    supabase.from('drive_reports').select('*').eq('group_id', currentGroupId) // Fetch Drive Reports
+                    supabase.from('drive_reports').select('*').eq('group_id', currentGroupId),
+                    supabase.from('announcements')
+                        .select('*, author:profiles(full_name), comments:announcement_comments(*, author:profiles(full_name))')
+                        .eq('group_id', currentGroupId)
+                        .order('created_at', { ascending: false })
                 ]);
 
                 setTasks(tasksRes.data || []);
                 setReports(reportsRes.data || []);
                 setKnowledge(knowledgeRes.data || []);
+                setAnnouncements(announcementsRes.data || []);
 
                 // Map drive_reports snake_case back to camelCase for UI if needed
                 const loadedDriveReports = (driveReportsRes.data || []).map(r => ({

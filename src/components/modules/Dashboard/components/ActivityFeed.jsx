@@ -25,9 +25,9 @@ export default function ActivityFeed() {
                 const reportIds = (reports || []).map(r => r.id);
 
                 const { data: allComments } = await supabase.from('drive_report_comments').select('*');
-                const { data: allViews } = await supabase.from('drive_report_views').select('*');
+                const { data: allViews } = await supabase.from('report_views').select('*');
 
-                const groupComments = (allComments || []).filter(c => reportIds.includes(c.report_id));
+                const groupComments = (allComments || []).filter(c => reportIds.includes(c.drive_report_id));
                 const groupViews = (allViews || []).filter(v => reportIds.includes(v.report_id));
 
                 let acts = [];
