@@ -1,21 +1,16 @@
 import React, { useState } from 'react';
-import { ArrowLeft, ExternalLink, CheckCircle, XCircle, Clock, Send, Plus, Calendar } from 'lucide-react';
+import { ArrowLeft, ExternalLink, CheckCircle, XCircle, Clock, Send, Plus, Calendar, Eye } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatDateShort } from '@/utils/helpers';
+import { useTasks } from '../../Tasks/hooks/useTasks';
 
 export default function ReportDetail({ report, onBack }) {
-    const { updateDriveReport, currentUser, hasRole, tasks, setTasks } = useApp();
+    const { updateDriveReport, currentUser, hasRole } = useApp();
+    const { createTask, updateTask } = useTasks();
     const [taskText, setTaskText] = useState('');
 
-    // Transform webViewLink to preview link for embedding
-    // e.g., https://docs.google.com/document/d/ID/view -> https://docs.google.com/document/d/ID/preview
-    const previewLink = report.webViewLink?.replace(/\/view.*/, '/preview') || report.webViewLink;
-    const editLink = report.webViewLink;
-
-    // Filter tasks linked to this report
-    // In a real DB, we would query tasks where report_id = report.id
-    // Here we assume report.tasks contains IDs, or we tag tasks with report_id
-    const reportTasks = tasks.filter(t => t.related_report_id === report.id);
+    // Tasks are now passed directly in the report object from AppContext
+    const reportTasks = report.tasks || [];
 
     const handleStatusChange = async (newStatus) => {
         await updateDriveReport(report.id, {
@@ -25,27 +20,23 @@ export default function ReportDetail({ report, onBack }) {
         });
     };
 
-    const handleAddTask = () => {
+    const handleAddTask = async () => {
         if (!taskText.trim()) return;
 
-        const newTask = {
-            id: 'task_' + Date.now(),
-            text: taskText,
-            completed: false,
-            related_report_id: report.id,
-            group_id: report.group_id,
-            created_at: new Date().toISOString()
-        };
-
-        // Update global tasks
-        setTasks(prev => [newTask, ...prev]);
+        await createTask({
+            title: taskText,
+            description: '',
+            status: 'todo',
+            priority: 'medium',
+            sourceReportId: report.id
+        });
         setTaskText('');
     };
 
-    const toggleTask = (taskId) => {
-        setTasks(prev => prev.map(t =>
-            t.id === taskId ? { ...t, completed: !t.completed } : t
-        ));
+    const toggleTask = async (taskId, currentStatus) => {
+        await updateTask(taskId, {
+            status: currentStatus === 'done' ? 'todo' : 'done'
+        });
     };
 
     return (
@@ -60,8 +51,8 @@ export default function ReportDetail({ report, onBack }) {
                         <h2 className="font-bold text-slate-800 text-lg flex items-center gap-2">
                             {report.title}
                             <span className={`px-2 py-0.5 rounded-full text-xs uppercase ${report.status === 'approved' ? 'bg-green-100 text-green-700' :
-                                    report.status === 'pending' ? 'bg-amber-100 text-amber-700' :
-                                        'bg-slate-100 text-slate-600'
+                                report.status === 'pending' ? 'bg-amber-100 text-amber-700' :
+                                    'bg-slate-100 text-slate-600'
                                 }`}>
                                 {report.status === 'draft' ? 'Borrador' :
                                     report.status === 'pending' ? 'Revisión' :
@@ -166,12 +157,12 @@ export default function ReportDetail({ report, onBack }) {
                                     <div key={task.id} className="flex items-start gap-3 p-3 bg-white border border-slate-100 rounded-lg shadow-sm">
                                         <input
                                             type="checkbox"
-                                            checked={task.completed}
-                                            onChange={() => toggleTask(task.id)}
+                                            checked={task.status === 'done'}
+                                            onChange={() => toggleTask(task.id, task.status)}
                                             className="mt-1 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                                         />
-                                        <div className={`text-sm ${task.completed ? 'opacity-50 line-through text-slate-400' : 'text-slate-700'}`}>
-                                            {task.text}
+                                        <div className={`text-sm ${task.status === 'done' ? 'opacity-50 line-through text-slate-400' : 'text-slate-700'}`}>
+                                            {task.title}
                                         </div>
                                     </div>
                                 ))
@@ -196,6 +187,24 @@ export default function ReportDetail({ report, onBack }) {
                                     <Plus className="w-4 h-4" />
                                 </button>
                             </div>
+                        </div>
+                    </div>
+
+                    {/* Viewers Section */}
+                    <div className="p-4 border-t border-slate-100 bg-slate-50/30">
+                        <div className="font-bold text-slate-700 text-sm flex items-center gap-2 mb-3">
+                            <Eye className="w-4 h-4 text-slate-400" /> Visto por
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {(!report.seenByNames || report.seenByNames.length === 0) ? (
+                                <p className="text-[10px] text-slate-400 italic">Nadie lo ha visto todavía.</p>
+                            ) : (
+                                report.seenByNames.map((name, idx) => (
+                                    <span key={idx} className="px-2 py-1 bg-white border border-slate-100 rounded-lg text-[10px] text-slate-600 font-medium shadow-sm">
+                                        {name}
+                                    </span>
+                                ))
+                            )}
                         </div>
                     </div>
                 </div>

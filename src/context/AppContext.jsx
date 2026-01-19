@@ -147,38 +147,65 @@ export const AppProvider = ({ children }) => {
                     supabase.from('reports').select('*').eq('group_id', currentGroupId),
                     supabase.from('knowledge_items').select('*').eq('group_id', currentGroupId),
                     supabase.from('group_members').select('*, profiles(*)').eq('group_id', currentGroupId),
-                    supabase.from('drive_reports').select('*').eq('group_id', currentGroupId),
+                    supabase.from('drive_reports')
+                        .select(`
+                            *,
+                            comments:drive_report_comments(*, author:profiles(full_name)),
+                            task_links:drive_report_task_links(*)
+                        `)
+                        .eq('group_id', currentGroupId),
                     supabase.from('announcements')
                         .select('*, author:profiles(full_name), comments:announcement_comments(*, author:profiles(full_name))')
                         .eq('group_id', currentGroupId)
                         .order('created_at', { ascending: false })
                 ]);
 
-                setTasks(tasksRes.data || []);
-                setReports(reportsRes.data || []);
-                setKnowledge(knowledgeRes.data || []);
-                setAnnouncements(announcementsRes.data || []);
-
-                // Map drive_reports snake_case back to camelCase for UI if needed
-                const loadedDriveReports = (driveReportsRes.data || []).map(r => ({
-                    ...r,
-                    webViewLink: r.web_view_link,
-                    driveFileId: r.drive_file_id,
-                    isImportant: r.is_important,
-                    startDate: r.start_date,
-                    endDate: r.end_date,
-                    authorName: r.author_name
-                }));
-                setDriveReports(loadedDriveReports);
-
                 const members = (membersRes.data || []).map(m => ({
                     ...(m.profiles || {}),
                     role: m.role,
                     joinedAt: m.created_at,
                     full_name: m.profiles?.full_name || 'Sin nombre',
-                    email: m.profiles?.email
+                    email: m.profiles?.email,
+                    user_id: m.profiles?.id // Explicit user_id for easier searching
                 }));
                 setGroupMembers(members);
+
+                const allTasksList = tasksRes.data || [];
+                setTasks(allTasksList);
+                setReports(reportsRes.data || []);
+                setKnowledge(knowledgeRes.data || []);
+                setAnnouncements(announcementsRes.data || []);
+
+                // Map drive_reports snake_case back to camelCase for UI if needed
+                const loadedDriveReports = (driveReportsRes.data || []).map(r => {
+                    // Link tasks by IDs from task_links
+                    const relatedTaskIds = (r.task_links || []).map(tl => tl.task_id);
+                    const relatedTasks = allTasksList.filter(t => relatedTaskIds.includes(t.id));
+
+                    // Map seen_by IDs to names
+                    const seenByNames = (r.seen_by || [])
+                        .map(id => members.find(m => m.id === id)?.full_name)
+                        .filter(Boolean);
+
+                    return {
+                        ...r,
+                        webViewLink: r.web_view_link,
+                        driveFileId: r.drive_file_id,
+                        isImportant: r.is_important,
+                        startDate: r.start_date,
+                        endDate: r.end_date,
+                        authorName: r.author_name,
+                        // Ensure comments and tasks are available for UI
+                        comments: (r.comments || []).map(c => ({
+                            ...c,
+                            content: c.body, // Aliasing body to content as UI expects it
+                            user_name: c.author?.full_name || 'Usuario'
+                        })),
+                        tasks: relatedTasks,
+                        seenByNames
+                    };
+                });
+                setDriveReports(loadedDriveReports);
 
             } else {
                 setUserRole('student');
@@ -549,12 +576,17 @@ export const AppProvider = ({ children }) => {
 
         addDriveReportComment: async (reportId, text) => {
             if (!currentUser || !text) return;
-            await supabase.from('drive_report_comments').insert({
+            const { error } = await supabase.from('drive_report_comments').insert({
                 drive_report_id: reportId,
                 author_id: currentUser.id,
-                content: text
+                body: text
             });
-            loadUserData(currentUser.id);
+            if (error) {
+                console.error("Error adding drive report comment:", error);
+                alert("Error al añadir comentario: " + error.message);
+                return;
+            }
+            await loadUserData(currentUser.id);
         },
 
         // Announcements

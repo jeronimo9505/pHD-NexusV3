@@ -165,7 +165,10 @@ export default function DriveReportCard({
                     {/* Bottom Info Bar */}
                     <div className="flex items-center gap-4 pt-3 border-t border-slate-50 mt-1">
                         {/* Seen History */}
-                        <div className="flex items-center gap-1 text-[10px] text-slate-400 font-medium">
+                        <div
+                            className="flex items-center gap-1 text-[10px] text-slate-400 font-medium cursor-help"
+                            title={report.seenByNames?.length > 0 ? `Visto por: ${report.seenByNames.join(', ')}` : 'Nadie lo ha visto todavía'}
+                        >
                             <Eye className="w-3.5 h-3.5" />
                             <span>Visto por {report.seen_by?.length || 0}</span>
                         </div>
