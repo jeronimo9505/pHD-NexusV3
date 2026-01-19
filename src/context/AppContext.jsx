@@ -503,8 +503,8 @@ export const AppProvider = ({ children }) => {
         addDriveReportComment: async (reportId, text) => {
             if (!currentUser || !text) return;
             await supabase.from('drive_report_comments').insert({
-                report_id: reportId,
-                user_id: currentUser.id,
+                drive_report_id: reportId,
+                author_id: currentUser.id,
                 content: text
             });
             loadUserData(currentUser.id);

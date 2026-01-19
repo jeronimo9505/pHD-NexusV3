@@ -24,6 +24,7 @@ export function useTasks() {
             const { data: allComments } = await supabase.from('task_comments').select('*');
             const { data: allAssignees } = await supabase.from('task_assignees').select('*');
             const { data: allReportLinks } = await supabase.from('report_task_links').select('*');
+            const { data: allDriveLinks } = await supabase.from('drive_report_task_links').select('*');
 
             // Transform for UI
             const transformed = (data || []).map(t => {
@@ -49,7 +50,10 @@ export function useTasks() {
                 const assignedUser = groupMembers?.find(m => m.user_id === firstAssigneeId || m.id === firstAssigneeId)
                     || (currentUser?.id === firstAssigneeId ? currentUser : null);
 
-                const relatedReport = (allReportLinks || []).find(l => l.task_id === t.id);
+                // Check both link tables
+                const stdLink = (allReportLinks || []).find(l => l.task_id === t.id);
+                const driveLink = (allDriveLinks || []).find(l => l.task_id === t.id);
+                const sourceReportId = stdLink?.report_id || driveLink?.drive_report_id;
 
                 return {
                     id: t.id,
@@ -63,7 +67,7 @@ export function useTasks() {
                     completedAt: t.completed_at,
                     assignedBy: creator?.full_name || creator?.name || 'Usuario',
                     assignedTo: assignedUser?.full_name || assignedUser?.name,
-                    sourceReportId: relatedReport?.report_id,
+                    sourceReportId,
                     assignees: taskAssignees,
                     comments: taskComments
                 };
@@ -113,10 +117,21 @@ export function useTasks() {
             }
 
             if (taskData.sourceReportId) {
-                await supabase.from('report_task_links').insert({
-                    task_id: newTask.id,
-                    report_id: taskData.sourceReportId
-                });
+                // Determine which link table to use
+                // If it's a UUID, we check if it's in drive_reports
+                const { data: isDriveReport } = await supabase.from('drive_reports').select('id').eq('id', taskData.sourceReportId).single();
+
+                if (isDriveReport) {
+                    await supabase.from('drive_report_task_links').insert({
+                        task_id: newTask.id,
+                        drive_report_id: taskData.sourceReportId
+                    });
+                } else {
+                    await supabase.from('report_task_links').insert({
+                        task_id: newTask.id,
+                        report_id: taskData.sourceReportId
+                    });
+                }
             }
 
             await fetchTasks();
@@ -141,13 +156,8 @@ export function useTasks() {
 
             // Update main task fields if any
             if (Object.keys(dbUpdates).length > 0) {
-                console.log(`Updating task ${taskId} with:`, dbUpdates);
-                const { data, error } = await supabase.from('tasks').update(dbUpdates).eq('id', taskId).select();
-                if (error) {
-                    console.error("Supabase update error:", error);
-                    return { error };
-                }
-                console.log("Supabase update success:", data);
+                const { error } = await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
+                if (error) return { error };
             }
 
             if (updates.assignees) {
@@ -163,15 +173,25 @@ export function useTasks() {
             }
 
             if (updates.sourceReportId !== undefined) {
-                // Clear existing
+                // Clear existing from both link tables
                 await supabase.from('report_task_links').delete().eq('task_id', taskId);
+                await supabase.from('drive_report_task_links').delete().eq('task_id', taskId);
 
                 // Add new if present
                 if (updates.sourceReportId) {
-                    await supabase.from('report_task_links').insert({
-                        task_id: taskId,
-                        report_id: updates.sourceReportId
-                    });
+                    const { data: isDriveReport } = await supabase.from('drive_reports').select('id').eq('id', updates.sourceReportId).single();
+
+                    if (isDriveReport) {
+                        await supabase.from('drive_report_task_links').insert({
+                            task_id: taskId,
+                            drive_report_id: updates.sourceReportId
+                        });
+                    } else {
+                        await supabase.from('report_task_links').insert({
+                            task_id: taskId,
+                            report_id: updates.sourceReportId
+                        });
+                    }
                 }
             }
 
@@ -184,11 +204,10 @@ export function useTasks() {
 
     const deleteTask = async (taskId) => {
         try {
-            // Manually delete related records first to ensure robustness
-            // (Even though DB has Cascade, this helps debug permissions if any fail)
             await supabase.from('task_assignees').delete().eq('task_id', taskId);
             await supabase.from('task_comments').delete().eq('task_id', taskId);
             await supabase.from('report_task_links').delete().eq('task_id', taskId);
+            await supabase.from('drive_report_task_links').delete().eq('task_id', taskId);
 
             const { error } = await supabase.from('tasks').delete().eq('id', taskId);
             if (error) return { error };
