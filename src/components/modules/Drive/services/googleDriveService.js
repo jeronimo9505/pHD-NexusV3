@@ -227,7 +227,7 @@ export const uploadFile = async (file, folderId) => {
         try {
             const getResponse = await window.gapi.client.drive.files.get({
                 fileId: data.id,
-                fields: 'id, name, mimeType, webViewLink, iconLink, alternativeLink' // Request specific fields
+                fields: 'id, name, mimeType, webViewLink, iconLink' // Request specific fields
             });
             // Merge metadata
             return { ...data, ...getResponse.result };
