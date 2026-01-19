@@ -150,6 +150,11 @@ export default function DriveReportsModule() {
         return () => { mounted = false; };
     }, [activeGroup]);
 
+    const handleBack = React.useCallback(() => {
+        setSelectedReport(null);
+        setView('library');
+    }, []);
+
     if (initializing) {
         return (
             <div className="h-full flex items-center justify-center bg-slate-50/50">
@@ -162,13 +167,6 @@ export default function DriveReportsModule() {
     // Permission check for settings
     // Includes 'student' for testing purposes/easy access
     const canConfigure = ['admin', 'supervisor', 'system_admin', 'owner', 'pi', 'student'].includes(userRole) || activeGroup?.role === 'owner';
-
-
-
-    const handleBack = React.useCallback(() => {
-        setSelectedReport(null);
-        setView('library');
-    }, []);
 
     const handleCreateNew = async (type = 'report') => {
         // HANDLING MEETING NOTES

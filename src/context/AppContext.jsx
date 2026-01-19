@@ -1,3 +1,5 @@
+'use client';
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 // import { mockDB } from '../lib/mockDatabase';
@@ -26,9 +28,13 @@ export const AppProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     // Group Context
-    const [activeGroupId, setActiveGroupId] = useState(() =>
-        window.localStorage.getItem('phd_nexus_activeGroupId') || null
-    );
+    const [activeGroupId, setActiveGroupId] = useState(null);
+
+    // Load activeGroupId from localStorage on mount (prevents Hydration error)
+    useEffect(() => {
+        const saved = window.localStorage.getItem('phd_nexus_activeGroupId');
+        if (saved) setActiveGroupId(saved);
+    }, []);
 
     // Module & UI State
     const [activeModule, setActiveModule] = useState('dashboard');
