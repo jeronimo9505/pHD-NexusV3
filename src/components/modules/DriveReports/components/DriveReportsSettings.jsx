@@ -11,8 +11,23 @@ export default function DriveReportsSettings({ onSave, initialSettings = {}, onC
     // So let's provide fields.
     const [clientId, setClientId] = useState(initialSettings?.clientId || '');
     const [apiKey, setApiKey] = useState(initialSettings?.apiKey || '');
-    // Sanitize initial folderId just in case
-    const cleanId = (id) => id ? id.split('?')[0].split('&')[0].trim() : '';
+    // Improved cleanId to extract the actual ID from a full Google Drive URL if pasted
+    const cleanId = (id) => {
+        if (!id) return '';
+        let trimmed = id.trim();
+        // If it looks like a URL, extract the last part
+        if (trimmed.includes('drive.google.com')) {
+            // Handle folders/ID or file/d/ID
+            const parts = trimmed.split('/');
+            const lastPart = parts[parts.length - 1].split('?')[0].split('&')[0];
+            // If the last part is "folders" or empty, try the second to last
+            if ((lastPart === 'folders' || !lastPart) && parts.length > 1) {
+                return parts[parts.length - 2].split('?')[0].split('&')[0];
+            }
+            return lastPart;
+        }
+        return trimmed.split('?')[0].split('&')[0];
+    };
     const [folderId, setFolderId] = useState(cleanId(initialSettings?.folderId));
     const [pptFolderId, setPptFolderId] = useState(cleanId(initialSettings?.pptFolderId));
     const [meetingsFolderId, setMeetingsFolderId] = useState(cleanId(initialSettings?.meetingsFolderId));
@@ -22,12 +37,12 @@ export default function DriveReportsSettings({ onSave, initialSettings = {}, onC
     const handleSubmit = (e) => {
         e.preventDefault();
         onSave({
-            templateId,
-            folderId,
-            pptFolderId,
-            meetingsFolderId,
-            clientId,
-            apiKey
+            templateId: cleanId(templateId),
+            folderId: cleanId(folderId),
+            pptFolderId: cleanId(pptFolderId),
+            meetingsFolderId: cleanId(meetingsFolderId),
+            clientId: clientId.trim(),
+            apiKey: apiKey.trim()
         });
     };
 
@@ -148,7 +163,7 @@ export default function DriveReportsSettings({ onSave, initialSettings = {}, onC
                         <input
                             type="text"
                             value={folderId}
-                            onChange={(e) => setFolderId(cleanId(e.target.value))}
+                            onChange={(e) => setFolderId(e.target.value)}
                             placeholder="Ej: 1A2b3C..."
                             className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
                         />

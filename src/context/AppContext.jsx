@@ -480,7 +480,12 @@ export const AppProvider = ({ children }) => {
 
         updateGroupSettings: async (groupId, settings) => {
             console.log(`[AppContext] updateGroupSettings for group ${groupId}`, settings);
-            const { error } = await supabase.from('groups').update({ drive_settings: settings }).eq('id', groupId);
+
+            // Fetch current settings to merge (prevent overwriting specialized fields like googleDrive)
+            const { data: currentGroup } = await supabase.from('groups').select('drive_settings').eq('id', groupId).single();
+            const mergedSettings = { ...(currentGroup?.drive_settings || {}), ...settings };
+
+            const { error } = await supabase.from('groups').update({ drive_settings: mergedSettings }).eq('id', groupId);
             if (error) {
                 console.error("[AppContext] updateGroupSettings ERROR:", error);
                 throw error;
@@ -519,25 +524,40 @@ export const AppProvider = ({ children }) => {
         announcements,
         addAnnouncement: async (text) => {
             if (!currentUser || !activeGroupId) return;
-            await supabase.from('announcements').insert({
+            const { error } = await supabase.from('announcements').insert({
                 group_id: activeGroupId,
                 author_id: currentUser.id,
                 content: text
             });
+            if (error) {
+                console.error("Error adding announcement:", error);
+                return { error };
+            }
             await loadUserData(currentUser.id);
+            return { success: true };
         },
         deleteAnnouncement: async (id) => {
-            await supabase.from('announcements').delete().eq('id', id);
+            const { error } = await supabase.from('announcements').delete().eq('id', id);
+            if (error) {
+                console.error("Error deleting announcement:", error);
+                return { error };
+            }
             await loadUserData(currentUser.id);
+            return { success: true };
         },
         addAnnouncementComment: async (announcementId, text) => {
             if (!currentUser || !text) return;
-            await supabase.from('announcement_comments').insert({
+            const { error } = await supabase.from('announcement_comments').insert({
                 announcement_id: announcementId,
                 user_id: currentUser.id,
                 content: text
             });
+            if (error) {
+                console.error("Error adding announcement comment:", error);
+                return { error };
+            }
             await loadUserData(currentUser.id);
+            return { success: true };
         },
 
         // RBAC

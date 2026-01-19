@@ -18,7 +18,7 @@ export default function DriveReportsModule() {
     const [initializing, setInitializing] = useState(true);
     const [isUploading, setIsUploading] = useState(false);
 
-    const handleSelectReport = async (report) => {
+    const handleSelectReport = React.useCallback(async (report) => {
         // STRICT CHECK: If report is marked as generated ('pending'), NEVER open editor.
         if (report.status === 'pending' || report.type === 'ppt') { // Also handle PPT simply opening link
             let link = report.webViewLink;
@@ -77,7 +77,7 @@ export default function DriveReportsModule() {
         // Draft -> Editor
         setSelectedReport(report);
         setView('detail');
-    };
+    }, [updateDriveReport]);
 
     // Deep Linking Effect - Moved here (BEFORE return) to fix Hook Order
     React.useEffect(() => {
@@ -165,10 +165,10 @@ export default function DriveReportsModule() {
 
 
 
-    const handleBack = () => {
+    const handleBack = React.useCallback(() => {
         setSelectedReport(null);
         setView('library');
-    };
+    }, []);
 
     const handleCreateNew = async (type = 'report') => {
         // HANDLING MEETING NOTES
