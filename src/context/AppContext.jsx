@@ -362,8 +362,12 @@ export const AppProvider = ({ children }) => {
     const requestPasswordReset = async (email) => {
         try {
             setLoading(true);
+            const redirectUrl = window.location.hostname === 'localhost'
+                ? `${window.location.origin}/reset-password`
+                : 'https://phdnexus2.vercel.app/reset-password';
+
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: `https://v11-phd-nexus-v2.vercel.app/reset-password`,
+                redirectTo: redirectUrl,
             });
             if (error) {
                 console.error("❌ Supabase Reset Error:", error);
