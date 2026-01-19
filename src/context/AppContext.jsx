@@ -313,10 +313,14 @@ export const AppProvider = ({ children }) => {
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
                 redirectTo: `https://v11-phd-nexus-v2.vercel.app/reset-password`,
             });
-            if (error) throw error;
+            if (error) {
+                console.error("❌ Supabase Reset Error:", error);
+                throw error;
+            }
             setLoading(false);
             return { success: true };
         } catch (err) {
+            console.error("❌ Reset Request Error:", err);
             setLoading(false);
             return { success: false, error: err.message };
         }
@@ -326,7 +330,10 @@ export const AppProvider = ({ children }) => {
         try {
             setLoading(true);
             const { error } = await supabase.auth.updateUser({ password: newPassword });
-            if (error) throw error;
+            if (error) {
+                console.error("❌ Supabase Update Error:", error);
+                throw error;
+            }
             setLoading(false);
             return { success: true };
         } catch (err) {
