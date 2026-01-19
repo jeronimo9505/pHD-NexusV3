@@ -437,6 +437,8 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
                                                 onComment={setActiveCommentReport}
                                                 onCreateTask={(r) => handleQuickAddTask({ stopPropagation: () => { } }, r.id)}
                                                 onOpen={onSelectReport}
+                                                expandedSection={expandedSection}
+                                                onToggleSection={(section) => toggleHistory({ stopPropagation: () => { } }, report.id, section)}
                                             />
                                         );
                                     })}
