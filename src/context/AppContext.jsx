@@ -485,20 +485,51 @@ export const AppProvider = ({ children }) => {
         },
 
         updateGroupSettings: async (groupId, settings) => {
-            console.log(`[AppContext] updateGroupSettings for group ${groupId}`, settings);
+            console.log(`[AppContext] updateGroupSettings START for group ${groupId}`, settings);
 
-            // Fetch current settings to merge (prevent overwriting specialized fields like googleDrive)
-            const { data: currentGroup } = await supabase.from('groups').select('drive_settings').eq('id', groupId).single();
-            const mergedSettings = { ...(currentGroup?.drive_settings || {}), ...settings };
+            try {
+                if (!groupId) throw new Error("ID de grupo no encontrado");
 
-            const { error } = await supabase.from('groups').update({ drive_settings: mergedSettings }).eq('id', groupId);
-            if (error) {
-                console.error("[AppContext] updateGroupSettings ERROR:", error);
-                throw error;
+                // Fetch current settings to merge
+                const { data: currentGroup, error: fetchError } = await supabase
+                    .from('groups')
+                    .select('drive_settings')
+                    .eq('id', groupId)
+                    .single();
+
+                if (fetchError) {
+                    console.warn("[AppContext] Error fetching current group settings (maybe it is empty?):", fetchError);
+                }
+
+                const mergedSettings = {
+                    ...(currentGroup?.drive_settings || {}),
+                    ...settings
+                };
+
+                console.log("[AppContext] Merged settings to save:", mergedSettings);
+
+                const { data, error: updateError } = await supabase
+                    .from('groups')
+                    .update({ drive_settings: mergedSettings })
+                    .eq('id', groupId)
+                    .select(); // Request back to verify
+
+                if (updateError) {
+                    console.error("[AppContext] updateGroupSettings ERROR:", updateError);
+                    alert("Error de base de datos al guardar: " + (updateError.message || JSON.stringify(updateError)));
+                    throw updateError;
+                }
+
+                console.log("[AppContext] updateGroupSettings SUCCESS:", data);
+
+                await loadUserData(currentUser?.id);
+                return { success: true };
+
+            } catch (err) {
+                console.error("[AppContext] updateGroupSettings CRASH:", err);
+                alert("Error crítico al guardar configuración: " + err.message);
+                throw err;
             }
-            console.log("[AppContext] updateGroupSettings success");
-            await loadUserData(currentUser?.id);
-            return { success: true };
         },
 
         markDriveReportSeen: async (reportId) => {
