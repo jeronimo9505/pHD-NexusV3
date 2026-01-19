@@ -151,7 +151,8 @@ export const AppProvider = ({ children }) => {
                         .select(`
                             *,
                             comments:drive_report_comments(*, author:profiles(full_name)),
-                            task_links:drive_report_task_links(*)
+                            task_links:drive_report_task_links(*),
+                            views:drive_report_views(user_id, viewed_at)
                         `)
                         .eq('group_id', currentGroupId),
                     supabase.from('announcements')
@@ -182,10 +183,21 @@ export const AppProvider = ({ children }) => {
                     const relatedTaskIds = (r.task_links || []).map(tl => tl.task_id);
                     const relatedTasks = allTasksList.filter(t => relatedTaskIds.includes(t.id));
 
-                    // Map seen_by IDs to names
-                    const seenByNames = (r.seen_by || [])
-                        .map(id => members.find(m => m.id === id)?.full_name)
-                        .filter(Boolean);
+                    // Map seen_by from views table now
+                    // We want { name, date } objects
+                    const seenDetails = (r.views || []).map(v => {
+                        const member = members.find(m => m.user_id === v.user_id || m.id === v.user_id);
+                        return {
+                            id: v.user_id,
+                            name: member?.full_name || 'Usuario',
+                            date: v.viewed_at
+                        };
+                    });
+
+                    // For backward compatibility (or simplicity in some UI parts), 
+                    // we can keep seenByNames as string array, but it's better to pass full object
+                    const seenByNames = seenDetails.map(d => d.name);
+                    const seenByIds = seenDetails.map(d => d.id);
 
                     return {
                         ...r,
@@ -202,7 +214,9 @@ export const AppProvider = ({ children }) => {
                             user_name: c.author?.full_name || 'Usuario'
                         })),
                         tasks: relatedTasks,
-                        seenByNames
+                        seenByNames,
+                        seenDetails,
+                        seen_by: seenByIds
                     };
                 });
                 setDriveReports(loadedDriveReports);
@@ -561,17 +575,25 @@ export const AppProvider = ({ children }) => {
 
         markDriveReportSeen: async (reportId) => {
             if (!currentUser) return;
-            // Simplified for Supabase: we probably want a specific table or a JSONB column update
-            // For now, let's assume 'seen_by' is a JSONB array or we use a separate table
-            // This logic depends on the schema, but I'll make it generic.
-            const { data: report } = await supabase.from('drive_reports').select('seen_by').eq('id', reportId).single();
-            const seenBy = report?.seen_by || [];
-            const newSeenBy = seenBy.includes(currentUser.id)
-                ? seenBy.filter(id => id !== currentUser.id)
-                : [...seenBy, currentUser.id];
 
-            await supabase.from('drive_reports').update({ seen_by: newSeenBy }).eq('id', reportId);
-            loadUserData(currentUser.id);
+            // Upsert into drive_report_views to track time
+            // We use upsert so if it exists, it just updates timestamp (or does nothing if we want first view)
+            // User probably wants "last viewed" or just "viewed". Let's update timestamp.
+            const { error } = await supabase.from('drive_report_views').upsert({
+                drive_report_id: reportId,
+                user_id: currentUser.id,
+                viewed_at: new Date().toISOString()
+            }, { onConflict: 'drive_report_id, user_id' });
+
+            if (error) {
+                console.error("Error marking seen:", error);
+                return;
+            }
+
+            // Also update the legacy array for backward compatibility if needed, 
+            // OR just trigger a reload which will fetch from the new table.
+            // Let's just reload.
+            await loadUserData(currentUser.id);
         },
 
         addDriveReportComment: async (reportId, text) => {

@@ -234,14 +234,16 @@ export default function DriveReportCard({
                                         <Eye className="w-3 h-3" /> Visto por
                                     </h4>
                                     <div className="flex flex-wrap gap-2 pt-1">
-                                        {report.seenByNames && report.seenByNames.length > 0 ? (
-                                            report.seenByNames.map((name, idx) => (
+                                        {report.seenDetails && report.seenDetails.length > 0 ? (
+                                            report.seenDetails.map((detail, idx) => (
                                                 <div key={idx} className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-full shadow-sm">
                                                     <div className="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center text-[10px] font-bold text-indigo-600">
-                                                        {name.charAt(0)}
+                                                        {detail.name.charAt(0)}
                                                     </div>
-                                                    <span className="text-xs font-medium text-slate-700">{name}</span>
-                                                    {/* We don't have time yet, so maybe just show name */}
+                                                    <div className="flex flex-col">
+                                                        <span className="text-xs font-medium text-slate-700 leading-none">{detail.name}</span>
+                                                        <span className="text-[9px] text-slate-400 leading-none mt-0.5">{formatDateShort(detail.date, true)}</span>
+                                                    </div>
                                                 </div>
                                             ))
                                         ) : (
@@ -269,18 +271,61 @@ export default function DriveReportCard({
                                     <div className="space-y-2">
                                         {hasTasks ? (
                                             report.tasks.map(task => (
-                                                <div key={task.id} className="flex items-start gap-3 p-2 bg-white border border-slate-200 rounded-lg shadow-sm">
-                                                    <div className={clsx("mt-0.5 w-4 h-4 rounded border flex items-center justify-center",
-                                                        task.status === 'done' ? "bg-indigo-100 border-indigo-200" : "border-slate-300"
-                                                    )}>
-                                                        {task.status === 'done' && <CheckCircle2 className="w-3 h-3 text-indigo-600" />}
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <p className={clsx("text-xs font-medium", task.status === 'done' ? "text-slate-400 line-through" : "text-slate-700")}>
-                                                            {task.title}
-                                                        </p>
-                                                        <div className="flex items-center gap-2 mt-1">
-                                                            <span className="text-[10px] text-slate-400">{task.assignedTo ? `Asignado a: ${task.assignedTo}` : 'Sin asignar'}</span>
+                                                <div key={task.id} className="group flex items-start gap-3 p-2 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-indigo-300 transition-colors">
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); onToggleTask && onToggleTask(task.id, task.status); }}
+                                                        className={clsx(
+                                                            "mt-0.5 w-5 h-5 rounded border flex items-center justify-center transition-all",
+                                                            task.status === 'done'
+                                                                ? "bg-indigo-100 border-indigo-200 text-indigo-600"
+                                                                : "border-slate-300 hover:border-indigo-400 text-transparent"
+                                                        )}
+                                                        title={task.status === 'done' ? "Marcar como pendiente" : "Marcar como completada"}
+                                                    >
+                                                        <CheckSquare className="w-3.5 h-3.5 fill-current" />
+                                                    </button>
+
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-start justify-between gap-2">
+                                                            <p className={clsx(
+                                                                "text-xs font-medium truncate w-full transition-all",
+                                                                task.status === 'done' ? "text-slate-400 line-through" : "text-slate-700"
+                                                            )}>
+                                                                {task.title}
+                                                            </p>
+                                                            {/* Actions visible on hover */}
+                                                            <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                {onOpen && (
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); onOpen(report); /* Or open task modal specifically if we had ability */ }}
+                                                                        className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-indigo-500"
+                                                                        title="Ver reporte"
+                                                                    >
+                                                                        <ExternalLink className="w-3 h-3" />
+                                                                    </button>
+                                                                )}
+                                                                {onDeleteTask && (
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); if (confirm('¿Eliminar esta tarea?')) onDeleteTask(task.id); }}
+                                                                        className="p-1 hover:bg-red-50 rounded text-slate-400 hover:text-red-500"
+                                                                        title="Eliminar tarea"
+                                                                    >
+                                                                        <Trash2 className="w-3 h-3" />
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                            <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                                                                <User className="w-2.5 h-2.5" />
+                                                                {task.assignedTo || 'Sin asignar'}
+                                                            </span>
+                                                            {task.dueDate && (
+                                                                <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                                                                    <Calendar className="w-2.5 h-2.5" />
+                                                                    {formatDateShort(task.dueDate)}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>

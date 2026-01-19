@@ -17,7 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSettings, onDeleteReport, onUploadPPT }) {
     const { driveReports, loading, currentUser, markDriveReportSeen, addDriveReportComment, groupMembers, reports, userProfile } = useApp();
-    const { createTask, updateTask, addComment: addTaskComment, tasks: allTasks } = useTasks();
+    const { createTask, updateTask, deleteTask, addComment: addTaskComment, tasks: allTasks } = useTasks();
 
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -422,21 +422,29 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
                                 <div className="space-y-4">
                                     {reports.map(report => {
                                         const isSeenByMe = report.isSeenByMe;
-                                        const isAuthor = report.author_id === currentUser?.id; // Assuming author_id is available, check mock data structure if needed
+                                        const isAuthor = report.author_id === currentUser?.id;
                                         const seenCount = report.seenCount || 0;
                                         const expandedSection = expandedSections[report.id];
                                         const hasComments = report.commentCount > 0;
 
+                                        // LIVE TASKS FILTER
+                                        // Use global tasks list to ensure instant updates without reload
+                                        const liveReportTasks = allTasks.filter(t => t.sourceReportId === report.id);
+
                                         return (
                                             <DriveReportCard
                                                 key={report.id}
-                                                report={report}
+                                                report={{ ...report, tasks: liveReportTasks }} // Override tasks with live list
                                                 currentUser={currentUser}
                                                 onMarkSeen={(r) => markDriveReportSeen && markDriveReportSeen(r.id)}
                                                 onDelete={onDeleteReport ? ((r) => onDeleteReport(r.id)) : undefined}
                                                 onComment={setActiveCommentReport}
                                                 onCreateTask={(r) => handleQuickAddTask({ stopPropagation: () => { } }, r.id)}
                                                 onOpen={onSelectReport}
+                                                // Task Actions
+                                                onToggleTask={(taskId, status) => handleTaskUpdate(taskId, 'status', status === 'done' ? 'todo' : 'done')}
+                                                onDeleteTask={(taskId) => deleteTask && deleteTask(taskId)}
+
                                                 expandedSection={expandedSection}
                                                 onToggleSection={(section) => toggleHistory({ stopPropagation: () => { } }, report.id, section)}
                                             />
