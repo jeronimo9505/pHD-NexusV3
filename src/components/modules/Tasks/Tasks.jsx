@@ -97,12 +97,12 @@ export default function Tasks() {
         if (isStandard) {
             setSelectedReportId(reportId);
             setActiveModule('reports');
-            // Use window.location to avoid useRouter circular dependency
-            window.location.href = '/reports';
+            // Use window.location with query param to persist highlight across reload
+            window.location.href = `/reports?highlight=${reportId}`;
         } else if (isDrive) {
             setSelectedReportId(reportId);
             setActiveModule('drive_reports');
-            window.location.href = '/drive-reports';
+            window.location.href = `/drive-reports?highlight=${reportId}`;
         } else {
             alert("No se encontró el reporte original (puede haber sido eliminado).");
         }
