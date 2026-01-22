@@ -19,8 +19,8 @@ export default function DriveReportsModule() {
     const [isUploading, setIsUploading] = useState(false);
 
     const handleSelectReport = React.useCallback(async (report) => {
-        // STRICT CHECK: If report is marked as generated ('pending'), NEVER open editor.
-        if (report.status === 'pending' || report.type === 'ppt') { // Also handle PPT simply opening link
+        // STRICT CHECK: If report is marked as generated ('pending') OR is a PPT OR Mtg Note, NEVER open internal editor.
+        if (report.status === 'pending' || report.type === 'ppt' || report.type === 'meeting_note') { // Also handle PPT simply opening link
             let link = report.webViewLink;
             let id = report.drive_file_id;
 
