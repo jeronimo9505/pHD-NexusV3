@@ -17,7 +17,9 @@ export default function DriveReportCard({
     onCreateTask,
     onOpen,
     expandedSection, // 'seen', 'tasks', 'comments' or null
-    onToggleSection  // (section) => void
+    onToggleSection,  // (section) => void,
+    onToggleTask,
+    onDeleteTask
 }) {
     // Check Status
     const isSeen = report.seen_by?.includes(currentUser?.id);
