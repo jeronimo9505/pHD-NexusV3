@@ -143,9 +143,28 @@ export const AppProvider = ({ children }) => {
 
                 // 4. Load Group Data from Supabase
                 const [tasksRes, reportsRes, knowledgeRes, membersRes, driveReportsRes, announcementsRes] = await Promise.all([
-                    supabase.from('tasks').select('*').eq('group_id', currentGroupId),
+                    supabase.from('tasks')
+                        .select(`
+                            *,
+                            assignees:task_assignees(*),
+                            comments:task_comments(*),
+                            report_limits:report_task_links(*),
+                            drive_links:drive_report_task_links(*)
+                        `)
+                        .eq('group_id', currentGroupId),
                     supabase.from('reports').select('*').eq('group_id', currentGroupId),
-                    supabase.from('knowledge_items').select('*').eq('group_id', currentGroupId),
+                    supabase.from('knowledge_items')
+                        .select(`
+                            *,
+                            comments:knowledge_comments(
+                                id,
+                                text,
+                                created_at,
+                                author:profiles(full_name)
+                            )
+                        `)
+                        .eq('group_id', currentGroupId)
+                        .order('created_at', { ascending: false }),
                     supabase.from('group_members').select('*, profiles(*)').eq('group_id', currentGroupId),
                     supabase.from('drive_reports')
                         .select(`

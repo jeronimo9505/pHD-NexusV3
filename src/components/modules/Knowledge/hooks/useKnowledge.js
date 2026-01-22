@@ -1,66 +1,32 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useApp } from '@/context/AppContext';
 
 export function useKnowledge() {
-    const { activeGroupId, currentUser } = useApp();
-    const [knowledge, setKnowledge] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
+    const {
+        knowledge: rawItems,
+        activeGroupId,
+        currentUser,
+        refreshUserData
+    } = useApp();
 
-    const fetchKnowledge = useCallback(async () => {
-        if (!activeGroupId) return;
+    const knowledge = useMemo(() => {
+        if (!rawItems) return [];
 
-        try {
-            console.log(`[useKnowledge] Fetching knowledge for group: ${activeGroupId}`);
-            setLoading(true);
+        return rawItems.map(item => ({
+            ...item,
+            description: item.content, // Map content to description for component
+            comments: item.comments?.map(c => ({
+                id: c.id,
+                text: c.text,
+                date: c.created_at,
+                author: c.author?.full_name || 'Sistema'
+            })) || []
+        }));
+    }, [rawItems]);
 
-            // Get items with comments
-            const { data, error } = await supabase
-                .from('knowledge_items')
-                .select(`
-                    *,
-                    comments:knowledge_comments(
-                        id,
-                        text,
-                        created_at,
-                        author:profiles(full_name)
-                    )
-                `)
-                .eq('group_id', activeGroupId)
-                .order('created_at', { ascending: false });
-
-            if (error) {
-                console.error('[useKnowledge] Supabase fetch error:', error);
-                throw error;
-            }
-
-            // Map data to expected frontend format (description -> content)
-            const formattedData = data.map(item => ({
-                ...item,
-                description: item.content, // Map content to description for component
-                comments: item.comments?.map(c => ({
-                    id: c.id,
-                    text: c.text,
-                    date: c.created_at,
-                    author: c.author?.full_name || 'Sistema'
-                })) || []
-            }));
-
-            console.log('[useKnowledge] Fetch success:', formattedData);
-            setKnowledge(formattedData || []);
-            setError(null);
-        } catch (err) {
-            console.error('Error fetching knowledge:', err);
-            setError(err.message);
-        } finally {
-            setLoading(false);
-        }
-    }, [activeGroupId]);
-
-    useEffect(() => {
-        fetchKnowledge();
-    }, [fetchKnowledge]);
+    // Derived loading state
+    const loading = !rawItems && activeGroupId; // Simple heuristic, or rely on AppContext loading
 
     const createKnowledgeItem = async (itemData) => {
         if (!activeGroupId || !currentUser) return { error: 'Missing data' };
@@ -70,7 +36,7 @@ export function useKnowledge() {
                 group_id: activeGroupId,
                 created_by: currentUser.id,
                 title: itemData.title,
-                content: itemData.description || itemData.content || '', // Handle mapping
+                content: itemData.description || itemData.content || '',
                 url: itemData.url || '',
                 category: itemData.category || 'reference',
                 tags: itemData.tags || [],
@@ -79,7 +45,7 @@ export function useKnowledge() {
 
             if (error) return { error };
 
-            await fetchKnowledge();
+            if (refreshUserData) await refreshUserData();
             return { data };
         } catch (err) {
             return { error: err.message };
@@ -88,7 +54,6 @@ export function useKnowledge() {
 
     const updateKnowledgeItem = async (itemId, updates) => {
         try {
-            // Handle mapping description -> content
             const dbUpdates = { ...updates };
             if (dbUpdates.description !== undefined) {
                 dbUpdates.content = dbUpdates.description;
@@ -102,7 +67,23 @@ export function useKnowledge() {
 
             if (error) return { error };
 
-            await fetchKnowledge();
+            if (refreshUserData) await refreshUserData();
+            return { error: null };
+        } catch (err) {
+            return { error: err.message };
+        }
+    };
+
+    const deleteKnowledgeItem = async (itemId) => {
+        try {
+            const { error } = await supabase
+                .from('knowledge_items')
+                .delete()
+                .eq('id', itemId);
+
+            if (error) return { error };
+
+            if (refreshUserData) await refreshUserData();
             return { error: null };
         } catch (err) {
             return { error: err.message };
@@ -120,23 +101,7 @@ export function useKnowledge() {
 
             if (error) return { error };
 
-            await fetchKnowledge();
-            return { error: null };
-        } catch (err) {
-            return { error: err.message };
-        }
-    };
-
-    const deleteKnowledgeItem = async (itemId) => {
-        try {
-            const { error } = await supabase
-                .from('knowledge_items')
-                .delete()
-                .eq('id', itemId);
-
-            if (error) return { error };
-
-            await fetchKnowledge();
+            if (refreshUserData) await refreshUserData();
             return { error: null };
         } catch (err) {
             return { error: err.message };
@@ -146,8 +111,8 @@ export function useKnowledge() {
     return {
         knowledge,
         loading,
-        error,
-        fetchKnowledge,
+        error: null,
+        fetchKnowledge: refreshUserData,
         createKnowledgeItem,
         updateKnowledgeItem,
         deleteKnowledgeItem,
