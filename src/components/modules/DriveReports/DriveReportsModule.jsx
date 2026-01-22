@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReportLibrary from './components/ReportLibrary';
 import ReportDetail from './components/ReportDetail';
 import CreateReportModal from './components/CreateReportModal';
@@ -17,6 +17,21 @@ export default function DriveReportsModule() {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [initializing, setInitializing] = useState(true);
     const [isUploading, setIsUploading] = useState(false);
+    const [highlightedReportId, setHighlightedReportId] = useState(null);
+
+    // Read highlight query parameter from URL
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search);
+            const highlightId = params.get('highlight');
+            if (highlightId) {
+                setHighlightedReportId(highlightId);
+                setSelectedReportId(highlightId);
+                // Clean URL after reading
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+        }
+    }, [setSelectedReportId]);
 
     const handleSelectReport = React.useCallback(async (report) => {
         // STRICT CHECK: If report is marked as generated ('pending') OR is a PPT OR Mtg Note, NEVER open internal editor.
@@ -415,7 +430,7 @@ export default function DriveReportsModule() {
                 </div>
             )}
             <ReportLibrary
-                highlightedReportId={selectedReportId}
+                highlightedReportId={highlightedReportId}
                 onSelectReport={handleSelectReport}
                 onCreateNew={handleCreateNew}
                 onUploadPPT={handleUploadPPT} // Pass this handler
