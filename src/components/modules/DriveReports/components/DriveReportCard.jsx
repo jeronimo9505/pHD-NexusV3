@@ -19,7 +19,8 @@ export default function DriveReportCard({
     expandedSection, // 'seen', 'tasks', 'comments' or null
     onToggleSection,  // (section) => void,
     onToggleTask,
-    onDeleteTask
+    onDeleteTask,
+    onEditTask
 }) {
     // Check Status
     const isSeen = report.seen_by?.includes(currentUser?.id);
@@ -273,7 +274,11 @@ export default function DriveReportCard({
                                     <div className="space-y-2">
                                         {hasTasks ? (
                                             report.tasks.map(task => (
-                                                <div key={task.id} className="group flex items-start gap-3 p-2 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-indigo-300 transition-colors">
+                                                <div
+                                                    key={task.id}
+                                                    onClick={() => onEditTask && onEditTask(task.id)}
+                                                    className="group flex items-start gap-3 p-2 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-indigo-300 transition-colors cursor-pointer hover:bg-slate-50"
+                                                >
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); onToggleTask && onToggleTask(task.id, task.status); }}
                                                         className={clsx(
