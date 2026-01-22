@@ -5,7 +5,7 @@ import { Box, Plus, Users, Trash2, Edit2, Shield, UserPlus } from 'lucide-react'
 import Modal from '@/components/ui/Modal';
 
 export default function GroupManagement() {
-    const { currentUser } = useApp();
+    const { currentUser, refreshUserData } = useApp();
     const [groups, setGroups] = useState([]);
     const [expandedGroup, setExpandedGroup] = useState(null);
     const [members, setMembers] = useState([]);
@@ -107,6 +107,7 @@ export default function GroupManagement() {
             setNewGroupDesc('');
             setIsCreateModalOpen(false);
             fetchGroups();
+            await refreshUserData();
         }
     };
 
@@ -124,6 +125,7 @@ export default function GroupManagement() {
             setIsEditModalOpen(false);
             setEditingGroup(null);
             fetchGroups();
+            await refreshUserData();
         }
     };
 
@@ -156,6 +158,7 @@ export default function GroupManagement() {
         } else {
             setIsAddMemberModalOpen(false);
             fetchGroupMembers(expandedGroup);
+            await refreshUserData();
         }
     };
 
@@ -165,7 +168,10 @@ export default function GroupManagement() {
         const { error } = await supabase.from('group_members').delete().eq('id', membershipId);
 
         if (error) alert("Error: " + error.message);
-        else if (expandedGroup) fetchGroupMembers(expandedGroup);
+        else {
+            if (expandedGroup) fetchGroupMembers(expandedGroup);
+            await refreshUserData();
+        }
     };
 
     const handleDeleteGroup = async (groupId) => {
@@ -179,6 +185,7 @@ export default function GroupManagement() {
         } else {
             setExpandedGroup(null);
             fetchGroups();
+            await refreshUserData();
         }
     };
 
@@ -186,7 +193,10 @@ export default function GroupManagement() {
         const { error } = await supabase.from('group_members').update({ role: newRole }).eq('id', membershipId);
 
         if (error) alert("Error updating role: " + error.message);
-        else if (expandedGroup) fetchGroupMembers(expandedGroup);
+        else {
+            if (expandedGroup) fetchGroupMembers(expandedGroup);
+            await refreshUserData();
+        }
     };
 
     return (
