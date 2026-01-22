@@ -12,6 +12,15 @@ export default function ReportDetail({ report, onBack }) {
     // Tasks are now passed directly in the report object from AppContext
     const reportTasks = report.tasks || [];
 
+    const editLink = report.drive_file_id
+        ? `https://docs.google.com/document/d/${report.drive_file_id}/edit`
+        : '#';
+
+    // For preview, we might want 'preview' or 'view'
+    const previewLink = report.drive_file_id
+        ? `https://docs.google.com/document/d/${report.drive_file_id}/preview`
+        : '';
+
     const handleStatusChange = async (newStatus) => {
         await updateDriveReport(report.id, {
             status: newStatus,
