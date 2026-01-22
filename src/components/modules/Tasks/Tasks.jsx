@@ -78,14 +78,34 @@ export default function Tasks() {
         if (report) {
             return `Reporte ${getWeekLabel(report.startDate, report.endDate)}`;
         }
+        // Search in Drive Reports
+        const driveReport = driveReports.find(r => r.id === reportId);
+        if (driveReport) {
+            return driveReport.title || `Reporte Drive`;
+        }
         // If not in context (maybe legacy or deleted), format the ID partially
         return `Reporte (ref: ${reportId.substr(0, 8)}...)`;
     };
 
     const handleNavigateToReport = (e, reportId) => {
         e.stopPropagation();
-        setSelectedReportId(reportId);
-        setActiveModule('reports');
+
+        // Determine target module
+        const isStandard = reports.some(r => r.id === reportId);
+        const isDrive = driveReports.some(r => r.id === reportId);
+
+        if (isStandard) {
+            setSelectedReportId(reportId);
+            setActiveModule('reports');
+            // Use window.location to avoid useRouter circular dependency
+            window.location.href = '/reports';
+        } else if (isDrive) {
+            setSelectedReportId(reportId);
+            setActiveModule('drive_reports');
+            window.location.href = '/drive-reports';
+        } else {
+            alert("No se encontró el reporte original (puede haber sido eliminado).");
+        }
     };
 
     const handleTaskUpdate = async (taskId, field, value) => {

@@ -79,23 +79,12 @@ export default function DriveReportsModule() {
         setView('detail');
     }, [updateDriveReport]);
 
-    // Deep Linking Effect - Moved here (BEFORE return) to fix Hook Order
+    // Deep Linking Effect: Ensure library view when navigating from task
     React.useEffect(() => {
-        if (selectedReportId && driveReports.length > 0) {
-            const report = driveReports.find(r => r.id === selectedReportId);
-            if (report) {
-                // Determine action based on status
-                if (report.status === 'draft') {
-                    setSelectedReport(report);
-                    setView('detail');
-                } else {
-                    handleSelectReport(report);
-                }
-                // Clear the selection so it doesn't trigger again on nav back
-                setSelectedReportId(null);
-            }
+        if (selectedReportId && view !== 'library') {
+            setView('library');
         }
-    }, [selectedReportId, driveReports, handleSelectReport, setSelectedReportId]);
+    }, [selectedReportId, view]);
 
 
     // Initialize Google API
@@ -426,6 +415,7 @@ export default function DriveReportsModule() {
                 </div>
             )}
             <ReportLibrary
+                highlightedReportId={selectedReportId}
                 onSelectReport={handleSelectReport}
                 onCreateNew={handleCreateNew}
                 onUploadPPT={handleUploadPPT} // Pass this handler
