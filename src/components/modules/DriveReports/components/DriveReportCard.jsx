@@ -20,7 +20,10 @@ export default function DriveReportCard({
     onToggleSection,  // (section) => void,
     onToggleTask,
     onDeleteTask,
-    onEditTask
+    onEditTask,
+    // New props for highlighting
+    isHighlighted,
+    domId
 }) {
     // Check Status
     const isSeen = report.seen_by?.includes(currentUser?.id);
@@ -28,10 +31,13 @@ export default function DriveReportCard({
     const hasTasks = report.tasks?.length > 0;
 
     return (
-        <div className={clsx(
-            "bg-white rounded-xl border p-4 transition-all hover:shadow-md relative group",
-            isSeen ? "border-slate-200" : "border-indigo-200 shadow-sm bg-indigo-50/10"
-        )}>
+        <div
+            id={domId}
+            className={clsx(
+                "bg-white rounded-xl border p-4 transition-all hover:shadow-md relative group duration-500",
+                isHighlighted ? "ring-2 ring-indigo-500 shadow-xl bg-indigo-50/30 scale-[1.02] z-10" :
+                    isSeen ? "border-slate-200" : "border-indigo-200 shadow-sm bg-indigo-50/10"
+            )}>
             {/* Delete Action (Top Right) */}
             {onDelete && (
                 <button

@@ -15,7 +15,7 @@ import { useTasks } from '../../Tasks/hooks/useTasks';
 import TaskDetailPanel from '../../Tasks/components/TaskDetailPanel';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSettings, onDeleteReport, onUploadPPT }) {
+export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSettings, onDeleteReport, onUploadPPT, highlightedReportId }) {
     const { driveReports, loading, currentUser, markDriveReportSeen, addDriveReportComment, groupMembers, reports, userProfile } = useApp();
     const { createTask, updateTask, deleteTask, addComment: addTaskComment, tasks: allTasks } = useTasks();
 
@@ -41,9 +41,21 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
         return members;
     }, [groupMembers, currentUser]);
 
-    // Toggle for History expansion per card (local state not feasible for list in this filtered view easily without subcomponent, 
     // Toggle for History/Tasks/Comments expansion per card
     const [expandedSections, setExpandedSections] = useState({});
+
+    // Scrolling Effect for Highlighted Report
+    React.useEffect(() => {
+        if (highlightedReportId) {
+            // Slight delay to ensure render
+            setTimeout(() => {
+                const element = document.getElementById(`report-card-${highlightedReportId}`);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 500);
+        }
+    }, [highlightedReportId]);
 
     const toggleHistory = (e, reportId, section) => {
         e.stopPropagation();
@@ -436,6 +448,9 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
                                                 key={report.id}
                                                 report={{ ...report, tasks: liveReportTasks }} // Override tasks with live list
                                                 currentUser={currentUser}
+                                                // Highlighting props
+                                                isHighlighted={highlightedReportId === report.id}
+                                                domId={`report-card-${report.id}`}
                                                 onMarkSeen={(r) => markDriveReportSeen && markDriveReportSeen(r.id)}
                                                 onDelete={onDeleteReport ? ((r) => onDeleteReport(r)) : undefined}
                                                 onComment={setActiveCommentReport}
