@@ -124,6 +124,13 @@ CREATE POLICY "Group members view drive reports" ON drive_reports FOR SELECT USI
 DROP POLICY IF EXISTS "Authors create drive reports" ON drive_reports;
 CREATE POLICY "Authors create drive reports" ON drive_reports FOR INSERT WITH CHECK (auth.uid() = author_id);
 
+DROP POLICY IF EXISTS "Authors update drive reports" ON drive_reports;
+CREATE POLICY "Authors update drive reports" ON drive_reports FOR UPDATE USING (auth.uid() = author_id);
+
+DROP POLICY IF EXISTS "Authors delete drive reports" ON drive_reports;
+CREATE POLICY "Authors delete drive reports" ON drive_reports FOR DELETE USING (auth.uid() = author_id);
+
+
 -- Drive Report Comments
 DROP POLICY IF EXISTS "Group members view drive comments" ON drive_report_comments;
 CREATE POLICY "Group members view drive comments" ON drive_report_comments FOR SELECT USING (
@@ -135,12 +142,38 @@ CREATE POLICY "Group members view drive comments" ON drive_report_comments FOR S
     )
 );
 
+DROP POLICY IF EXISTS "Authors create drive comments" ON drive_report_comments;
+CREATE POLICY "Authors create drive comments" ON drive_report_comments FOR INSERT WITH CHECK (auth.uid() = author_id);
+
+
+-- Drive Report Task Links
+DROP POLICY IF EXISTS "Group members view drive task links" ON drive_report_task_links;
+CREATE POLICY "Group members view drive task links" ON drive_report_task_links FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM drive_reports 
+        JOIN group_members ON drive_reports.group_id = group_members.group_id 
+        WHERE drive_report_task_links.drive_report_id = drive_reports.id 
+        AND group_members.user_id = auth.uid()
+    )
+);
+
+DROP POLICY IF EXISTS "Authors create drive task links" ON drive_report_task_links;
+CREATE POLICY "Authors create drive task links" ON drive_report_task_links FOR INSERT WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM drive_reports 
+        WHERE drive_reports.id = drive_report_task_links.drive_report_id 
+        AND drive_reports.author_id = auth.uid()
+    )
+);
+
+
 -- Report Views
 DROP POLICY IF EXISTS "Users can track views" ON report_views;
 CREATE POLICY "Users can track views" ON report_views FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Users view own view stats" ON report_views;
 CREATE POLICY "Users view own view stats" ON report_views FOR SELECT USING (auth.uid() = user_id);
+
 
 -- Knowledge Comments
 DROP POLICY IF EXISTS "Group members view knowledge comments" ON knowledge_comments;
@@ -152,3 +185,6 @@ CREATE POLICY "Group members view knowledge comments" ON knowledge_comments FOR 
         AND group_members.user_id = auth.uid()
     )
 );
+
+DROP POLICY IF EXISTS "Authors create knowledge comments" ON knowledge_comments;
+CREATE POLICY "Authors create knowledge comments" ON knowledge_comments FOR INSERT WITH CHECK (auth.uid() = author_id);
