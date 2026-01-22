@@ -1,7 +1,7 @@
 import React from 'react';
 import {
     FileText, CheckCircle2, MessageSquare, CheckSquare,
-    Eye, EyeOff, Trash2, Presentation, StickyNote, Clock, ExternalLink
+    Eye, EyeOff, Trash2, Presentation, StickyNote, Clock, ExternalLink, User
 } from 'lucide-react';
 import { getMonthLabel, formatDateShort } from '@/utils/helpers';
 import clsx from 'clsx';
