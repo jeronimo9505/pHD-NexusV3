@@ -79,13 +79,13 @@ export function useReports(activeGroupId) {
             if (error) return { error };
 
             const sections = ['context', 'experimental', 'findings', 'difficulties', 'nextSteps'];
-            const section inserts = sections.map(key => ({
+            const sectionInserts = sections.map(key => ({
                 report_id: data.id,
                 key: key,
                 content: ''
             }));
 
-            await supabase.from('report_sections').insert(inserts);
+            await supabase.from('report_sections').insert(sectionInserts);
 
             if (refreshUserData) await refreshUserData();
             return { data };
