@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Security Fixes - Consolidated Migration
 -- Applied on: 2026-01-22
--- Includes: RLS Enablement, Core Policies, Drive Policies, Function Security
+-- Includes: RLS Enablement, Core Policies, Drive Policies, Function Security, Task Policies
 -- ============================================================================
 
 -- 1. Enable RLS on ALL identified tables
@@ -98,6 +98,50 @@ DROP POLICY IF EXISTS "Group members can create tasks" ON tasks;
 CREATE POLICY "Group members can create tasks" ON tasks FOR INSERT WITH CHECK (
     EXISTS (SELECT 1 FROM group_members WHERE group_members.group_id = tasks.group_id AND group_members.user_id = auth.uid())
 );
+
+DROP POLICY IF EXISTS "Group members update tasks" ON tasks;
+CREATE POLICY "Group members update tasks" ON tasks FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM group_members WHERE group_members.group_id = tasks.group_id AND group_members.user_id = auth.uid())
+);
+
+DROP POLICY IF EXISTS "Authors can delete tasks" ON tasks;
+CREATE POLICY "Authors can delete tasks" ON tasks FOR DELETE USING (auth.uid() = created_by);
+
+-- TASK ASSIGNEES
+DROP POLICY IF EXISTS "Group members view task assignees" ON task_assignees;
+CREATE POLICY "Group members view task assignees" ON task_assignees FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM tasks 
+        JOIN group_members ON tasks.group_id = group_members.group_id 
+        WHERE task_assignees.task_id = tasks.id 
+        AND group_members.user_id = auth.uid()
+    )
+);
+
+DROP POLICY IF EXISTS "Group members manage task assignees" ON task_assignees;
+CREATE POLICY "Group members manage task assignees" ON task_assignees FOR ALL USING (
+    EXISTS (
+        SELECT 1 FROM tasks 
+        JOIN group_members ON tasks.group_id = group_members.group_id 
+        WHERE task_assignees.task_id = tasks.id 
+        AND group_members.user_id = auth.uid()
+    )
+);
+
+-- TASK COMMENTS
+DROP POLICY IF EXISTS "Group members view task comments" ON task_comments;
+CREATE POLICY "Group members view task comments" ON task_comments FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM tasks 
+        JOIN group_members ON tasks.group_id = group_members.group_id 
+        WHERE task_comments.task_id = tasks.id 
+        AND group_members.user_id = auth.uid()
+    )
+);
+
+DROP POLICY IF EXISTS "Authors create task comments" ON task_comments;
+CREATE POLICY "Authors create task comments" ON task_comments FOR INSERT WITH CHECK (auth.uid() = author_id);
+
 
 -- KNOWLEDGE
 DROP POLICY IF EXISTS "Group members can view knowledge" ON knowledge_items;
