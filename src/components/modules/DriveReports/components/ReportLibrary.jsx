@@ -444,6 +444,7 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
                                                 // Task Actions
                                                 onToggleTask={(taskId, status) => handleTaskUpdate(taskId, 'status', status === 'done' ? 'todo' : 'done')}
                                                 onDeleteTask={(taskId) => deleteTask && deleteTask(taskId)}
+                                                onEditTask={(taskId) => setEditingTaskId(taskId)}
 
                                                 expandedSection={expandedSection}
                                                 onToggleSection={(section) => toggleHistory({ stopPropagation: () => { } }, report.id, section)}
