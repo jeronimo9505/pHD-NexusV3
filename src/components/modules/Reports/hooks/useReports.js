@@ -1,33 +1,23 @@
-// NOTE: This is a SIMPLIFIED version of useReports migrated to Supabase
-// The full version is 768 lines - this covers the essential CRUD operations
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useApp } from '@/context/AppContext';
 
 export function useReports(activeGroupId) {
-    const { currentUser } = useApp();
-    const [reports, setReports] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
+    const {
+        reports: rawReports,
+        currentUser,
+        refreshUserData
+    } = useApp();
 
-    const fetchReports = useCallback(async () => {
-        if (!activeGroupId) return;
+    const reports = useMemo(() => {
+        if (!rawReports) return [];
 
-        try {
-            setLoading(true);
-            const { data, error } = await supabase
-                .from('reports')
-                .select(`
-                    *,
-                    author:profiles!reports_author_id_fkey(full_name),
-                    reviewer:profiles!reports_reviewed_by_fkey(full_name)
-                `)
-                .eq('group_id', activeGroupId);
+        let transformed = rawReports.map(r => {
+            // Find my view
+            const myView = currentUser?.id ? (r.views || []).find(v => v.user_id === currentUser.id) : null;
 
-            if (error) throw error;
-
-            const { data: allSections } = await supabase.from('report_sections').select('*');
-            const { data: allViews } = await supabase.from('report_views').select('*');
+            // Find context section
+            const contextSec = (r.sections || []).find(s => s.key === 'context');
 
             const normStatus = (s) => {
                 const v = (s || 'draft').toString().toLowerCase();
@@ -35,57 +25,44 @@ export function useReports(activeGroupId) {
                 return v;
             };
 
-            let transformed = (data || []).map(r => {
-                const views = allViews?.filter(v => v.report_id === r.id) || [];
-                const myView = currentUser?.id ? views.find(v => v.user_id === currentUser.id) : null;
-                const contextSec = allSections?.find(s => s.report_id === r.id && s.key === 'context');
+            return {
+                id: r.id,
+                groupId: r.group_id,
+                authorId: r.author_id,
+                authorName: r.author?.full_name || 'Desconocido',
+                startDate: r.week_start,
+                endDate: r.week_end,
+                status: normStatus(r.status),
+                isImportant: r.is_important || false,
+                submittedAt: r.submitted_at,
+                reviewedAt: r.reviewed_at,
+                reviewedBy: r.reviewer?.full_name,
+                supervisorFeedback: r.supervisor_feedback,
+                createdAt: r.created_at,
+                views: r.views || [],
+                mySeenAt: myView?.seen_at || null,
+                isSeenByMe: Boolean(myView?.seen_at),
+                context: contextSec?.content || '', // Mapped for List View
 
-                return {
-                    id: r.id,
-                    groupId: r.group_id,
-                    authorId: r.author_id,
-                    authorName: r.author?.full_name || 'Desconocido',
-                    startDate: r.week_start,
-                    endDate: r.week_end,
-                    status: normStatus(r.status),
-                    isImportant: r.is_important || false,
-                    submittedAt: r.submitted_at,
-                    reviewedAt: r.reviewed_at,
-                    reviewedBy: r.reviewer?.full_name,
-                    supervisorFeedback: r.supervisor_feedback,
-                    createdAt: r.created_at,
-                    views: views,
-                    mySeenAt: myView?.seen_at || myView?.viewed_at || null,
-                    isSeenByMe: Boolean(myView?.seen_at || myView?.viewed_at),
-                    context: contextSec?.content || '',
-                    experimental: '',
-                    findings: '',
-                    difficulties: '',
-                    nextSteps: ''
-                };
-            });
+                // Fields that might be missing if not fully loaded but acceptable for List
+                experimental: '',
+                findings: '',
+                difficulties: '',
+                nextSteps: ''
+            };
+        });
 
-            if (currentUser?.id) {
-                transformed = transformed.filter(r => r.status !== 'draft' || r.authorId === currentUser.id);
-            } else {
-                transformed = transformed.filter(r => r.status !== 'draft');
-            }
-
-            transformed.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
-            setReports(transformed);
-            setError(null);
-        } catch (err) {
-            console.error('Error fetching reports:', err);
-            setError(err.message);
-        } finally {
-            setLoading(false);
+        // Filter based on user role (same logic as before)
+        if (currentUser?.id) {
+            transformed = transformed.filter(r => r.status !== 'draft' || r.authorId === currentUser.id);
+        } else {
+            transformed = transformed.filter(r => r.status !== 'draft');
         }
-    }, [activeGroupId, currentUser?.id]);
 
-    useEffect(() => {
-        fetchReports();
-    }, [fetchReports]);
+        return transformed.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+    }, [rawReports, currentUser]);
 
+    // Actions
     const createReport = async (weekStart, weekEnd) => {
         if (!activeGroupId || !currentUser) return { error: 'Missing data' };
 
@@ -102,15 +79,15 @@ export function useReports(activeGroupId) {
             if (error) return { error };
 
             const sections = ['context', 'experimental', 'findings', 'difficulties', 'nextSteps'];
-            for (const key of sections) {
-                await supabase.from('report_sections').insert({
-                    report_id: data.id,
-                    key: key,
-                    content: ''
-                });
-            }
+            const section inserts = sections.map(key => ({
+                report_id: data.id,
+                key: key,
+                content: ''
+            }));
 
-            await fetchReports();
+            await supabase.from('report_sections').insert(inserts);
+
+            if (refreshUserData) await refreshUserData();
             return { data };
         } catch (err) {
             return { error: err.message };
@@ -126,7 +103,19 @@ export function useReports(activeGroupId) {
 
             if (error) return { error };
 
-            await fetchReports();
+            if (refreshUserData) await refreshUserData();
+            return { error: null };
+        } catch (err) {
+            return { error: err.message };
+        }
+    };
+
+    const deleteReport = async (reportId) => {
+        try {
+            const { error } = await supabase.from('reports').delete().eq('id', reportId);
+            if (error) return { error };
+
+            if (refreshUserData) await refreshUserData();
             return { error: null };
         } catch (err) {
             return { error: err.message };
@@ -135,37 +124,33 @@ export function useReports(activeGroupId) {
 
     return {
         reports,
-        loading,
-        error,
-        fetchReports,
+        loading: !rawReports, // Derived loading
+        error: null,
+        fetchReports: refreshUserData,
         createReport,
         updateReportDates,
-        deleteReport: async (reportId) => {
-            try {
-                const { error } = await supabase.from('reports').delete().eq('id', reportId);
-                if (error) return { error };
-                await fetchReports();
-                return { error: null };
-            } catch (err) {
-                return { error: err.message };
-            }
-        }
+        deleteReport
     };
 }
 
-// Full implementation of useReportDetails
+// Keep useReportDetails as is, but maybe fix its internal fetches to be more efficient?
+// For now, leaving it as isolated fetch is safer for detail view complexity.
+// But we must export it. I'll just copy the previous implementation of useReportDetails below.
+// I need key imports from top of original file too.
+// Wait, I am replacing the file content.
+// I must include `useReportDetails` implementation.
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+
 export function useReportDetails(reportId) {
     const { currentUser } = useApp();
     const [reportMeta, setReportMeta] = useState(null);
     const [sections, setSections] = useState({});
-    const [annotations, setAnnotations] = useState([]); // Comments + Highlights
+    const [annotations, setAnnotations] = useState([]);
     const [linkedTasks, setLinkedTasks] = useState([]);
-    const [completedTasks, setCompletedTasks] = useState([]); // Derived or fetched
+    const [completedTasks, setCompletedTasks] = useState([]);
     const [linkedResources, setLinkedResources] = useState([]);
-
-    // Derived states for convenience (optional, but ReportReadView filters itself)
     const [comments, setComments] = useState([]);
-
     const [loading, setLoading] = useState(false);
     const saveTimeoutRef = useRef(null);
 
@@ -175,7 +160,6 @@ export function useReportDetails(reportId) {
         try {
             setLoading(true);
 
-            // 1. Fetch Report Meta
             const { data: report, error: reportError } = await supabase
                 .from('reports')
                 .select(`
@@ -208,7 +192,6 @@ export function useReportDetails(reportId) {
                 });
             }
 
-            // 2. Fetch Sections
             const { data: sectionsData } = await supabase
                 .from('report_sections')
                 .select('*')
@@ -220,8 +203,6 @@ export function useReportDetails(reportId) {
             });
             setSections(secMap);
 
-            // 3. Fetch Annotations (Comments & Highlights)
-            // We use report_comments table which now has type, quote, etc.
             const { data: commentsData } = await supabase
                 .from('report_comments')
                 .select(`
@@ -233,12 +214,12 @@ export function useReportDetails(reportId) {
 
             const formattedAnnotations = (commentsData || []).map(c => ({
                 id: c.id,
-                type: c.type || 'comment', // Default to comment if null
-                section_key: c.section_key, // Matches schema
-                sectionKey: c.section_key,  // For frontend compat
-                text: c.quote,              // Frontend expects 'text' for highlight quote
+                type: c.type || 'comment',
+                section_key: c.section_key,
+                sectionKey: c.section_key,
+                text: c.quote,
                 quote: c.quote,
-                content: c.body,            // Frontend expects content/body
+                content: c.body,
                 body: c.body,
                 author_id: c.author_id,
                 authorName: c.author?.full_name || 'Unknown',
@@ -253,7 +234,6 @@ export function useReportDetails(reportId) {
             setAnnotations(formattedAnnotations);
             setComments(formattedAnnotations.filter(a => a.type === 'comment'));
 
-            // 4. Fetch Linked Tasks
             const { data: tasksData } = await supabase
                 .from('report_task_links')
                 .select(`
@@ -268,7 +248,6 @@ export function useReportDetails(reportId) {
             setLinkedTasks(tasks);
             setCompletedTasks(tasks.filter(t => t.status === 'done'));
 
-            // 5. Fetch Linked Resources
             const { data: resourcesData } = await supabase
                 .from('report_knowledge_links')
                 .select(`
@@ -286,12 +265,10 @@ export function useReportDetails(reportId) {
         }
     }, [reportId, currentUser]);
 
-    // Initial Fetch
     useEffect(() => {
         fetchReportDetails();
     }, [fetchReportDetails]);
 
-    // Section Updates (Debounced Persist, Instant State)
     const updateSection = useCallback((key, content) => {
         setSections(prev => ({ ...prev, [key]: content }));
 
@@ -314,16 +291,14 @@ export function useReportDetails(reportId) {
         }
     };
 
-    // Annotations
     const addAnnotation = async (annotationData) => {
         try {
-            // Map frontend fields to DB columns
             const payload = {
                 report_id: reportId,
                 author_id: currentUser.id,
                 type: annotationData.type || 'comment',
                 section_key: annotationData.section_key || annotationData.sectionKey,
-                body: annotationData.content || '', // For highlights, body might be empty? or same as quote?
+                body: annotationData.content || '',
                 quote: annotationData.quote || annotationData.text,
                 range_start: annotationData.range_start || 0,
                 range_end: annotationData.range_end || 0,
@@ -339,7 +314,7 @@ export function useReportDetails(reportId) {
                 .single();
 
             if (error) throw error;
-            await fetchReportDetails(); // Refresh to get author info etc
+            await fetchReportDetails();
             return { data };
         } catch (err) {
             console.error("Error adding annotation:", err);
@@ -361,13 +336,12 @@ export function useReportDetails(reportId) {
         }
     };
 
-    // Report Status
     const updateReportStatus = async (newStatus) => {
         try {
             const updates = { status: newStatus };
             if (newStatus === 'submitted') updates.submitted_at = new Date().toISOString();
             if (newStatus === 'approved' || newStatus === 'reviewed') {
-                updates.status = 'reviewed'; // Normalize
+                updates.status = 'reviewed';
                 updates.reviewed_at = new Date().toISOString();
                 updates.reviewed_by = currentUser.id;
             }
@@ -382,7 +356,6 @@ export function useReportDetails(reportId) {
         }
     };
 
-    // Mark as Seen
     const markAsSeen = async () => {
         if (!currentUser || !reportId) return;
         try {
@@ -391,8 +364,6 @@ export function useReportDetails(reportId) {
                 user_id: currentUser.id,
                 seen_at: new Date().toISOString()
             }, { onConflict: ['report_id', 'user_id'] });
-
-            // Optimistic update if needed, or just silent
         } catch (err) {
             console.error("Error marking seen:", err);
         }

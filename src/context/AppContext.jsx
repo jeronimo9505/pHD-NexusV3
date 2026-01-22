@@ -152,7 +152,15 @@ export const AppProvider = ({ children }) => {
                             drive_links:drive_report_task_links(*)
                         `)
                         .eq('group_id', currentGroupId),
-                    supabase.from('reports').select('*').eq('group_id', currentGroupId),
+                    supabase.from('reports')
+                        .select(`
+                            *,
+                            author:profiles!reports_author_id_fkey(full_name),
+                            reviewer:profiles!reports_reviewed_by_fkey(full_name),
+                            views:report_views(user_id, seen_at),
+                            sections:report_sections(key, content)
+                        `)
+                        .eq('group_id', currentGroupId),
                     supabase.from('knowledge_items')
                         .select(`
                             *,
