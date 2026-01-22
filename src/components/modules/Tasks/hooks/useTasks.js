@@ -1,92 +1,77 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useApp } from '@/context/AppContext';
 
 export function useTasks() {
-    const { activeGroupId, currentUser, groupMembers } = useApp();
-    const [tasks, setTasks] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
+    // 1. Get raw data from AppContext (Single Source of Truth)
+    const {
+        tasks: rawTasks,
+        activeGroupId,
+        currentUser,
+        groupMembers,
+        refreshUserData // Function to reload global data
+    } = useApp();
 
-    const fetchTasks = useCallback(async () => {
-        if (!activeGroupId) return;
+    // 2. Transform raw data for UI (Memoized)
+    const tasks = useMemo(() => {
+        if (!rawTasks) return [];
 
-        try {
-            setLoading(true);
-            const { data, error } = await supabase
-                .from('tasks')
-                .select('*')
-                .eq('group_id', activeGroupId);
+        const transformed = rawTasks.map(t => {
+            // Find Creator
+            const creator = groupMembers?.find(m => m.user_id === t.created_by || m.id === t.created_by)
+                || (currentUser?.id === t.created_by ? currentUser : null);
 
-            if (error) throw error;
+            // Map Comments (using 'comments' relation from AppContext query)
+            const taskComments = (t.comments || [])
+                .map(c => {
+                    const commentAuthor = groupMembers?.find(m => m.user_id === c.author_id || m.id === c.author_id)
+                        || (currentUser?.id === c.author_id ? currentUser : null);
+                    return {
+                        id: c.id,
+                        text: c.body,
+                        author: commentAuthor?.full_name || commentAuthor?.name || 'Usuario',
+                        role: commentAuthor?.system_role || commentAuthor?.role,
+                        date: c.created_at
+                    };
+                });
 
-            // Load related data
-            const { data: allComments } = await supabase.from('task_comments').select('*');
-            const { data: allAssignees } = await supabase.from('task_assignees').select('*');
-            const { data: allReportLinks } = await supabase.from('report_task_links').select('*');
-            const { data: allDriveLinks } = await supabase.from('drive_report_task_links').select('*');
+            // Map Assignees (using 'assignees' relation from AppContext query)
+            const taskAssignees = (t.assignees || []);
+            const firstAssigneeId = taskAssignees.length > 0 ? taskAssignees[0].user_id : t.created_by;
+            const assignedUser = groupMembers?.find(m => m.user_id === firstAssigneeId || m.id === firstAssigneeId)
+                || (currentUser?.id === firstAssigneeId ? currentUser : null);
 
-            // Transform for UI
-            const transformed = (data || []).map(t => {
-                const creator = groupMembers?.find(m => m.user_id === t.created_by || m.id === t.created_by)
-                    || (currentUser?.id === t.created_by ? currentUser : null);
+            // Map Links (using 'report_limits' and 'drive_links' alias from query)
+            // Note: AppContext alias was: report_limits:report_task_links(*), drive_links:drive_report_task_links(*)
+            const stdLink = (t.report_limits || [])[0]; // Usually 1-to-1 or 1-to-many? Assuming single link logic
+            const driveLink = (t.drive_links || [])[0];
+            const sourceReportId = stdLink?.report_id || driveLink?.drive_report_id;
 
-                const taskComments = (allComments || [])
-                    .filter(c => c.task_id === t.id)
-                    .map(c => {
-                        const commentAuthor = groupMembers?.find(m => m.user_id === c.author_id || m.id === c.author_id)
-                            || (currentUser?.id === c.author_id ? currentUser : null);
-                        return {
-                            id: c.id,
-                            text: c.body,
-                            author: commentAuthor?.full_name || commentAuthor?.name || 'Usuario',
-                            role: commentAuthor?.system_role || commentAuthor?.role,
-                            date: c.created_at
-                        };
-                    });
+            return {
+                id: t.id,
+                groupId: t.group_id,
+                title: t.title,
+                description: t.description,
+                status: t.status,
+                priority: t.priority,
+                dueDate: t.due_date,
+                createdAt: t.created_at,
+                completedAt: t.completed_at,
+                assignedBy: creator?.full_name || creator?.name || 'Usuario',
+                assignedTo: assignedUser?.full_name || assignedUser?.name,
+                sourceReportId,
+                assignees: taskAssignees,
+                comments: taskComments,
+                created_by: t.created_by // Keep original ID for filters
+            };
+        });
 
-                const taskAssignees = (allAssignees || []).filter(a => a.task_id === t.id);
-                const firstAssigneeId = taskAssignees.length > 0 ? taskAssignees[0].user_id : t.created_by;
-                const assignedUser = groupMembers?.find(m => m.user_id === firstAssigneeId || m.id === firstAssigneeId)
-                    || (currentUser?.id === firstAssigneeId ? currentUser : null);
+        // Sort by Newest
+        return transformed.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }, [rawTasks, groupMembers, currentUser]);
 
-                // Check both link tables
-                const stdLink = (allReportLinks || []).find(l => l.task_id === t.id);
-                const driveLink = (allDriveLinks || []).find(l => l.task_id === t.id);
-                const sourceReportId = stdLink?.report_id || driveLink?.drive_report_id;
-
-                return {
-                    id: t.id,
-                    groupId: t.group_id,
-                    title: t.title,
-                    description: t.description,
-                    status: t.status,
-                    priority: t.priority,
-                    dueDate: t.due_date,
-                    createdAt: t.created_at,
-                    completedAt: t.completed_at,
-                    assignedBy: creator?.full_name || creator?.name || 'Usuario',
-                    assignedTo: assignedUser?.full_name || assignedUser?.name,
-                    sourceReportId,
-                    assignees: taskAssignees,
-                    comments: taskComments
-                };
-            });
-
-            transformed.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            setTasks(transformed);
-            setError(null);
-        } catch (err) {
-            console.error('Error fetching tasks:', err);
-            setError(err.message);
-        } finally {
-            setLoading(false);
-        }
-    }, [activeGroupId, groupMembers, currentUser]);
-
-    useEffect(() => {
-        fetchTasks();
-    }, [fetchTasks]);
+    // 3. Actions (Mutations)
+    // These update DB then trigger global reload
 
     const createTask = async (taskData) => {
         if (!activeGroupId || !currentUser) return { error: 'Missing required data' };
@@ -117,9 +102,10 @@ export function useTasks() {
             }
 
             if (taskData.sourceReportId) {
-                // Determine which link table to use
-                // If it's a UUID, we check if it's in drive_reports
-                const { data: isDriveReport } = await supabase.from('drive_reports').select('id').eq('id', taskData.sourceReportId).single();
+                // Check if it's a Drive Report (usually UUID) or legacy ID
+                // Best way: Check both or assume ID format. 
+                // Let's optimize: Check if ID exists in drive_reports
+                const { data: isDriveReport } = await supabase.from('drive_reports').select('id').eq('id', taskData.sourceReportId).maybeSingle();
 
                 if (isDriveReport) {
                     await supabase.from('drive_report_task_links').insert({
@@ -134,7 +120,9 @@ export function useTasks() {
                 }
             }
 
-            await fetchTasks();
+            // Global Refresh
+            if (refreshUserData) await refreshUserData();
+
             return { data: newTask };
         } catch (err) {
             return { error: err.message };
@@ -149,12 +137,11 @@ export function useTasks() {
 
             const dbUpdates = {};
             Object.keys(updates).forEach(key => {
-                if (key === 'sourceReportId' || key === 'assignees') return; // Handle separately
+                if (key === 'sourceReportId' || key === 'assignees') return;
                 const dbKey = fieldMapping[key] || key;
                 dbUpdates[dbKey] = updates[key];
             });
 
-            // Update main task fields if any
             if (Object.keys(dbUpdates).length > 0) {
                 const { error } = await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
                 if (error) return { error };
@@ -173,13 +160,11 @@ export function useTasks() {
             }
 
             if (updates.sourceReportId !== undefined) {
-                // Clear existing from both link tables
                 await supabase.from('report_task_links').delete().eq('task_id', taskId);
                 await supabase.from('drive_report_task_links').delete().eq('task_id', taskId);
 
-                // Add new if present
                 if (updates.sourceReportId) {
-                    const { data: isDriveReport } = await supabase.from('drive_reports').select('id').eq('id', updates.sourceReportId).single();
+                    const { data: isDriveReport } = await supabase.from('drive_reports').select('id').eq('id', updates.sourceReportId).maybeSingle();
 
                     if (isDriveReport) {
                         await supabase.from('drive_report_task_links').insert({
@@ -195,7 +180,7 @@ export function useTasks() {
                 }
             }
 
-            await fetchTasks();
+            if (refreshUserData) await refreshUserData();
             return { error: null };
         } catch (err) {
             return { error: err.message };
@@ -212,7 +197,7 @@ export function useTasks() {
             const { error } = await supabase.from('tasks').delete().eq('id', taskId);
             if (error) return { error };
 
-            await fetchTasks();
+            if (refreshUserData) await refreshUserData();
             return { error: null };
         } catch (err) {
             return { error: err.message };
@@ -231,7 +216,7 @@ export function useTasks() {
 
             if (error) return { error };
 
-            await fetchTasks();
+            if (refreshUserData) await refreshUserData();
             return { error: null };
         } catch (err) {
             return { error: err.message };
@@ -247,7 +232,7 @@ export function useTasks() {
 
             if (error) return { error };
 
-            await fetchTasks();
+            if (refreshUserData) await refreshUserData();
             return { error: null };
         } catch (err) {
             return { error: err.message };
@@ -255,10 +240,10 @@ export function useTasks() {
     };
 
     return {
-        tasks,
-        loading,
-        error,
-        fetchTasks,
+        tasks,          // Now from Context
+        loading: !tasks, // Or use AppContext loading
+        error: null,    // Errors handled in mutations
+        fetchTasks: refreshUserData, // Alias for manual refresh if needed
         createTask,
         updateTask,
         deleteTask,
