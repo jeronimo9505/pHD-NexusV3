@@ -437,7 +437,7 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
                                                 report={{ ...report, tasks: liveReportTasks }} // Override tasks with live list
                                                 currentUser={currentUser}
                                                 onMarkSeen={(r) => markDriveReportSeen && markDriveReportSeen(r.id)}
-                                                onDelete={onDeleteReport ? ((r) => onDeleteReport(r.id)) : undefined}
+                                                onDelete={onDeleteReport ? ((r) => onDeleteReport(r)) : undefined}
                                                 onComment={setActiveCommentReport}
                                                 onCreateTask={(r) => handleQuickAddTask({ stopPropagation: () => { } }, r.id)}
                                                 onOpen={onSelectReport}
