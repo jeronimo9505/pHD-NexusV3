@@ -534,19 +534,24 @@ export const AppProvider = ({ children }) => {
             if (data.sections !== undefined) dbUpdates.sections = data.sections;
             if (data.drive_file_id !== undefined) dbUpdates.drive_file_id = data.drive_file_id;
             if (data.isImportant !== undefined) dbUpdates.is_important = data.isImportant;
-            // Add others as needed
+            if (data.startDate !== undefined) dbUpdates.start_date = data.startDate;
+            if (data.endDate !== undefined) dbUpdates.end_date = data.endDate;
 
-            // Merge with raw data in case we missed some or user sent snake_case already
-            const payload = { ...dbUpdates, ...data };
-            // Cleanup camelCase duplicates from payload if strictly needed, but Supabase ignores extra fields mostly if not in schema... 
-            // actually Supabase Client might warn or error on unknown columns.
-            // Let's rely on ...data containing snake_case if the caller is good, or our mapped `dbUpdates`.
-            // Ideally we should sanitize.
-            delete payload.webViewLink;
-            delete payload.isImportant;
+            // Merge with raw data to allow passing other valid snake_case props
+            const payload = { ...data, ...dbUpdates };
+
+            // Remove camelCase keys that cause "Column does not exist" errors
+            const keysToRemove = ['webViewLink', 'isImportant', 'startDate', 'endDate', 'driveFileId'];
+            keysToRemove.forEach(k => delete payload[k]);
 
             const { error } = await supabase.from('drive_reports').update(payload).eq('id', id);
-            if (error) throw error;
+
+            if (error) {
+                console.error("Error updating Drive Report:", error);
+                throw error;
+            }
+
+            // Update local state (optimistic)
             setDriveReports(prev => prev.map(r => r.id === id ? { ...r, ...data } : r));
         },
 
