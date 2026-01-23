@@ -87,6 +87,7 @@ export default function Knowledge({ isSelectorMode = false, onSelect = () => { }
         const newEntry = {
             title: file.name,
             url: file.webViewLink || '#',
+            drive_file_id: file.id,
             description: `Archivo subido a Google Drive. Tipo: ${file.mimeType || 'Archivo'}`,
             category: 'Resource',
             isPinned: false,
@@ -136,19 +137,24 @@ export default function Knowledge({ isSelectorMode = false, onSelect = () => { }
                 for (const file of driveFiles) {
                     if (!file.webViewLink) continue;
 
-                    const existingItem = knowledge.find(k => k.url === file.webViewLink);
+                    // Match by Drive ID (best) OR fall back to URL (legacy/transition)
+                    const existingItem = knowledge.find(k =>
+                        k.drive_file_id === file.id || (!k.drive_file_id && k.url === file.webViewLink)
+                    );
 
                     if (existingItem) {
-                        // Update existing item tags and category
+                        // Update existing item tags, category, and ensure drive_file_id is set
                         batchPromises.push(updateResource(existingItem.id, {
                             tags: file.tags || [],
-                            category: file.category || 'Drive'
+                            category: file.category || 'Drive',
+                            drive_file_id: file.id // Ensure ID is linked for future robust sync
                         }));
                     } else {
                         // Add new item
                         batchPromises.push(addResource({
                             title: file.name,
                             url: file.webViewLink,
+                            drive_file_id: file.id,
                             description: `Sincronizado desde Drive - Carpeta: ${file.category}`,
                             category: file.category || 'Drive',
                             tags: file.tags || [],

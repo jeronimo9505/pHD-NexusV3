@@ -38,6 +38,7 @@ export function useKnowledge() {
                 title: itemData.title,
                 content: itemData.description || itemData.content || '',
                 url: itemData.url || '',
+                drive_file_id: itemData.drive_file_id || null,
                 category: itemData.category || 'reference',
                 tags: itemData.tags || [],
                 is_pinned: itemData.is_pinned || false
@@ -58,6 +59,11 @@ export function useKnowledge() {
             if (dbUpdates.description !== undefined) {
                 dbUpdates.content = dbUpdates.description;
                 delete dbUpdates.description;
+            }
+
+            // Allow update of drive_file_id if passed
+            if (dbUpdates.drive_file_id !== undefined) {
+                // Should be fine as is since we spread updates, but explicit comment helps
             }
 
             const { error } = await supabase
