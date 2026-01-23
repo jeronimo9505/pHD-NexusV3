@@ -307,7 +307,7 @@ export const AppProvider = ({ children }) => {
         });
 
         return () => subscription.unsubscribe();
-    }, [loadUserData]);
+    }, []); // Run only once on mount to prevent auth signal abortion
 
     // Reload data when active group changes
     useEffect(() => {
