@@ -185,7 +185,8 @@ export const AppProvider = ({ children }) => {
                             task_links:drive_report_task_links(*),
                             views:drive_report_views(user_id, viewed_at)
                         `)
-                        .eq('group_id', currentGroupId),
+                        .eq('group_id', currentGroupId)
+                        .order('created_at', { ascending: false }),
                     supabase.from('announcements')
                         .select('*, author:profiles(full_name), comments:announcement_comments(*, author:profiles(full_name))')
                         .eq('group_id', currentGroupId)
@@ -208,8 +209,8 @@ export const AppProvider = ({ children }) => {
                 setKnowledge(knowledgeRes.data || []);
                 setAnnouncements(announcementsRes.data || []);
 
-                // Map drive_reports snake_case back to camelCase for UI if needed
                 const loadedDriveReports = (driveReportsRes.data || []).map(r => {
+                    console.log("🔍 Processing drive report:", r.id, r.title);
                     // Link tasks by IDs from task_links
                     const relatedTaskIds = (r.task_links || []).map(tl => tl.task_id);
                     const relatedTasks = allTasksList.filter(t => relatedTaskIds.includes(t.id));
@@ -250,7 +251,9 @@ export const AppProvider = ({ children }) => {
                         seen_by: seenByIds
                     };
                 });
+                console.log("📋 Raw driveReportsRes.data count:", driveReportsRes.data?.length);
                 console.log("📋 Setting driveReports, count:", loadedDriveReports.length);
+                console.log("📋 Report IDs:", loadedDriveReports.map(r => r.id));
                 setDriveReports(loadedDriveReports);
 
             } else {
@@ -447,6 +450,84 @@ export const AppProvider = ({ children }) => {
         }
     };
 
+    // Drive Reports Actions (Defined before value object to access loadUserData properly)
+    const addDriveReport = async (reportData) => {
+        const dbPayload = {
+            group_id: activeGroupId,
+            author_id: reportData.author_id,
+            author_name: reportData.author_name,
+            title: reportData.title,
+            name: reportData.title,
+            status: reportData.status,
+            type: reportData.type,
+            drive_file_id: reportData.drive_file_id || reportData.driveFileId,
+            web_view_link: reportData.webViewLink,
+            sections: reportData.sections,
+            submitted_at: reportData.submitted_at,
+            created_at: reportData.created_at || new Date().toISOString(),
+            is_important: reportData.isImportant || false,
+            start_date: reportData.startDate,
+            end_date: reportData.endDate,
+            icon_link: reportData.iconLink,
+            mime_type: reportData.mimeType
+        };
+
+        Object.keys(dbPayload).forEach(key => dbPayload[key] === undefined && delete dbPayload[key]);
+
+        const { data, error } = await supabase
+            .from('drive_reports')
+            .insert([dbPayload])
+            .select()
+            .single();
+
+        if (error) {
+            console.error("Error adding Drive Report:", error);
+            throw error;
+        }
+        await loadUserData(currentUser?.id);
+        return data;
+    };
+
+    const updateDriveReport = async (id, data) => {
+        const dbUpdates = {};
+        if (data.title !== undefined) dbUpdates.title = data.title;
+        if (data.status !== undefined) dbUpdates.status = data.status;
+        if (data.webViewLink !== undefined) dbUpdates.web_view_link = data.webViewLink;
+        if (data.sections !== undefined) dbUpdates.sections = data.sections;
+        if (data.drive_file_id !== undefined) dbUpdates.drive_file_id = data.drive_file_id;
+        if (data.isImportant !== undefined) dbUpdates.is_important = data.isImportant;
+        if (data.startDate !== undefined) dbUpdates.start_date = data.startDate;
+        if (data.endDate !== undefined) dbUpdates.end_date = data.endDate;
+
+        const payload = { ...data, ...dbUpdates };
+        const keysToRemove = ['webViewLink', 'isImportant', 'startDate', 'endDate', 'driveFileId'];
+        keysToRemove.forEach(k => delete payload[k]);
+
+        const { error } = await supabase.from('drive_reports').update(payload).eq('id', id);
+
+        if (error) {
+            console.error("Error updating Drive Report:", error);
+            throw error;
+        }
+
+        await loadUserData(currentUser?.id);
+    };
+
+    const deleteDriveReport = async (id) => {
+        console.log("🔥 deleteDriveReport called with id:", id);
+        console.log("👤 currentUser:", currentUser?.id);
+        
+        const { error } = await supabase.from('drive_reports').delete().eq('id', id);
+        if (error) {
+            console.error("❌ Supabase delete error:", error);
+            throw error;
+        }
+        
+        console.log("✅ Supabase delete successful, calling loadUserData...");
+        await loadUserData(currentUser?.id);
+        console.log("✅ loadUserData completed");
+    };
+
     const value = {
         // Auth
         isAuthenticated,
@@ -462,9 +543,8 @@ export const AppProvider = ({ children }) => {
 
         // Data State
         tasks, setTasks,
-        tasks, setTasks,
         reports, setReports,
-        driveReports, setDriveReports, // Export State
+        driveReports, setDriveReports,
         knowledge, setKnowledge,
         groupMembers,
         groups, setGroups,
@@ -486,93 +566,11 @@ export const AppProvider = ({ children }) => {
         activities, setActivities,
         addActivity,
         refreshUserData: () => loadUserData(currentUser?.id),
-        // updateGroupConfig deprecated - check updateGroupSettings
-        // updateGroupConfig: async (groupId, config) => { ... },
 
-        // Drive Reports Actions
-        addDriveReport: async (reportData) => {
-            // Map camelCase to snake_case for DB
-            const dbPayload = {
-                group_id: activeGroupId,
-                author_id: reportData.author_id,
-                author_name: reportData.author_name,
-                title: reportData.title, // Maps to title
-                name: reportData.title, // Also map to name for compatibility
-                status: reportData.status,
-                type: reportData.type,
-                drive_file_id: reportData.drive_file_id || reportData.driveFileId,
-                web_view_link: reportData.webViewLink, // Map camel to snake
-                sections: reportData.sections,
-                submitted_at: reportData.submitted_at,
-                created_at: reportData.created_at || new Date().toISOString(),
-                is_important: reportData.isImportant || false,
-                start_date: reportData.startDate,
-                end_date: reportData.endDate,
-                // Handle any other fields?
-                icon_link: reportData.iconLink,
-                mime_type: reportData.mimeType
-            };
-
-            // Remove undefined values to let DB defaults take over if needed, or just send
-            Object.keys(dbPayload).forEach(key => dbPayload[key] === undefined && delete dbPayload[key]);
-
-            const { data, error } = await supabase
-                .from('drive_reports')
-                .insert([dbPayload])
-                .select()
-                .single();
-
-            if (error) {
-                console.error("Error adding Drive Report:", error);
-                throw error;
-            }
-            await loadUserData(currentUser?.id);
-            return data;
-        },
-
-        updateDriveReport: async (id, data) => {
-            // Map keys
-            const dbUpdates = {};
-            if (data.title !== undefined) dbUpdates.title = data.title;
-            if (data.status !== undefined) dbUpdates.status = data.status;
-            if (data.webViewLink !== undefined) dbUpdates.web_view_link = data.webViewLink;
-            if (data.sections !== undefined) dbUpdates.sections = data.sections;
-            if (data.drive_file_id !== undefined) dbUpdates.drive_file_id = data.drive_file_id;
-            if (data.isImportant !== undefined) dbUpdates.is_important = data.isImportant;
-            if (data.startDate !== undefined) dbUpdates.start_date = data.startDate;
-            if (data.endDate !== undefined) dbUpdates.end_date = data.endDate;
-
-            // Merge with raw data to allow passing other valid snake_case props
-            const payload = { ...data, ...dbUpdates };
-
-            // Remove camelCase keys that cause "Column does not exist" errors
-            const keysToRemove = ['webViewLink', 'isImportant', 'startDate', 'endDate', 'driveFileId'];
-            keysToRemove.forEach(k => delete payload[k]);
-
-            const { error } = await supabase.from('drive_reports').update(payload).eq('id', id);
-
-            if (error) {
-                console.error("Error updating Drive Report:", error);
-                throw error;
-            }
-
-            await loadUserData(currentUser?.id);
-        },
-
-        deleteDriveReport: async (id) => {
-            console.log("🔥 deleteDriveReport called with id:", id);
-            console.log("👤 currentUser:", currentUser?.id);
-            
-            const { error } = await supabase.from('drive_reports').delete().eq('id', id);
-            if (error) {
-                console.error("❌ Supabase delete error:", error);
-                throw error;
-            }
-            
-            console.log("✅ Supabase delete successful, calling loadUserData...");
-            await loadUserData(currentUser?.id);
-            console.log("✅ loadUserData completed");
-        },
+        // Drive Reports Actions (reference functions defined above)
+        addDriveReport,
+        updateDriveReport,
+        deleteDriveReport,
 
         updateGroupSettings: async (groupId, settings) => {
             console.log(`[AppContext] updateGroupSettings START for group ${groupId}`, settings);
