@@ -343,10 +343,10 @@ export default function DriveReportsModule() {
         if (!window.confirm(`¿Estás seguro de eliminar el reporte "${report.title}"? Esta acción no se puede deshacer.`)) return;
 
         try {
-            // Actually I should pull it from main hook usage
-            // Wait, I need to add it to the top level destructure first
+            await deleteDriveReport(report.id);
         } catch (e) {
-            console.error(e);
+            console.error("Error al eliminar reporte:", e);
+            alert("Error al eliminar: " + e.message);
         }
     };
 
