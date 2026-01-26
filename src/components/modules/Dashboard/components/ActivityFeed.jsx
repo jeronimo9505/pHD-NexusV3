@@ -4,12 +4,11 @@ import { History, MessageSquare, CheckSquare, FileText, CheckCircle2, User, File
 import { useApp } from '@/context/AppContext';
 import { formatDateShort, getDaysSince, formatTime, getWeekLabel } from '@/utils/helpers';
 import { supabase } from '@/lib/supabase';
-import { MOCK_USERS } from '@/data/mockUsers';
 import clsx from 'clsx';
 
 export default function ActivityFeed() {
     const router = useRouter();
-    const { setActiveModule, setSelectedReportId, setSelectedTaskId, activeGroupId, userProfile } = useApp();
+    const { setActiveModule, setSelectedReportId, setSelectedTaskId, activeGroupId, userProfile, groupMembers } = useApp();
     const [activities, setActivities] = useState([]);
     const [loading, setLoading] = useState(false);
 
@@ -33,7 +32,7 @@ export default function ActivityFeed() {
                 let acts = [];
 
                 (reports || []).forEach(r => {
-                    const author = MOCK_USERS.find(u => u.id === r.author_id);
+                    const author = groupMembers?.find(u => u.user_id === r.author_id || u.id === r.author_id);
                     const isMe = r.author_id === userProfile.id;
                     const date = r.created_at || r.date;
 
@@ -52,7 +51,7 @@ export default function ActivityFeed() {
                     const report = reports.find(r => r.id === v.report_id);
                     if (!report) return;
 
-                    const author = MOCK_USERS.find(u => u.id === v.user_id);
+                    const author = groupMembers?.find(u => u.user_id === v.user_id || u.id === v.user_id);
                     const isMe = v.user_id === userProfile.id;
 
                     if (isMe) return;
@@ -69,7 +68,7 @@ export default function ActivityFeed() {
                 });
 
                 groupComments.forEach(c => {
-                    const author = MOCK_USERS.find(u => u.id === c.user_id);
+                    const author = groupMembers?.find(u => u.user_id === c.user_id || u.id === c.user_id);
                     const isMe = c.user_id === userProfile.id;
                     const report = reports.find(r => r.id === c.report_id);
                     const snippet = c.content?.length > 30 ? c.content.substring(0, 30) + '...' : c.content;
@@ -99,7 +98,7 @@ export default function ActivityFeed() {
                             link: { module: 'tasks', id: t.id, label: 'Ver Tarea' }
                         });
                     } else {
-                        const creator = MOCK_USERS.find(u => u.id === t.created_by);
+                        const creator = groupMembers?.find(u => u.user_id === t.created_by || u.id === t.created_by);
                         const amAssigned = allAssignees?.some(a => a.task_id === t.id && a.user_id === userProfile.id);
 
                         if (amAssigned) {
@@ -127,7 +126,7 @@ export default function ActivityFeed() {
         };
 
         fetchActivity();
-    }, [activeGroupId, userProfile]);
+    }, [activeGroupId, userProfile, groupMembers]);
 
     const handleNavigate = (link) => {
         if (!link) return;
