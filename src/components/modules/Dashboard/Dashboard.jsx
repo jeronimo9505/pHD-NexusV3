@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { LayoutDashboard, CheckCircle2, AlertCircle, Clock, Calendar, ChevronRight, User, ArrowUpRight, Plus, CheckSquare, FileText } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { useTasks } from '../Tasks/hooks/useTasks';
+import { useDriveReports } from '../DriveReports/hooks/useDriveReports';
 import { formatDateShort, getDaysSince, formatTime, getWeekLabel } from '@/utils/helpers';
 import clsx from 'clsx';
 import ActivityFeed from './components/ActivityFeed';
@@ -25,15 +26,13 @@ export default function Dashboard() {
         activeGroupId,
         activeGroupName,
         groupMembers,
-        driveReports,
-        updateDriveReport,
-        deleteDriveReport,
-        markDriveReportSeen,
         setSelectedReportId,
         selectedTaskId,
         setSelectedTaskId,
         currentUser
     } = useApp();
+
+    const { driveReports, deleteDriveReport, updateDriveReport, markAsSeen } = useDriveReports();
 
     const [isLoadingReports, setIsLoadingReports] = useState(true); // Maybe not needed if driveReports comes from context
 

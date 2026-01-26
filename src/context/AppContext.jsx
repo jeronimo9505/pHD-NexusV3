@@ -12,11 +12,12 @@ export const AppProvider = ({ children }) => {
     // -------------------------------------------------------------------------
     // 1. STATE DEFINITIONS
     // -------------------------------------------------------------------------
-    const [tasks, setTasks] = useState([]);
-    const [knowledge, setKnowledge] = useState([]);
+    // Legacy state removed - now managed by Zustand stores:
+    // - tasks -> useTasksStore
+    // - knowledge -> useKnowledgeStore  
+    // - reports -> useReportsStore
+    // - driveReports -> useDriveReportsStore
     const [groupMembers, setGroupMembers] = useState([]);
-    const [reports, setReports] = useState([]);
-    const [driveReports, setDriveReports] = useState([]); // NEW: Drive Reports State
     const [groups, setGroups] = useState([]);
 
     const [activities, setActivities] = useState([]);
@@ -100,9 +101,6 @@ export const AppProvider = ({ children }) => {
             if (memError) {
                 console.error("Error loading memberships:", memError);
                 setGroups([]);
-                setTasks([]);
-                setReports([]);
-                setKnowledge([]);
                 setGroupMembers([]);
                 return;
             }
@@ -145,48 +143,9 @@ export const AppProvider = ({ children }) => {
                 const role = membership?.role || 'student';
                 setUserRole(role);
 
-                // 4. Load Group Data from Supabase
-                const [tasksRes, reportsRes, knowledgeRes, membersRes, driveReportsRes, announcementsRes] = await Promise.all([
-                    supabase.from('tasks')
-                        .select(`
-                            *,
-                            assignees:task_assignees(*),
-                            comments:task_comments(*),
-                            report_limits:report_task_links(*),
-                            drive_links:drive_report_task_links(*)
-                        `)
-                        .eq('group_id', currentGroupId),
-                    supabase.from('reports')
-                        .select(`
-                            *,
-                            author:profiles!reports_author_id_fkey(full_name),
-                            reviewer:profiles!reports_reviewed_by_fkey(full_name),
-                            views:report_views(user_id, seen_at),
-                            sections:report_sections(key, content)
-                        `)
-                        .eq('group_id', currentGroupId),
-                    supabase.from('knowledge_items')
-                        .select(`
-                            *,
-                            comments:knowledge_comments(
-                                id,
-                                text,
-                                created_at,
-                                author:profiles(full_name)
-                            )
-                        `)
-                        .eq('group_id', currentGroupId)
-                        .order('created_at', { ascending: false }),
+                // 4. Load Group Members (only - other data managed by Zustand stores)
+                const [membersRes, announcementsRes] = await Promise.all([
                     supabase.from('group_members').select('*, profiles(*)').eq('group_id', currentGroupId),
-                    supabase.from('drive_reports')
-                        .select(`
-                            *,
-                            comments:drive_report_comments(*, author:profiles(full_name)),
-                            task_links:drive_report_task_links(*),
-                            views:drive_report_views(user_id, viewed_at)
-                        `)
-                        .eq('group_id', currentGroupId)
-                        .order('created_at', { ascending: false }),
                     supabase.from('announcements')
                         .select('*, author:profiles(full_name), comments:announcement_comments(*, author:profiles(full_name))')
                         .eq('group_id', currentGroupId)
@@ -202,64 +161,13 @@ export const AppProvider = ({ children }) => {
                     user_id: m.profiles?.id // Explicit user_id for easier searching
                 }));
                 setGroupMembers(members);
-
-                const allTasksList = tasksRes.data || [];
-                setTasks(allTasksList);
-                setReports(reportsRes.data || []);
-                setKnowledge(knowledgeRes.data || []);
                 setAnnouncements(announcementsRes.data || []);
 
-                const loadedDriveReports = (driveReportsRes.data || []).map(r => {
-                    console.log("🔍 Processing drive report:", r.id, r.title);
-                    // Link tasks by IDs from task_links
-                    const relatedTaskIds = (r.task_links || []).map(tl => tl.task_id);
-                    const relatedTasks = allTasksList.filter(t => relatedTaskIds.includes(t.id));
-
-                    // Map seen_by from views table now
-                    // We want { name, date } objects
-                    const seenDetails = (r.views || []).map(v => {
-                        const member = members.find(m => m.user_id === v.user_id || m.id === v.user_id);
-                        return {
-                            id: v.user_id,
-                            name: member?.full_name || 'Usuario',
-                            date: v.viewed_at
-                        };
-                    });
-
-                    // For backward compatibility (or simplicity in some UI parts), 
-                    // we can keep seenByNames as string array, but it's better to pass full object
-                    const seenByNames = seenDetails.map(d => d.name);
-                    const seenByIds = seenDetails.map(d => d.id);
-
-                    return {
-                        ...r,
-                        webViewLink: r.web_view_link,
-                        driveFileId: r.drive_file_id,
-                        isImportant: r.is_important,
-                        startDate: r.start_date,
-                        endDate: r.end_date,
-                        authorName: r.author_name,
-                        // Ensure comments and tasks are available for UI
-                        comments: (r.comments || []).map(c => ({
-                            ...c,
-                            content: c.body, // Aliasing body to content as UI expects it
-                            user_name: c.author?.full_name || 'Usuario'
-                        })),
-                        tasks: relatedTasks,
-                        seenByNames,
-                        seenDetails,
-                        seen_by: seenByIds
-                    };
-                });
-                console.log("📋 Raw driveReportsRes.data count:", driveReportsRes.data?.length);
-                console.log("📋 Setting driveReports, count:", loadedDriveReports.length);
-                console.log("📋 Report IDs:", loadedDriveReports.map(r => r.id));
-                setDriveReports(loadedDriveReports);
+                // NOTE: reports, tasks, knowledge, driveReports are now loaded by Zustand stores
+                // They auto-fetch when activeGroupId changes via their respective hooks
 
             } else {
                 setUserRole('student');
-                setTasks([]);
-                setReports([]);
                 setKnowledge([]);
                 setGroupMembers([]);
             }
@@ -541,11 +449,7 @@ export const AppProvider = ({ children }) => {
         realUser: currentUser,
         loading,
 
-        // Data State
-        tasks, setTasks,
-        reports, setReports,
-        driveReports, setDriveReports,
-        knowledge, setKnowledge,
+        // Data State (Groups & Members only - other data in Zustand stores)
         groupMembers,
         groups, setGroups,
         activeGroupId, setActiveGroupId,
@@ -557,7 +461,7 @@ export const AppProvider = ({ children }) => {
         selectedReportId, setSelectedReportId,
         selectedTaskId, setSelectedTaskId,
         isEditingReport, setIsEditingReport,
-        isSidebarOpen, setIsSidebarOpen, // Added
+        isSidebarOpen, setIsSidebarOpen,
         availableSupervisors,
 
         // Helpers
@@ -567,11 +471,7 @@ export const AppProvider = ({ children }) => {
         addActivity,
         refreshUserData: () => loadUserData(currentUser?.id),
 
-        // Drive Reports Actions (reference functions defined above)
-        addDriveReport,
-        updateDriveReport,
-        deleteDriveReport,
-
+        // Group Settings
         updateGroupSettings: async (groupId, settings) => {
             console.log(`[AppContext] updateGroupSettings START for group ${groupId}`, settings);
 
@@ -618,44 +518,6 @@ export const AppProvider = ({ children }) => {
                 alert("Error crítico al guardar configuración: " + err.message);
                 throw err;
             }
-        },
-
-        markDriveReportSeen: async (reportId) => {
-            if (!currentUser) return;
-
-            // Upsert into drive_report_views to track time
-            // We use upsert so if it exists, it just updates timestamp (or does nothing if we want first view)
-            // User probably wants "last viewed" or just "viewed". Let's update timestamp.
-            const { error } = await supabase.from('drive_report_views').upsert({
-                drive_report_id: reportId,
-                user_id: currentUser.id,
-                viewed_at: new Date().toISOString()
-            }, { onConflict: 'drive_report_id, user_id' });
-
-            if (error) {
-                console.error("Error marking seen:", error);
-                return;
-            }
-
-            // Also update the legacy array for backward compatibility if needed, 
-            // OR just trigger a reload which will fetch from the new table.
-            // Let's just reload.
-            await loadUserData(currentUser?.id);
-        },
-
-        addDriveReportComment: async (reportId, text) => {
-            if (!currentUser || !text) return;
-            const { error } = await supabase.from('drive_report_comments').insert({
-                drive_report_id: reportId,
-                author_id: currentUser.id,
-                body: text
-            });
-            if (error) {
-                console.error("Error adding drive report comment:", error);
-                alert("Error al añadir comentario: " + error.message);
-                return;
-            }
-            await loadUserData(currentUser?.id);
         },
 
         // Announcements
