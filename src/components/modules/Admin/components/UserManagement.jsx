@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase/client';
 import { Search, CheckCircle2, XCircle, MoreVertical, Shield, Clock, AlertCircle, Plus, Mail } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import clsx from 'clsx';

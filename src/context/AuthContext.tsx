@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { createClient } from '@/utils/supabase/client';
+import { supabase } from '@/lib/supabase/client'; // Use singleton client
 import { useRouter } from 'next/navigation';
 
 const AuthContext = createContext(null);
@@ -12,9 +12,9 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [permissions, setPermissions] = useState(new Set());
     const [roles, setRoles] = useState([]);
-    const [activeGroupId, setActiveGroupId] = useState(null); // Managed here or AppContext?
+    // REMOVED: activeGroupId (now managed only in AppContext)
     const router = useRouter();
-    const supabase = createClient();
+    // REMOVED: const supabase = createClient(); (was creating new instance every render!)
 
     // 1. Initialize Session
     useEffect(() => {
@@ -54,7 +54,7 @@ export const AuthProvider = ({ children }) => {
     const loadPermissions = useCallback(async (groupId) => {
         if (!user || !groupId) return;
 
-        setActiveGroupId(groupId);
+        // NOTE: activeGroupId is now managed in AppContext, not here
 
         // Fetch Role in Group
         const { data: membership, error: memError } = await supabase
@@ -146,29 +146,53 @@ export const AuthProvider = ({ children }) => {
         return false;
     }, [permissions, roles]);
 
-    const value = {
-        user,
-        session,
-        loading,
-        permissions,
-        roles,
-        loadPermissions,
-        activeGroupId,
-        can,
-        hasRole, // Added hierarchy check
-        signOut: async () => {
-            await supabase.auth.signOut();
-            router.push('/login');
-        }
+    const signIn = async (email, password) => {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        return data;
+    };
+
+    const signUp = async (email, password) => {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        return data;
+    };
+
+    const resetPassword = async (email) => {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: `${window.location.origin}/update-password`,
+        });
+        if (error) throw error;
     };
 
     return (
-        <AuthContext.Provider value={value}>
+        <AuthContext.Provider value={{
+            user,
+            session,
+            loading,
+            permissions,
+            roles,
+            // activeGroupId removed - now managed in AppContext
+            loadPermissions,
+            hasRole,
+            can,
+            signIn,
+            signOut: async () => {
+                await supabase.auth.signOut();
+                router.push('/login');
+            },
+            signUp,
+            resetPassword
+        }}>
             {!loading && children}
         </AuthContext.Provider>
     );
 };
 
 export const useAuth = () => {
-    return useContext(AuthContext);
+    const context = useContext(AuthContext);
+    if (!context) {
+        throw new Error('useAuth must be used within AuthProvider');
+    }
+    return context;
 };

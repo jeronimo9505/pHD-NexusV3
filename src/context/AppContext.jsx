@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '@/lib/supabase/client';
 // import { mockDB } from '../lib/mockDatabase';
 // import { MOCK_USERS } from '../data/mockUsers';
 // import { MOCK_GROUPS, MOCK_GROUP_MEMBERS, getGroupsByUserId, getUserRoleInGroup } from '../data/mockGroups';
@@ -516,13 +516,13 @@ export const AppProvider = ({ children }) => {
     const deleteDriveReport = async (id) => {
         console.log("🔥 deleteDriveReport called with id:", id);
         console.log("👤 currentUser:", currentUser?.id);
-        
+
         const { error } = await supabase.from('drive_reports').delete().eq('id', id);
         if (error) {
             console.error("❌ Supabase delete error:", error);
             throw error;
         }
-        
+
         console.log("✅ Supabase delete successful, calling loadUserData...");
         await loadUserData(currentUser?.id);
         console.log("✅ loadUserData completed");

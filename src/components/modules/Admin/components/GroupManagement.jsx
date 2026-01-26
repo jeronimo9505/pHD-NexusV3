@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase/client';
 import { Box, Plus, Users, Trash2, Edit2, Shield, UserPlus } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 
