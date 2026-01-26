@@ -8,9 +8,11 @@ import { Loader2 } from 'lucide-react';
 import ReportEditor from './components/ReportEditor';
 import { useApp } from '@/context/AppContext';
 import { useTasks } from '../Tasks/hooks/useTasks';
+import { useDriveReports } from './hooks/useDriveReports';
 
 export default function DriveReportsModule() {
-    const { activeGroup, userRole, updateGroupSettings, deleteDriveReport, updateDriveReport, addDriveReport, currentUser, selectedReportId, setSelectedReportId, driveReports } = useApp();
+    const { activeGroup, userRole, updateGroupSettings, currentUser, selectedReportId, setSelectedReportId } = useApp();
+    const { driveReports, deleteDriveReport, updateDriveReport, createDriveReport, markAsSeen } = useDriveReports();
     const { tasks: allTasks } = useTasks();
     const [view, setView] = useState('library'); // library, detail, settings
     const [selectedReport, setSelectedReport] = useState(null);
