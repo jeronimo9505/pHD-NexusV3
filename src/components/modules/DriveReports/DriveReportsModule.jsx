@@ -436,10 +436,17 @@ export default function DriveReportsModule() {
                 onUploadPPT={handleUploadPPT} // Pass this handler
                 onOpenSettings={canConfigure ? () => setView('settings') : null}
                 onDeleteReport={async (report) => {
-                    if (!window.confirm(`¿Estás seguro de eliminar el reporte "${report.title}"?`)) return;
+                    console.log("🗑️ DELETE CLICKED for report:", report.id, report.title);
+                    if (!window.confirm(`¿Estás seguro de eliminar el reporte "${report.title}"?`)) {
+                        console.log("❌ Delete cancelled by user");
+                        return;
+                    }
                     try {
+                        console.log("🚀 Calling deleteDriveReport...");
                         await deleteDriveReport(report.id);
+                        console.log("✅ Delete successful!");
                     } catch (e) {
+                        console.error("❌ Delete error:", e);
                         alert("Error al eliminar: " + e.message);
                     }
                 }}
