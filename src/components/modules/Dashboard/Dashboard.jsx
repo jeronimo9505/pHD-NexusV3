@@ -25,7 +25,6 @@ export default function Dashboard() {
         activeGroupId,
         activeGroupName,
         groupMembers,
-        tasks,
         driveReports,
         updateDriveReport,
         deleteDriveReport,
@@ -33,7 +32,6 @@ export default function Dashboard() {
         setSelectedReportId,
         selectedTaskId,
         setSelectedTaskId,
-        refreshUserData,
         currentUser
     } = useApp();
 
@@ -43,7 +41,15 @@ export default function Dashboard() {
     const [activeCommentReport, setActiveCommentReport] = useState(null);
     const [activeTaskReport, setActiveTaskReport] = useState(null);
 
-    const { fetchTasks, loading: loadingTasks, createTask, updateTask, deleteTask, addComment: addTaskComment } = useTasks();
+    const {
+        tasks,
+        fetchTasks,
+        loading: loadingTasks,
+        createTask,
+        updateTask,
+        deleteTask,
+        addComment: addTaskComment
+    } = useTasks();
 
     // Task Sidebar Logic
     const selectedTask = tasks.find(t => t.id === selectedTaskId);
@@ -68,13 +74,11 @@ export default function Dashboard() {
             }
         }
         await updateTask(taskId, updates);
-        await refreshUserData(); // Sync global state
     };
 
     const handleTaskDelete = async (taskId) => {
         if (selectedTaskId === taskId) setSelectedTaskId(null);
         await deleteTask(taskId);
-        await refreshUserData(); // Sync global state
     };
 
     const handleAddTaskComment = async (taskId, text) => {
@@ -135,7 +139,6 @@ export default function Dashboard() {
         }
 
         if (createdTask) {
-            await refreshUserData(); // Sync global state
             setSelectedTaskId(createdTask.id);
             // Redirection removed to stay in dashboard
         }

@@ -3,7 +3,7 @@ import { useRouter } from 'next/navigation';
 import { History, MessageSquare, CheckSquare, FileText, CheckCircle2, User, FileUp, Eye, MessageCircle } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatDateShort, getDaysSince, formatTime, getWeekLabel } from '@/utils/helpers';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase/client';
 import clsx from 'clsx';
 
 export default function ActivityFeed() {

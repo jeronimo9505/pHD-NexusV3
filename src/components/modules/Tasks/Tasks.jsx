@@ -17,16 +17,25 @@ export default function Tasks() {
     const {
         reports, driveReports, setActiveModule, setSelectedReportId,
         userRole, userProfile, addActivity, currentUser,
-        activeGroupId, activeGroup, refreshUserData, groupMembers,
         selectedTaskId, setSelectedTaskId
     } = useApp();
+    const { activeGroupId, activeGroup, groupMembers } = useApp();
 
-    React.useEffect(() => {
-        refreshUserData();
-    }, []);
+    const {
+        tasks,
+        loading,
+        createTask,
+        updateTask,
+        deleteTask,
+        addComment,
+        fetchTasks
+    } = useTasks();
 
+    useEffect(() => {
+        // Initial fetch handled by hook, but we can force it if needed
+        // fetchTasks();
+    }, [activeGroupId]);
 
-    const { tasks, createTask, updateTask, deleteTask, addComment: addTaskComment } = useTasks();
 
     const [currentComment, setCurrentComment] = useState('');
     const [sortCriteria, setSortCriteria] = useState('newest');

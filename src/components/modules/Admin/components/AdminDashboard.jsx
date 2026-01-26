@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Users, UserPlus, Box, Component } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase/client';
 
 export default function AdminDashboard({ setActiveTab }) {
     const [stats, setStats] = useState({
