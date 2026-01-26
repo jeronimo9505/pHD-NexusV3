@@ -83,7 +83,11 @@ export const AppProvider = ({ children }) => {
     };
 
     const loadUserData = React.useCallback(async (userId) => {
-        if (!userId) return;
+        console.log("📊 loadUserData called with userId:", userId);
+        if (!userId) {
+            console.warn("⚠️ loadUserData: No userId provided!");
+            return;
+        }
 
         try {
             // 1. Get User Groups from Supabase
@@ -246,6 +250,7 @@ export const AppProvider = ({ children }) => {
                         seen_by: seenByIds
                     };
                 });
+                console.log("📋 Setting driveReports, count:", loadedDriveReports.length);
                 setDriveReports(loadedDriveReports);
 
             } else {
@@ -555,9 +560,18 @@ export const AppProvider = ({ children }) => {
         },
 
         deleteDriveReport: async (id) => {
+            console.log("🔥 deleteDriveReport called with id:", id);
+            console.log("👤 currentUser:", currentUser?.id);
+            
             const { error } = await supabase.from('drive_reports').delete().eq('id', id);
-            if (error) throw error;
+            if (error) {
+                console.error("❌ Supabase delete error:", error);
+                throw error;
+            }
+            
+            console.log("✅ Supabase delete successful, calling loadUserData...");
             await loadUserData(currentUser?.id);
+            console.log("✅ loadUserData completed");
         },
 
         updateGroupSettings: async (groupId, settings) => {
