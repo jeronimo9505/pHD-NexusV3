@@ -521,7 +521,7 @@ export const AppProvider = ({ children }) => {
                 console.error("Error adding Drive Report:", error);
                 throw error;
             }
-            setDriveReports(prev => [data, ...prev]);
+            await loadUserData(currentUser?.id);
             return data;
         },
 
@@ -551,14 +551,13 @@ export const AppProvider = ({ children }) => {
                 throw error;
             }
 
-            // Update local state (optimistic)
-            setDriveReports(prev => prev.map(r => r.id === id ? { ...r, ...data } : r));
+            await loadUserData(currentUser?.id);
         },
 
         deleteDriveReport: async (id) => {
             const { error } = await supabase.from('drive_reports').delete().eq('id', id);
             if (error) throw error;
-            setDriveReports(prev => prev.filter(r => r.id !== id));
+            await loadUserData(currentUser?.id);
         },
 
         updateGroupSettings: async (groupId, settings) => {
@@ -629,7 +628,7 @@ export const AppProvider = ({ children }) => {
             // Also update the legacy array for backward compatibility if needed, 
             // OR just trigger a reload which will fetch from the new table.
             // Let's just reload.
-            await loadUserData(currentUser.id);
+            await loadUserData(currentUser?.id);
         },
 
         addDriveReportComment: async (reportId, text) => {
@@ -644,7 +643,7 @@ export const AppProvider = ({ children }) => {
                 alert("Error al añadir comentario: " + error.message);
                 return;
             }
-            await loadUserData(currentUser.id);
+            await loadUserData(currentUser?.id);
         },
 
         // Announcements
@@ -660,7 +659,7 @@ export const AppProvider = ({ children }) => {
                 console.error("Error adding announcement:", error);
                 return { error };
             }
-            await loadUserData(currentUser.id);
+            await loadUserData(currentUser?.id);
             return { success: true };
         },
         deleteAnnouncement: async (id) => {
@@ -669,7 +668,7 @@ export const AppProvider = ({ children }) => {
                 console.error("Error deleting announcement:", error);
                 return { error };
             }
-            await loadUserData(currentUser.id);
+            await loadUserData(currentUser?.id);
             return { success: true };
         },
         addAnnouncementComment: async (announcementId, text) => {
@@ -683,7 +682,7 @@ export const AppProvider = ({ children }) => {
                 console.error("Error adding announcement comment:", error);
                 return { error };
             }
-            await loadUserData(currentUser.id);
+            await loadUserData(currentUser?.id);
             return { success: true };
         },
 

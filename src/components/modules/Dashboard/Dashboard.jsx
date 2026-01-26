@@ -8,7 +8,6 @@ import { useTasks } from '../Tasks/hooks/useTasks';
 import { formatDateShort, getDaysSince, formatTime, getWeekLabel } from '@/utils/helpers';
 import clsx from 'clsx';
 import ActivityFeed from './components/ActivityFeed';
-import { MOCK_USERS } from '@/data/mockUsers';
 import DriveReportCard from '../DriveReports/components/DriveReportCard';
 import { AnimatePresence, motion } from 'framer-motion';
 import TaskDetailPanel from '../Tasks/components/TaskDetailPanel';
