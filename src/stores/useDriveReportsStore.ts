@@ -149,18 +149,50 @@ export const useDriveReportsStore = create<DriveReportsState>()(
         deleteDriveReport: async (id: string) => {
             const previousReports = get().driveReports;
 
-            // Optimistic update - remove immediately
+            // DIAGNOSTIC START
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                const { data: record } = await supabase.from('drive_reports').select('author_id, title').eq('id', id).single();
+
+                console.log("🛑 DELETION DIAGNOSTIC: 🛑");
+                console.log("   - Report ID:", id);
+                console.log("   - Report Title:", record?.title);
+                console.log("   - Report Author ID:", record?.author_id);
+                console.log("   - Current User ID :", user?.id);
+
+                if (record?.author_id && user?.id && record.author_id !== user.id) {
+                    console.error("❌ MISMATCH DETECTED: You are trying to delete a report you don't own.");
+                    console.error("   Policy 'auth.uid() = author_id' will BLOCK this.");
+                } else if (!record) {
+                    console.error("❌ RECORD NOT FOUND: The ID doesn't exist in DB (already deleted?)");
+                } else {
+                    console.log("✅ IDS MATCH: You own this report. RLS *should* allow delete.");
+                }
+            } catch (e) {
+                console.error("Diagnostic failed", e);
+            }
+            // DIAGNOSTIC END
+
             set((state) => {
                 state.driveReports = state.driveReports.filter(r => r.id !== id);
             });
 
             try {
-                const { error } = await supabase
+                const { error, count } = await supabase
                     .from('drive_reports')
-                    .delete()
+                    .delete({ count: 'exact' }) // Request count
                     .eq('id', id);
 
                 if (error) throw error;
+
+                // If count is 0, it silently failed (RLS blocked it or not found)
+                if (count === 0) {
+                    console.error("❌ SUPABASE DELETED 0 ROWS. RLS Policy likely blocked it.");
+                    alert("No se pudo eliminar: No tienes permisos o el reporte no existe.");
+                    // Rollback manually since no error thrown
+                    set({ driveReports: previousReports });
+                    return { error: "Deletion blocked by RLS" };
+                }
 
                 console.log('✅ Drive report deleted successfully');
                 return { error: undefined };
