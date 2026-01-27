@@ -47,7 +47,7 @@ export const AppProvider = ({ children }) => {
 
     // Derived State
     const activeGroup = groups.find(g => g.id === activeGroupId) || null;
-    const availableSupervisors = groupMembers.filter(m =>
+    const availableSupervisors = (groupMembers || []).filter(m =>
         m.role === 'supervisor' || m.role === 'labmanager'
     );
 
