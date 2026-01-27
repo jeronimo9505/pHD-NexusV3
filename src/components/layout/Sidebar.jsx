@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '@/context/AuthContext';
+import { useTasks } from '../modules/Tasks/hooks/useTasks';
 import { getWeekLabel, formatDateShort } from '../../utils/helpers';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -44,12 +45,13 @@ const NavButton = ({ href, active, icon, label, badge, onClick }) => {
 export default function Sidebar() {
     const router = useRouter();
     const {
-        tasks, reports,
         activeSupervisorId, setActiveSupervisorId, availableSupervisors,
         groups, activeGroupId, setActiveGroupId,
         hasRole, setSelectedReportId, setIsEditingReport,
         userProfile, userRole // Added these
     } = useApp();
+
+    const { tasks } = useTasks();
 
     // Use AuthContext for user info to be secure, but rely on AppContext for Permission Checks in Mixed Mode
     const { user, roles, can, signOut } = useAuth();
@@ -111,7 +113,7 @@ export default function Sidebar() {
                     onClick={handleReportsClick}
                 /> */}
 
-                <NavButton href="/tasks" active={isActive('/tasks')} icon={<CheckSquare className="w-4 h-4" />} label="Gestor de Tareas" badge={tasks.filter(t => t.status !== 'done' && t.groupId === activeGroupId).length} />
+                <NavButton href="/tasks" active={isActive('/tasks')} icon={<CheckSquare className="w-4 h-4" />} label="Gestor de Tareas" badge={(tasks || []).filter(t => t.status !== 'done' && t.groupId === activeGroupId).length} />
                 <NavButton href="/drive-reports" active={isActive('/drive-reports')} icon={<FileText className="w-4 h-4 text-indigo-500" />} label="Reportes Drive" />
                 <NavButton href="/knowledge" active={isActive('/knowledge')} icon={<Library className="w-4 h-4" />} label="Libro de Conocimiento" />
                 <NavButton href="/drive" active={isActive('/drive') && !isActive('/drive-reports')} icon={<div className="w-4 h-4 flex items-center justify-center font-bold text-[10px] border border-current rounded-sm">G</div>} label="Google Drive" />
