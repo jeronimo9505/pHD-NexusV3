@@ -211,7 +211,7 @@ export default function Tasks() {
         });
     };
 
-    const sortedAllTasks = getSortedTasks(tasks.filter(t => t.groupId === activeGroupId));
+    const sortedAllTasks = getSortedTasks(tasks.filter(t => t.group_id === activeGroupId));
     const activeTasks = sortedAllTasks.filter(t => t.status !== 'done');
     const completedTasks = sortedAllTasks.filter(t => t.status === 'done');
 
@@ -358,7 +358,7 @@ export default function Tasks() {
                             potentialAssignees={potentialAssignees}
                             onClose={() => setSelectedTaskId(null)}
                             onUpdate={handleTaskUpdate}
-                            onAddComment={addTaskComment}
+                            onAddComment={addComment}
                             reports={reports}
                             driveReports={driveReports}
                         />
