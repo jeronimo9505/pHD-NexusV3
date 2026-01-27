@@ -12,11 +12,15 @@ import { useApp } from '@/context/AppContext';
 import { formatDateShort, getMonthLabel } from '@/utils/helpers';
 import clsx from 'clsx';
 import { useTasks } from '../../Tasks/hooks/useTasks';
+import { useDriveReports } from '../hooks/useDriveReports';
+import { useReports } from '../../Reports/hooks/useReports';
 import TaskDetailPanel from '../../Tasks/components/TaskDetailPanel';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSettings, onDeleteReport, onUploadPPT, highlightedReportId }) {
-    const { driveReports, loading, currentUser, markDriveReportSeen, addDriveReportComment, groupMembers, reports, userProfile } = useApp();
+    const { currentUser, groupMembers, userProfile } = useApp();
+    const { driveReports, loading, markAsSeen, addComment: addDriveReportComment } = useDriveReports(); // CORRECT HOOK
+    const { reports } = useReports(); // CORRECT HOOK
     const { createTask, updateTask, deleteTask, addComment: addTaskComment, tasks: allTasks } = useTasks();
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -166,7 +170,7 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
     const handleCommentSubmit = async (e) => {
         e.preventDefault();
         if (!newCommentText.trim() || !activeCommentReport) return;
-        await addDriveReportComment(activeCommentReport.id, newCommentText);
+        await addDriveReportComment(activeCommentReport.id, newCommentText, currentUser.id); // Assuming hook method signature
         setNewCommentText('');
         // Optimistic update of local comments list for the active report
         const newComment = {
@@ -451,7 +455,7 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
                                                 // Highlighting props
                                                 isHighlighted={highlightedReportId === report.id}
                                                 domId={`report-card-${report.id}`}
-                                                onMarkSeen={(r) => markDriveReportSeen && markDriveReportSeen(r.id)}
+                                                onMarkSeen={(r) => markAsSeen && markAsSeen(r.id)}
                                                 onDelete={onDeleteReport ? ((r) => onDeleteReport(r)) : undefined}
                                                 onComment={setActiveCommentReport}
                                                 onCreateTask={(r) => handleQuickAddTask({ stopPropagation: () => { } }, r.id)}
