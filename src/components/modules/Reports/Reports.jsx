@@ -23,8 +23,6 @@ import { useKnowledge } from '@/components/modules/Knowledge/hooks/useKnowledge'
 export default function Reports() {
     const {
         userRole, userProfile,
-        knowledge, setKnowledge,
-        tasks, setTasks,
         addActivity, currentUser,
         activeGroupId,
         selectedReportId, setSelectedReportId, // Use GLOBAL state
