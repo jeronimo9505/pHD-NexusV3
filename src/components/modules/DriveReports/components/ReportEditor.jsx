@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Target, FlaskConical, Lightbulb, AlertTriangle, FileText, ArrowRight, X, Plus, Link as LinkIcon, CheckCircle2, Circle } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
+import { useDriveReports } from '../hooks/useDriveReports';
+import { useReports } from '../../Reports/hooks/useReports';
 import { googleDriveService } from '@/components/modules/Drive/services/googleDriveService';
 import DateRangePicker from '@/components/common/DateRangePicker';
 import Knowledge from '../../Knowledge/Knowledge';
@@ -25,7 +27,9 @@ const SectionCard = ({ title, icon: Icon, colorClass, children, className = "" }
 );
 
 export default function ReportEditor({ report, onCancel, onGenerateSuccess }) {
-    const { addDriveReport, updateDriveReport, currentUser, activeGroup, groupMembers, userProfile, reports } = useApp();
+    const { currentUser, activeGroup, groupMembers, userProfile } = useApp();
+    const { addDriveReport, updateDriveReport } = useDriveReports(); // CORRECT HOOK
+    const { reports } = useReports(); // CORRECT HOOK
     const {
         createTask,
         updateTask,
