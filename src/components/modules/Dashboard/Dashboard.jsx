@@ -85,7 +85,7 @@ export default function Dashboard() {
     };
 
     // Derived Stats & Filtering
-    const myActiveTasks = tasks.filter(t =>
+    const myActiveTasks = (tasks || []).filter(t =>
         t.status !== 'done' &&
         (t.assignees?.some(a => a.user_id === userProfile?.id) || t.assignedTo === userProfile?.name)
     );
