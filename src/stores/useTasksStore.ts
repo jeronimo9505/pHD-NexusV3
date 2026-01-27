@@ -38,7 +38,9 @@ export const useTasksStore = create<TasksState>()(
         error: null,
 
         fetchTasks: async (groupId: string) => {
+            console.log("📝 [useTasksStore] fetchTasks called for groupId:", groupId);
             if (!groupId) {
+                console.warn("⚠️ [useTasksStore] No groupId provided, clearing tasks");
                 set({ tasks: [], loading: false });
                 return;
             }
@@ -46,6 +48,7 @@ export const useTasksStore = create<TasksState>()(
             set({ loading: true, error: null });
 
             try {
+                console.log("🚀 [useTasksStore] querying Supabase tasks...");
                 const { data, error } = await supabase
                     .from('tasks')
                     .select(`
@@ -58,9 +61,10 @@ export const useTasksStore = create<TasksState>()(
 
                 if (error) throw error;
 
+                console.log(`✅ [useTasksStore] Fetched ${data?.length || 0} tasks for group ${groupId}`);
                 set({ tasks: data || [], loading: false, error: null });
             } catch (err: any) {
-                console.error('Error fetching tasks:', err);
+                console.error('❌ [useTasksStore] Error fetching tasks:', err);
                 set({ error: err.message, loading: false });
             }
         },

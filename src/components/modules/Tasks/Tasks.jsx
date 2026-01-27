@@ -45,6 +45,15 @@ export default function Tasks() {
     const [filterAssignee, setFilterAssignee] = useState('all'); // 'all' or user ID
     const [isAssigneeDropdownOpen, setIsAssigneeDropdownOpen] = useState(false);
 
+    // DEBUG: Trace tasks state
+    useEffect(() => {
+        console.log("📊 [Tasks UI] Current tasks in store:", tasks.length);
+        console.log("👤 [Tasks UI] Current user:", currentUser?.id, currentUser?.full_name);
+        if (tasks.length > 0) {
+            console.log("First task sample:", tasks[0]);
+        }
+    }, [tasks, currentUser]);
+
     const selectedTask = tasks.find(t => t.id === selectedTaskId);
 
     const potentialAssignees = React.useMemo(() => {
