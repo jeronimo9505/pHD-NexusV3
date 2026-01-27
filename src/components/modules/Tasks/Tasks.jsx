@@ -41,18 +41,9 @@ export default function Tasks() {
     const [sortCriteria, setSortCriteria] = useState('newest');
     const [searchQuery, setSearchQuery] = useState('');
     const [filterPriority, setFilterPriority] = useState('all');
-    const [filterViewMode, setFilterViewMode] = useState('my'); // 'my' or 'all'
+    const [filterViewMode, setFilterViewMode] = useState('all'); // Default to 'all' to avoid hiding unassigned tasks
     const [filterAssignee, setFilterAssignee] = useState('all'); // 'all' or user ID
     const [isAssigneeDropdownOpen, setIsAssigneeDropdownOpen] = useState(false);
-
-    // DEBUG: Trace tasks state
-    useEffect(() => {
-        console.log("📊 [Tasks UI] Current tasks in store:", tasks.length);
-        console.log("👤 [Tasks UI] Current user:", currentUser?.id, currentUser?.full_name);
-        if (tasks.length > 0) {
-            console.log("First task sample:", tasks[0]);
-        }
-    }, [tasks, currentUser]);
 
     const selectedTask = tasks.find(t => t.id === selectedTaskId);
 
@@ -169,7 +160,7 @@ export default function Tasks() {
     };
 
     const handleAddTaskComment = async (taskId, text) => {
-        await addTaskComment(taskId, text);
+        await addComment(taskId, text);
     };
 
     const getSortedTasks = (taskList) => {
