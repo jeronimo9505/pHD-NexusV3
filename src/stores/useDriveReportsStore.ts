@@ -186,40 +186,43 @@ export const useDriveReportsStore = create<DriveReportsState>()(
                 const userId = user.id;
                 const previousReports = get().driveReports;
 
-                // Optimistic update
-                set((state) => {
-                    const report = state.driveReports.find(r => r.id === id);
-                    if (report) {
-                        if (!report.seen_by) report.seen_by = [];
-                        if (!report.seen_by.includes(userId)) {
-                            report.seen_by.push(userId);
-                        }
-                    }
-                });
-
-                // Get current seen_by array
+                // Get current seen_by array first to determine if we're adding or removing
                 const { data: current } = await supabase
                     .from('drive_reports')
                     .select('seen_by')
                     .eq('id', id)
                     .single();
 
-                const seenBy = current?.seen_by || [];
-                if (!seenBy.includes(userId)) {
-                    seenBy.push(userId);
+                const currentSeenBy = current?.seen_by || [];
+                const isCurrentlySeen = currentSeenBy.includes(userId);
+
+                // Toggle: if seen, remove; if not seen, add
+                let newSeenBy;
+                if (isCurrentlySeen) {
+                    newSeenBy = currentSeenBy.filter((uid: string) => uid !== userId);
+                } else {
+                    newSeenBy = [...currentSeenBy, userId];
                 }
+
+                // Optimistic update
+                set((state) => {
+                    const report = state.driveReports.find(r => r.id === id);
+                    if (report) {
+                        report.seen_by = newSeenBy;
+                    }
+                });
 
                 const { error } = await supabase
                     .from('drive_reports')
-                    .update({ seen_by: seenBy })
+                    .update({ seen_by: newSeenBy })
                     .eq('id', id);
 
                 if (error) throw error;
 
-                console.log('✅ Drive report marked as seen');
+                console.log(isCurrentlySeen ? '✅ Drive report unmarked as seen' : '✅ Drive report marked as seen');
                 return { error: undefined };
             } catch (err: any) {
-                console.error('❌ Error marking drive report as seen:', err);
+                console.error('❌ Error toggling drive report seen status:', err);
 
                 // Rollback
                 const previousReports = get().driveReports;

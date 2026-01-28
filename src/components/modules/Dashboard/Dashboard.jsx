@@ -145,7 +145,11 @@ export default function Dashboard() {
 
     // --- DRIVE REPORTS LOGIC ---
     const handleToggleSeen = async (report) => {
-        await markDriveReportSeen(report.id);
+        try {
+            await markAsSeen(report.id);
+        } catch (error) {
+            console.error('Error toggling seen status:', error);
+        }
     };
 
     const handleDeleteReport = async (report) => {
