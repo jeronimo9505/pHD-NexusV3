@@ -179,19 +179,26 @@ export const useDriveReportsStore = create<DriveReportsState>()(
                 // Get current user automatically
                 const { data: { user } } = await supabase.auth.getUser();
                 if (!user) {
-                    console.warn('Cannot mark as seen: No authenticated user');
+                    console.warn('⚠️ Cannot mark as seen: No authenticated user');
                     return { error: 'Not authenticated' };
                 }
 
                 const userId = user.id;
-                const previousReports = get().driveReports;
+                console.log('📝 Marking report as seen:', { reportId: id, userId });
 
-                // Get current seen_by array first to determine if we're adding or removing
-                const { data: current } = await supabase
+                // Get current record
+                const { data: current, error: fetchError } = await supabase
                     .from('drive_reports')
-                    .select('seen_by')
+                    .select('seen_by, title')
                     .eq('id', id)
                     .single();
+
+                if (fetchError) {
+                    console.error('❌ Error fetching report:', fetchError);
+                    throw fetchError;
+                }
+
+                console.log('📊 Current seen_by:', current?.seen_by);
 
                 const currentSeenBy = current?.seen_by || [];
                 const isCurrentlySeen = currentSeenBy.includes(userId);
@@ -200,29 +207,39 @@ export const useDriveReportsStore = create<DriveReportsState>()(
                 let newSeenBy;
                 if (isCurrentlySeen) {
                     newSeenBy = currentSeenBy.filter((uid: string) => uid !== userId);
+                    console.log('👁️ Unmarking as seen (removing user)');
                 } else {
                     newSeenBy = [...currentSeenBy, userId];
+                    console.log('✅ Marking as seen (adding user)');
                 }
 
-                // Optimistic update
-                set((state) => {
-                    const report = state.driveReports.find(r => r.id === id);
-                    if (report) {
-                        report.seen_by = newSeenBy;
-                    }
-                });
+                console.log('📤 New seen_by array:', newSeenBy);
 
-                const { error } = await supabase
+                // Update database
+                const { error: updateError } = await supabase
                     .from('drive_reports')
                     .update({ seen_by: newSeenBy })
                     .eq('id', id);
 
-                if (error) throw error;
+                if (updateError) {
+                    console.error('❌ Error updating seen_by:', updateError);
+                    throw updateError;
+                }
 
-                console.log(isCurrentlySeen ? '✅ Drive report unmarked as seen' : '✅ Drive report marked as seen');
+                console.log('✅ Database updated successfully');
+
+                // Update local state (optimistic)
+                set((state) => {
+                    const report = state.driveReports.find(r => r.id === id);
+                    if (report) {
+                        report.seen_by = newSeenBy;
+                        console.log('🔄 Local state updated');
+                    }
+                });
+
                 return { error: undefined };
             } catch (err: any) {
-                console.error('❌ Error toggling drive report seen status:', err);
+                console.error('❌ Error in markAsSeen:', err);
 
                 // Rollback
                 const previousReports = get().driveReports;
