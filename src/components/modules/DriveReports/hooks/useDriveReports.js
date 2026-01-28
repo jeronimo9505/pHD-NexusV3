@@ -17,17 +17,26 @@ export function useDriveReports() {
         updateDriveReport,
         deleteDriveReport,
         markAsSeen,
-        clearDriveReports
+        clearDriveReports,
+        subscribeToChanges
     } = useDriveReportsStore();
 
     // Auto-fetch when group changes
     useEffect(() => {
         if (activeGroupId) {
             fetchDriveReports(activeGroupId);
+
+            // Setup real-time subscription
+            const channel = subscribeToChanges(activeGroupId);
+
+            // Cleanup on unmount or group change
+            return () => {
+                channel.unsubscribe();
+            };
         } else {
             clearDriveReports();
         }
-    }, [activeGroupId, fetchDriveReports, clearDriveReports]);
+    }, [activeGroupId, fetchDriveReports, clearDriveReports, subscribeToChanges]);
 
     return {
         driveReports,
