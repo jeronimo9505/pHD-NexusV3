@@ -32,7 +32,8 @@ export default function Dashboard() {
         currentUser
     } = useApp();
 
-    const { driveReports, deleteDriveReport, updateDriveReport, markAsSeen } = useDriveReports();
+    const { driveReports, deleteDriveReport, updateDriveReport, refetch } = useDriveReports();
+    const { toggleDriveReportSeen } = require('@/stores/driveReportsHelpers');
 
     const [isLoadingReports, setIsLoadingReports] = useState(true); // Maybe not needed if driveReports comes from context
 
@@ -145,10 +146,9 @@ export default function Dashboard() {
 
     // --- DRIVE REPORTS LOGIC ---
     const handleToggleSeen = async (report) => {
-        try {
-            await markAsSeen(report.id);
-        } catch (error) {
-            console.error('Error toggling seen status:', error);
+        const result = await toggleDriveReportSeen(report.id);
+        if (!result.error) {
+            refetch(); // Refresh after toggle
         }
     };
 

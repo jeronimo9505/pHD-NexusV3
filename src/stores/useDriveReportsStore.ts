@@ -30,14 +30,12 @@ interface DriveReportsState {
     loading: boolean;
     error: string | null;
 
-    // Actions
+    // Actions - SIMPLE LIKE REPORTS/TASKS
     fetchDriveReports: (groupId: string) => Promise<void>;
-    createDriveReport: (data: Partial<DriveReport>) => Promise<{ data: DriveReport | null; error: any }>;
-    updateDriveReport: (id: string, data: Partial<DriveReport>) => Promise<{ error: any }>;
-    deleteDriveReport: (id: string) => Promise<{ error: any }>;
-    markAsSeen: (id: string) => Promise<{ error: any }>;
+    createDriveReport: (data: Partial<DriveReport>) => Promise<{ error?: string; data?: DriveReport }>;
+    updateDriveReport: (id: string, data: Partial<DriveReport>) => Promise<{ error?: string }>;
+    deleteDriveReport: (id: string) => Promise<{ error?: string }>;
     clearDriveReports: () => void;
-    subscribeToChanges: (groupId: string) => any;
 }
 
 export const useDriveReportsStore = create<DriveReportsState>()(
@@ -47,6 +45,11 @@ export const useDriveReportsStore = create<DriveReportsState>()(
         error: null,
 
         fetchDriveReports: async (groupId: string) => {
+            if (!groupId) {
+                set({ driveReports: [], loading: false });
+                return;
+            }
+
             set({ loading: true, error: null });
 
             try {
@@ -58,38 +61,34 @@ export const useDriveReportsStore = create<DriveReportsState>()(
 
                 if (error) throw error;
 
-                console.log('📊 Fetched drive reports:', data?.length || 0);
-                set({ driveReports: data || [], loading: false });
+                set({ driveReports: data || [], loading: false, error: null });
             } catch (err: any) {
-                console.error('❌ Error fetching drive reports:', err);
+                console.error('Error fetching drive reports:', err);
                 set({ error: err.message, loading: false });
             }
         },
 
-        createDriveReport: async (data: Partial<DriveReport>) => {
+        createDriveReport: async (reportData: Partial<DriveReport>) => {
+            // Optimistic update
             const tempId = `temp-${Date.now()}`;
-            const newReport: DriveReport = {
+            const optimisticReport: DriveReport = {
                 id: tempId,
-                group_id: data.group_id!,
-                author_id: data.author_id!,
-                title: data.title || 'Nuevo Reporte',
-                status: data.status || 'draft',
-                type: data.type || 'report',
-                is_important: data.is_important || false,
+                status: 'draft',
+                type: 'report',
+                is_important: false,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
-                ...data,
+                ...reportData,
             } as DriveReport;
 
-            // Optimistic update
             set((state) => {
-                state.driveReports.unshift(newReport);
+                state.driveReports.unshift(optimisticReport);
             });
 
             try {
-                const { data: created, error } = await supabase
+                const { data, error } = await supabase
                     .from('drive_reports')
-                    .insert([data])
+                    .insert(reportData)
                     .select()
                     .single();
 
@@ -98,48 +97,46 @@ export const useDriveReportsStore = create<DriveReportsState>()(
                 // Replace temp with real
                 set((state) => {
                     const index = state.driveReports.findIndex(r => r.id === tempId);
-                    if (index !== -1 && created) {
-                        state.driveReports[index] = created;
+                    if (index !== -1) {
+                        state.driveReports[index] = data;
                     }
                 });
 
-                console.log('✅ Drive report created successfully');
-                return { data: created, error: undefined };
+                return { data };
             } catch (err: any) {
-                console.error('❌ Error creating drive report:', err);
+                console.error('Error creating drive report:', err);
 
                 // Rollback
                 set((state) => {
                     state.driveReports = state.driveReports.filter(r => r.id !== tempId);
                 });
 
-                return { data: null, error: err.message };
+                return { error: err.message };
             }
         },
 
-        updateDriveReport: async (id: string, data: Partial<DriveReport>) => {
+        updateDriveReport: async (id: string, updates: Partial<DriveReport>) => {
             const previousReports = get().driveReports;
 
             // Optimistic update
             set((state) => {
                 const report = state.driveReports.find(r => r.id === id);
                 if (report) {
-                    Object.assign(report, data, { updated_at: new Date().toISOString() });
+                    Object.assign(report, updates);
                 }
             });
 
             try {
                 const { error } = await supabase
                     .from('drive_reports')
-                    .update(data)
+                    .update(updates)
                     .eq('id', id);
 
                 if (error) throw error;
 
-                console.log('✅ Drive report updated successfully');
                 return { error: undefined };
             } catch (err: any) {
-                console.error('❌ Error updating drive report:', err);
+                console.error('Error updating drive report:', err);
 
                 // Rollback
                 set({ driveReports: previousReports });
@@ -150,7 +147,7 @@ export const useDriveReportsStore = create<DriveReportsState>()(
         deleteDriveReport: async (id: string) => {
             const previousReports = get().driveReports;
 
-            // Optimistic update - remove immediately
+            // Optimistic update
             set((state) => {
                 state.driveReports = state.driveReports.filter(r => r.id !== id);
             });
@@ -163,86 +160,11 @@ export const useDriveReportsStore = create<DriveReportsState>()(
 
                 if (error) throw error;
 
-                console.log('✅ Drive report deleted successfully');
                 return { error: undefined };
             } catch (err: any) {
-                console.error('❌ Error deleting drive report:', err);
+                console.error('Error deleting drive report:', err);
 
                 // Rollback
-                set({ driveReports: previousReports });
-                return { error: err.message };
-            }
-        },
-
-        markAsSeen: async (id: string) => {
-            try {
-                // Get current user automatically
-                const { data: { user } } = await supabase.auth.getUser();
-                if (!user) {
-                    console.warn('⚠️ Cannot mark as seen: No authenticated user');
-                    return { error: 'Not authenticated' };
-                }
-
-                const userId = user.id;
-                console.log('📝 Marking report as seen:', { reportId: id, userId });
-
-                // Get current record
-                const { data: current, error: fetchError } = await supabase
-                    .from('drive_reports')
-                    .select('seen_by, title')
-                    .eq('id', id)
-                    .single();
-
-                if (fetchError) {
-                    console.error('❌ Error fetching report:', fetchError);
-                    throw fetchError;
-                }
-
-                console.log('📊 Current seen_by:', current?.seen_by);
-
-                const currentSeenBy = current?.seen_by || [];
-                const isCurrentlySeen = currentSeenBy.includes(userId);
-
-                // Toggle: if seen, remove; if not seen, add
-                let newSeenBy;
-                if (isCurrentlySeen) {
-                    newSeenBy = currentSeenBy.filter((uid: string) => uid !== userId);
-                    console.log('👁️ Unmarking as seen (removing user)');
-                } else {
-                    newSeenBy = [...currentSeenBy, userId];
-                    console.log('✅ Marking as seen (adding user)');
-                }
-
-                console.log('📤 New seen_by array:', newSeenBy);
-
-                // Update database
-                const { error: updateError } = await supabase
-                    .from('drive_reports')
-                    .update({ seen_by: newSeenBy })
-                    .eq('id', id);
-
-                if (updateError) {
-                    console.error('❌ Error updating seen_by:', updateError);
-                    throw updateError;
-                }
-
-                console.log('✅ Database updated successfully');
-
-                // Update local state (optimistic)
-                set((state) => {
-                    const report = state.driveReports.find(r => r.id === id);
-                    if (report) {
-                        report.seen_by = newSeenBy;
-                        console.log('🔄 Local state updated');
-                    }
-                });
-
-                return { error: undefined };
-            } catch (err: any) {
-                console.error('❌ Error in markAsSeen:', err);
-
-                // Rollback
-                const previousReports = get().driveReports;
                 set({ driveReports: previousReports });
                 return { error: err.message };
             }
@@ -250,47 +172,6 @@ export const useDriveReportsStore = create<DriveReportsState>()(
 
         clearDriveReports: () => {
             set({ driveReports: [], loading: false, error: null });
-        },
-
-        // Real-time subscription handler (to be called externally)
-        subscribeToChanges: (groupId: string) => {
-            const channel = supabase
-                .channel(`drive_reports:${groupId}`)
-                .on(
-                    'postgres_changes',
-                    {
-                        event: '*',
-                        schema: 'public',
-                        table: 'drive_reports',
-                        filter: `group_id=eq.${groupId}`
-                    },
-                    (payload) => {
-                        console.log('🔄 Drive reports change detected:', payload);
-
-                        if (payload.eventType === 'INSERT') {
-                            set((state) => {
-                                // Add new report if not exists
-                                if (!state.driveReports.find(r => r.id === payload.new.id)) {
-                                    state.driveReports.unshift(payload.new as DriveReport);
-                                }
-                            });
-                        } else if (payload.eventType === 'UPDATE') {
-                            set((state) => {
-                                const index = state.driveReports.findIndex(r => r.id === payload.new.id);
-                                if (index !== -1) {
-                                    state.driveReports[index] = payload.new as DriveReport;
-                                }
-                            });
-                        } else if (payload.eventType === 'DELETE') {
-                            set((state) => {
-                                state.driveReports = state.driveReports.filter(r => r.id !== payload.old.id);
-                            });
-                        }
-                    }
-                )
-                .subscribe();
-
-            return channel;
         },
     }))
 );

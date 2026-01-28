@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { googleDriveService } from '@/components/modules/Drive/services/googleDriveService';
 import DriveReportCard from './DriveReportCard';
+import { toggleDriveReportSeen } from '@/stores/driveReportsHelpers';
 
 import { useApp } from '@/context/AppContext';
 import { formatDateShort, getMonthLabel } from '@/utils/helpers';
@@ -19,8 +20,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSettings, onDeleteReport, onUploadPPT, highlightedReportId }) {
     const { currentUser, groupMembers, userProfile } = useApp();
-    const { driveReports, loading, markAsSeen, addComment: addDriveReportComment } = useDriveReports(); // CORRECT HOOK
-    const { reports } = useReports(); // CORRECT HOOK
+    const { driveReports, loading, refetch } = useDriveReports();
+    const { reports } = useReports();
     const { createTask, updateTask, deleteTask, addComment: addTaskComment, tasks: allTasks } = useTasks();
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -74,6 +75,13 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
             // Expand new section
             return { ...prev, [reportId]: section };
         });
+    };
+
+    const handleMarkSeen = async (reportId) => {
+        const result = await toggleDriveReportSeen(reportId);
+        if (!result.error) {
+            refetch();
+        }
     };
 
     const handleQuickAddTask = async (e, reportId) => {
@@ -455,7 +463,7 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
                                                 // Highlighting props
                                                 isHighlighted={highlightedReportId === report.id}
                                                 domId={`report-card-${report.id}`}
-                                                onMarkSeen={(r) => markAsSeen && markAsSeen(r.id)}
+                                                onMarkSeen={(r) => handleMarkSeen(r.id)}
                                                 onDelete={onDeleteReport ? ((r) => onDeleteReport(r)) : undefined}
                                                 onComment={setActiveCommentReport}
                                                 onCreateTask={(r) => handleQuickAddTask({ stopPropagation: () => { } }, r.id)}
