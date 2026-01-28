@@ -78,9 +78,21 @@ export default function ReportLibrary({ onSelectReport, onCreateNew, onOpenSetti
     };
 
     const handleMarkSeen = async (reportId) => {
-        const result = await toggleDriveReportSeen(reportId);
-        if (!result.error) {
-            refetch();
+        console.log('🎯 handleMarkSeen called for report:', reportId);
+        try {
+            const result = await toggleDriveReportSeen(reportId);
+            console.log('📬 Result from helper:', result);
+
+            if (result.error) {
+                console.error('❌ Error from helper:', result.error);
+                return;
+            }
+
+            console.log('🔄 Refetching drive reports...');
+            await refetch();
+            console.log('✅ Refetch complete');
+        } catch (error) {
+            console.error('❌ Exception in handleMarkSeen:', error);
         }
     };
 
