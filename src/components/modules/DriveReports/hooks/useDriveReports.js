@@ -26,13 +26,14 @@ export function useDriveReports() {
         if (activeGroupId) {
             fetchDriveReports(activeGroupId);
 
-            // Setup real-time subscription
+            // TEMPORARILY DISABLED: Real-time causing infinite loops
+            // Will re-enable after seen_by column is added and tested
+            /*
             const channel = subscribeToChanges(activeGroupId);
-
-            // Cleanup on unmount or group change
             return () => {
                 channel.unsubscribe();
             };
+            */
         } else {
             clearDriveReports();
         }
