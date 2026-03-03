@@ -1,40 +1,9 @@
-import { createBrowserClient } from '@supabase/ssr';
+import { createBrowserClient } from "@supabase/ssr";
+import { Database } from "@/types/supabase";
 
-// Singleton instance
-let supabaseInstance: ReturnType<typeof createBrowserClient> | null = null;
-
-/**
- * Get the canonical Supabase client for browser usage.
- * This is a singleton to ensure consistent cache and auth state across the app.
- * 
- * @returns Supabase client instance
- */
-export function getSupabaseClient() {
-  if (supabaseInstance) {
-    return supabaseInstance;
-  }
-
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !key) {
-    throw new Error(
-      'Missing Supabase environment variables. Please check your .env file.'
+export function createClient() {
+    return createBrowserClient<Database>(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
-  }
-
-  supabaseInstance = createBrowserClient(url, key);
-  return supabaseInstance;
 }
-
-/**
- * Canonical Supabase client - use this throughout the application.
- * 
- * Usage:
- * ```typescript
- * import { supabase } from '@/lib/supabase/client';
- * 
- * const { data, error } = await supabase.from('reports').select('*');
- * ```
- */
-export const supabase = getSupabaseClient();
