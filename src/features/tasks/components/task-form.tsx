@@ -23,7 +23,7 @@ export function TaskForm({ task, groupId, onClose, onCreate, onSave, columns = [
     const [title, setTitle] = useState(task?.title || '');
     const [description, setDescription] = useState(task?.description || '');
     const [status, setStatus] = useState(task?.status || initialStatus || 'todo');
-    const [priority, setPriority] = useState(task?.priority || 'medium');
+    const [priority, setPriority] = useState<'low' | 'medium' | 'high'>((task?.priority as any) || 'medium');
     const [dueDate, setDueDate] = useState(task?.due_date || '');
     const [assigneeIds, setAssigneeIds] = useState<string[]>(task?.assignees?.map(a => a.user_id) || []);
     const [subtasks, setSubtasks] = useState<Subtask[]>(task?.subtasks || []);
@@ -232,7 +232,7 @@ export function TaskForm({ task, groupId, onClose, onCreate, onSave, columns = [
                         <select
                             value={priority}
                             onChange={(e) => {
-                                setPriority(e.target.value);
+                                setPriority(e.target.value as 'low' | 'medium' | 'high');
                                 if (isEditMode) handleUpdate({ priority: e.target.value as any });
                             }}
                             className="w-full p-2 bg-slate-800 border border-slate-700 text-slate-100 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"

@@ -1,6 +1,6 @@
 
 import { createClient } from "@/lib/supabase/server";
-import { getKnowledgeItemsAction } from "@/features/knowledge/actions";
+import { getKnowledgeItemsAction, type KnowledgeItem } from "@/features/knowledge/actions";
 import { KnowledgeExplorer } from "@/features/knowledge/components/knowledge-explorer";
 
 interface PageProps {
@@ -15,11 +15,11 @@ export default async function KnowledgePage({ params }: PageProps) {
 
     const [itemsRes, settingsRes] = await Promise.all([
         getKnowledgeItemsAction(groupId),
-        supabase.from('group_settings').select('drive_settings').eq('group_id', groupId).single()
+        supabase.from('groups').select('drive_settings').eq('id', groupId).single()
     ]);
 
-    const items = itemsRes.data || [];
-    const settings = settingsRes.data?.drive_settings || {};
+    const items = (itemsRes.data || []) as KnowledgeItem[];
+    const settings = (settingsRes.data?.drive_settings as any) || {};
 
     return (
         <KnowledgeExplorer

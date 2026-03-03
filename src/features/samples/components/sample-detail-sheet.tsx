@@ -59,9 +59,10 @@ export function SampleDetailSheet({
         const res = await getCharacterizationsAction(sample.id);
         if (res.error) toast.error(res.error);
         else {
-            setCharacterizations(res.data || []);
+            const data = (res.data || []) as unknown as SampleCharacterization[];
+            setCharacterizations(data);
             if (expandedChar) {
-                const updated = (res.data || []).find(c => c.id === expandedChar.id);
+                const updated = data.find(c => c.id === expandedChar.id);
                 if (updated) setExpandedChar(updated); else setExpandedChar(null);
             }
         }

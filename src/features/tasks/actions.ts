@@ -83,14 +83,14 @@ export async function getTasksAction(groupId: string) {
 
 export async function updateGroupKanbanColumnsAction(groupId: string, columns: string[]) {
     const supabase = await createClient();
-    const { error, count } = await supabase
+    const { data, error } = await supabase
         .from('groups')
         .update({ kanban_columns: columns } as any) // Postgres handles JSONB array
         .eq('id', groupId)
-        .select('*', { count: 'exact', head: true }); // Use select to get count
+        .select('id');
 
     if (error) return { error: error.message };
-    if (count === 0) return { error: "Permission denied (RLS) or group not found" };
+    if (!data || data.length === 0) return { error: "Permission denied (RLS) or group not found" };
 
     revalidatePath(`/${groupId}/tasks`);
     return { success: true };
