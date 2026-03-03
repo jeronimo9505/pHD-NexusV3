@@ -52,23 +52,17 @@ export async function signUpAction(formData: FormData) {
     return { error: 'Unknown registration error' };
 }
 
-export async function getGoogleOAuthUrlAction(): Promise<{ url?: string; error?: string }> {
+export async function getGoogleOAuthUrlAction(clientOrigin?: string): Promise<{ url?: string; error?: string }> {
     const supabase = await createClient();
 
-    // Determine the base URL dynamically based on the request host
-    // This is crucial so that the OAuth callback matches the domain the user is visiting,
-    // otherwise PKCE validation will fail due to cross-domain cookie issues.
-    const headerList = await headers();
-    const host = headerList.get('host') || headerList.get('x-forwarded-host');
-    let origin = 'http://localhost:3000';
+    // Determine the base URL: prioritize origin passed from client, then fallback to headers
+    let origin = clientOrigin;
 
-    if (host) {
-        const protocol = host.includes('localhost') ? 'http' : 'https';
-        origin = `${protocol}://${host}`;
-    } else if (process.env.NEXT_PUBLIC_SITE_URL) {
-        origin = process.env.NEXT_PUBLIC_SITE_URL;
-    } else if (process.env.NEXT_PUBLIC_VERCEL_URL) {
-        origin = `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`;
+    if (!origin) {
+        const headerList = await headers();
+        const host = headerList.get('host') || headerList.get('x-forwarded-host');
+        const protocol = host?.includes('localhost') ? 'http' : 'https';
+        origin = host ? `${protocol}://${host}` : 'http://localhost:3000';
     }
 
     // Remove trailing slash if present
