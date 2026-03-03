@@ -14,7 +14,7 @@ export function GoogleSignInButton() {
         setError(null);
 
         try {
-            const result = await getGoogleOAuthUrlAction();
+            const result = await getGoogleOAuthUrlAction(window.location.origin);
 
             if (result.error || !result.url) {
                 setError(result.error || 'Could not connect to Google');

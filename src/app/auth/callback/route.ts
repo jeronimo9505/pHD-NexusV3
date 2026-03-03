@@ -2,7 +2,13 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
-    const { searchParams, origin } = new URL(request.url);
+    const { searchParams } = new URL(request.url);
+
+    // Robust origin detection for Vercel and local environments
+    const host = request.headers.get('host') || request.headers.get('x-forwarded-host');
+    const protocol = request.headers.get('x-forwarded-proto') || (host?.includes('localhost') ? 'http' : 'https');
+    const origin = host ? `${protocol}://${host}` : new URL(request.url).origin;
+
     const code = searchParams.get("code");
     const next = searchParams.get("next") ?? "/dashboard";
     const isPopup = searchParams.get("popup") === "1";

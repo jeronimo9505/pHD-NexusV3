@@ -17,6 +17,13 @@ export function NotesWidget({ groupId, initialNotes }: { groupId: string, initia
         if (res.error) {
             toast.error(res.error);
         } else {
+            const newNote = {
+                id: Math.random().toString(), // Temporary ID for UI
+                content: content.trim(),
+                created_at: new Date().toISOString(),
+                creator: { full_name: 'You' } // Placeholder for immediate feedback
+            };
+            setNotes([newNote, ...notes]);
             setContent('');
             toast.success('Note added');
         }
