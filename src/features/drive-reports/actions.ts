@@ -145,7 +145,7 @@ export async function markAsSeenAction(id: string, groupId: string) {
             return { error: 'Failed to fetch report' };
         }
 
-        const currentSeenBy = report?.seen_by || [];
+        const currentSeenBy = (report?.seen_by as string[]) || [];
 
         // Toggle: if already seen, remove; if not seen, add
         const isSeen = currentSeenBy.includes(user.id);

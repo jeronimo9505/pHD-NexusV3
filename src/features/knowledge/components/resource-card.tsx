@@ -6,8 +6,8 @@ import { cn } from '@/lib/utils';
 
 interface ResourceCardProps {
     item: KnowledgeItem;
-    onToggleStar: () => void;
-    onDelete: () => void;
+    onToggleStar?: () => void;
+    onDelete?: () => void;
 }
 
 const typeIcons: Record<string, any> = {
@@ -36,7 +36,7 @@ export function ResourceCard({ item, onToggleStar, onDelete }: ResourceCardProps
                 </div>
                 <div className="flex items-center gap-1">
                     <button
-                        onClick={(e) => { e.stopPropagation(); onToggleStar(); }}
+                        onClick={(e) => { e.stopPropagation(); onToggleStar?.(); }}
                         className={cn(
                             "p-1.5 rounded-lg transition-all",
                             item.is_starred
@@ -47,7 +47,7 @@ export function ResourceCard({ item, onToggleStar, onDelete }: ResourceCardProps
                         <Star size={15} className={item.is_starred ? 'fill-amber-400' : ''} />
                     </button>
                     <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                        onClick={(e) => { e.stopPropagation(); onDelete?.(); }}
                         className="p-1.5 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 rounded-lg transition-all"
                     >
                         <Trash2 size={14} />

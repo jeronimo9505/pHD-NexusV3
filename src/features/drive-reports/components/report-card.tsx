@@ -28,8 +28,8 @@ export function ReportCard({ report, currentUserId, groupId, driveSettings }: Re
     const [showDraftEditor, setShowDraftEditor] = useState(false);
     const [showEditDialog, setShowEditDialog] = useState(false);
 
-    const isSeen = report.seen_by?.includes(currentUserId);
-    const seenCount = report.seen_by?.length || 0;
+    const isSeen = (report.seen_by as string[])?.includes(currentUserId);
+    const seenCount = (report.seen_by as string[])?.length || 0;
     const isDraft = report.status === 'draft';
 
     const handleMarkSeen = async (e: React.MouseEvent) => {
@@ -334,10 +334,10 @@ export function ReportCard({ report, currentUserId, groupId, driveSettings }: Re
                     onClose={() => setShowDraftEditor(false)}
                     initialData={{
                         title: report.title,
-                        type: report.type,
+                        type: report.type as "report" | "ppt" | "meeting_note",
                         startDate: report.start_date || undefined,
                         endDate: report.end_date || undefined,
-                        sections: report.sections || undefined,
+                        sections: report.sections as any || undefined,
                     }}
                     groupId={groupId}
                     draftId={report.id}

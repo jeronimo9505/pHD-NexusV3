@@ -27,9 +27,10 @@ export const openPicker = ({
     viewId?: 'DOCS' | 'FOLDERS' | string,
     onSelect: (file: any) => void
 }) => {
-    if (!window.google || !window.google.picker) {
+    const w = window as any;
+    if (!w.google || !w.google.picker) {
         // Load Picker Lib
-        window.gapi.load('picker', {
+        w.gapi.load('picker', {
             callback: () => {
                 createPicker({ clientId, apiKey, token, viewId, onSelect });
             }
@@ -40,20 +41,21 @@ export const openPicker = ({
 };
 
 const createPicker = ({ clientId, apiKey, token, viewId, onSelect }: any) => {
-    const view = new window.google.picker.DocsView(window.google.picker.ViewId[viewId]);
+    const google = (window as any).google;
+    const view = new google.picker.DocsView(google.picker.ViewId[viewId]);
     view.setIncludeFolders(true);
     view.setSelectFolderEnabled(viewId === 'FOLDERS');
 
-    const picker = new window.google.picker.PickerBuilder()
-        .enableFeature(window.google.picker.Feature.NAV_HIDDEN)
-        .enableFeature(window.google.picker.Feature.SUPPORT_DRIVES)
+    const picker = new google.picker.PickerBuilder()
+        .enableFeature(google.picker.Feature.NAV_HIDDEN)
+        .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
         .setAppId(clientId.trim())
         .setOAuthToken(token)
         .setDeveloperKey(apiKey.trim())
         .setOrigin(window.location.protocol + '//' + window.location.host)
         .addView(view)
         .setCallback((data: any) => {
-            if (data.action === window.google.picker.Action.PICKED) {
+            if (data.action === google.picker.Action.PICKED) {
                 const file = data.docs[0];
                 onSelect(file);
             }

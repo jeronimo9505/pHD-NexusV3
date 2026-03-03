@@ -63,7 +63,7 @@ export function ReportCardExpanded({
     };
 
     // Mock data for now - will be replaced with real data
-    const seenDetails = report.seen_by?.map(userId => ({
+    const seenDetails = (report.seen_by as string[])?.map(userId => ({
         id: userId,
         name: userId === currentUserId ? 'You' : 'User',
         date: report.created_at

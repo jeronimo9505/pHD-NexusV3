@@ -1,0 +1,54 @@
+src/app/(platform)/[groupId]/knowledge/page.tsx(18,9): error TS2589: Type instantiation is excessively deep and possibly infinite.
+src/app/(platform)/[groupId]/knowledge/page.tsx(18,23): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(relation: "groups" | "profiles" | "announcements" | "drive_reports" | "tasks" | "knowledge_items" | "report_comments" | "reports" | "permissions" | "roles" | "samples" | "logbooks" | ... 20 more ... | "task_comments"): PostgrestQueryBuilder<...>', gave the following error.
+    Argument of type '"group_settings"' is not assignable to parameter of type '"groups" | "profiles" | "announcements" | "drive_reports" | "tasks" | "knowledge_items" | "report_comments" | "reports" | "permissions" | "roles" | "samples" | "logbooks" | ... 20 more ... | "task_comments"'.
+  Overload 2 of 2, '(relation: never): PostgrestQueryBuilder<{ PostgrestVersion: "14.1"; }, { Tables: { activity_log: { Row: { action: string; created_at: string; entity_id: string; entity_type: string; group_id: string; id: string; metadata: Json; user_id: string; }; Insert: { ...; }; Update: { ...; }; Relationships: [...]; }; ... 31 more ...; tasks: { ...; }; }; Views: {}; Functions: {}; Enums: {}; CompositeTypes: {}; }, never, never, never>', gave the following error.
+    Argument of type '"group_settings"' is not assignable to parameter of type 'never'.
+src/app/(platform)/[groupId]/knowledge/page.tsx(22,40): error TS2339: Property 'drive_settings' does not exist on type 'SelectQueryError<"column 'drive_settings' does not exist on 'groups'."> | SelectQueryError<"column 'drive_settings' does not exist on 'profiles'."> | ... 30 more ... | SelectQueryError<...>'.
+  Property 'drive_settings' does not exist on type 'SelectQueryError<"column 'drive_settings' does not exist on 'groups'.">'.
+src/app/(platform)/[groupId]/knowledge/page.tsx(26,13): error TS2322: Type '{ category: string; content: string; created_at: string; created_by: string; drive_file_id: string; folder_id: string; group_id: string; id: string; is_pinned: boolean; is_starred: boolean; resource_type: string; tags: string[]; title: string; updated_at: string; url: string; }[]' is not assignable to type 'KnowledgeItem[]'.
+  Type '{ category: string; content: string; created_at: string; created_by: string; drive_file_id: string; folder_id: string; group_id: string; id: string; is_pinned: boolean; is_starred: boolean; resource_type: string; tags: string[]; title: string; updated_at: string; url: string; }' is not assignable to type 'KnowledgeItem'.
+    Types of property 'resource_type' are incompatible.
+      Type 'string' is not assignable to type '"link" | "file" | "note"'.
+src/features/drive-reports/actions.ts(151,38): error TS2339: Property 'includes' does not exist on type 'string | number | true | { [key: string]: Json; } | Json[]'.
+  Property 'includes' does not exist on type 'number'.
+src/features/drive-reports/actions.ts(153,29): error TS2339: Property 'filter' does not exist on type 'string | number | true | { [key: string]: Json; } | Json[]'.
+  Property 'filter' does not exist on type 'string'.
+src/features/drive-reports/actions.ts(154,19): error TS2488: Type 'string | number | true | { [key: string]: Json; } | Json[]' must have a '[Symbol.iterator]()' method that returns an iterator.
+src/features/drive-reports/components/report-card-expanded.tsx(66,41): error TS2339: Property 'map' does not exist on type 'Json'.
+  Property 'map' does not exist on type 'string'.
+src/features/drive-reports/components/report-card.tsx(31,36): error TS2339: Property 'includes' does not exist on type 'Json'.
+  Property 'includes' does not exist on type 'number'.
+src/features/drive-reports/components/report-card.tsx(32,39): error TS2339: Property 'length' does not exist on type 'Json'.
+  Property 'length' does not exist on type 'number'.
+src/features/drive-reports/components/report-card.tsx(337,25): error TS2322: Type 'string' is not assignable to type '"report" | "ppt" | "meeting_note"'.
+src/features/drive-reports/components/report-card.tsx(340,25): error TS2322: Type 'string | number | true | { [key: string]: Json; } | Json[]' is not assignable to type '{ context?: string; experimental?: string; findings?: string; difficulties?: string; nextSteps?: string; attendees?: string; notes?: string; agreements?: string; }'.
+  Type 'string' has no properties in common with type '{ context?: string; experimental?: string; findings?: string; difficulties?: string; nextSteps?: string; attendees?: string; notes?: string; agreements?: string; }'.
+src/features/drive-reports/components/report-detail.tsx(34,36): error TS2339: Property 'includes' does not exist on type 'Json'.
+  Property 'includes' does not exist on type 'number'.
+src/features/drive-reports/components/report-detail.tsx(185,65): error TS2339: Property 'length' does not exist on type 'string | number | true | { [key: string]: Json; } | Json[]'.
+  Property 'length' does not exist on type 'number'.
+src/features/drive-reports/components/report-detail.tsx(187,67): error TS2339: Property 'length' does not exist on type 'Json'.
+  Property 'length' does not exist on type 'number'.
+src/features/knowledge/components/knowledge-list.tsx(62,22): error TS2739: Type '{ key: string; item: KnowledgeItem; }' is missing the following properties from type 'ResourceCardProps': onToggleStar, onDelete
+src/features/samples/components/sample-detail-sheet.tsx(62,34): error TS2345: Argument of type '{ created_at: string; created_by: string; data: Json; id: string; images: string[]; sample_id: string; type: string; created_by_user: { full_name: string; }; }[]' is not assignable to parameter of type 'SetStateAction<SampleCharacterization[]>'.
+  Type '{ created_at: string; created_by: string; data: Json; id: string; images: string[]; sample_id: string; type: string; created_by_user: { full_name: string; }; }[]' is not assignable to type 'SampleCharacterization[]'.
+    Type '{ created_at: string; created_by: string; data: Json; id: string; images: string[]; sample_id: string; type: string; created_by_user: { full_name: string; }; }' is not assignable to type 'SampleCharacterization'.
+      Types of property 'data' are incompatible.
+        Type 'Json' is not assignable to type 'Record<string, any>'.
+          Type 'string' is not assignable to type 'Record<string, any>'.
+src/features/samples/components/sample-detail-sheet.tsx(65,46): error TS2345: Argument of type '{ created_at: string; created_by: string; data: Json; id: string; images: string[]; sample_id: string; type: string; created_by_user: { full_name: string; }; }' is not assignable to parameter of type 'SetStateAction<SampleCharacterization>'.
+  Type '{ created_at: string; created_by: string; data: Json; id: string; images: string[]; sample_id: string; type: string; created_by_user: { full_name: string; }; }' is not assignable to type 'SampleCharacterization'.
+    Types of property 'data' are incompatible.
+      Type 'Json' is not assignable to type 'Record<string, any>'.
+        Type 'string' is not assignable to type 'Record<string, any>'.
+src/features/tasks/actions.ts(90,22): error TS2554: Expected 0-1 arguments, but got 2.
+src/features/tasks/components/task-form.tsx(235,45): error TS2345: Argument of type 'string' is not assignable to parameter of type 'SetStateAction<"low" | "medium" | "high">'.
+src/lib/google/picker.ts(30,42): error TS2339: Property 'picker' does not exist on type '{ accounts: { oauth2: { initTokenClient: (config: { client_id: string; scope: string; callback: (response: { access_token?: string; error?: string; }) => void; }) => { requestAccessToken: (options: { prompt: string; }) => void; }; }; }; }'.
+src/lib/google/picker.ts(33,13): error TS2353: Object literal may only specify known properties, and 'callback' does not exist in type '() => void'.
+src/lib/google/picker.ts(43,36): error TS2339: Property 'picker' does not exist on type '{ accounts: { oauth2: { initTokenClient: (config: { client_id: string; scope: string; callback: (response: { access_token?: string; error?: string; }) => void; }) => { requestAccessToken: (options: { prompt: string; }) => void; }; }; }; }'.
+src/lib/google/picker.ts(43,66): error TS2339: Property 'picker' does not exist on type '{ accounts: { oauth2: { initTokenClient: (config: { client_id: string; scope: string; callback: (response: { access_token?: string; error?: string; }) => void; }) => { requestAccessToken: (options: { prompt: string; }) => void; }; }; }; }'.
+src/lib/google/picker.ts(47,38): error TS2339: Property 'picker' does not exist on type '{ accounts: { oauth2: { initTokenClient: (config: { client_id: string; scope: string; callback: (response: { access_token?: string; error?: string; }) => void; }) => { requestAccessToken: (options: { prompt: string; }) => void; }; }; }; }'.
+src/lib/google/picker.ts(48,38): error TS2339: Property 'picker' does not exist on type '{ accounts: { oauth2: { initTokenClient: (config: { client_id: string; scope: string; callback: (response: { access_token?: string; error?: string; }) => void; }) => { requestAccessToken: (options: { prompt: string; }) => void; }; }; }; }'.
+src/lib/google/picker.ts(49,38): error TS2339: Property 'picker' does not exist on type '{ accounts: { oauth2: { initTokenClient: (config: { client_id: string; scope: string; callback: (response: { access_token?: string; error?: string; }) => void; }) => { requestAccessToken: (options: { prompt: string; }) => void; }; }; }; }'.
+src/lib/google/picker.ts(56,47): error TS2339: Property 'picker' does not exist on type '{ accounts: { oauth2: { initTokenClient: (config: { client_id: string; scope: string; callback: (response: { access_token?: string; error?: string; }) => void; }) => { requestAccessToken: (options: { prompt: string; }) => void; }; }; }; }'.
