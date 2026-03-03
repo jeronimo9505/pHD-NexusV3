@@ -54,8 +54,25 @@ export async function signUpAction(formData: FormData) {
 
 export async function getGoogleOAuthUrlAction(): Promise<{ url?: string; error?: string }> {
     const supabase = await createClient();
+
+    // Determine the base URL dynamically based on the request host
+    // This is crucial so that the OAuth callback matches the domain the user is visiting,
+    // otherwise PKCE validation will fail due to cross-domain cookie issues.
     const headerList = await headers();
-    const origin = headerList.get('origin') || 'http://localhost:3000';
+    const host = headerList.get('host') || headerList.get('x-forwarded-host');
+    let origin = 'http://localhost:3000';
+
+    if (host) {
+        const protocol = host.includes('localhost') ? 'http' : 'https';
+        origin = `${protocol}://${host}`;
+    } else if (process.env.NEXT_PUBLIC_SITE_URL) {
+        origin = process.env.NEXT_PUBLIC_SITE_URL;
+    } else if (process.env.NEXT_PUBLIC_VERCEL_URL) {
+        origin = `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`;
+    }
+
+    // Remove trailing slash if present
+    origin = origin.replace(/\/$/, '');
 
     const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
