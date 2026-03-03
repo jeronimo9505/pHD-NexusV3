@@ -13,6 +13,9 @@ dist-ssr
 *.local
 .next/
 
+# Legacy code archive - not needed in production
+_archive/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
