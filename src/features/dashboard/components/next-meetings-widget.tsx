@@ -32,10 +32,12 @@ function formatEventTime(isoString: string): string {
 function getRelativeDayLabel(dateString: string): string {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const date = new Date(dateString.slice(0, 10) + 'T12:00');
-    date.setHours(0, 0, 0, 0);
 
-    const diffMs = date.getTime() - today.getTime();
+    // Parse the date in local time
+    const date = new Date(dateString);
+    const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+    const diffMs = dateOnly.getTime() - today.getTime();
     const diffDays = Math.round(diffMs / 86400000);
 
     if (diffDays === 0) return 'Today';
@@ -75,10 +77,10 @@ export function NextMeetingsWidget({ groupId, events }: { groupId: string, event
                                 <div className="p-3 bg-white border border-slate-100 hover:border-violet-200 rounded-lg shadow-sm transition-all hover:shadow-md flex items-start gap-3">
                                     <div className="shrink-0 flex flex-col items-center justify-center bg-slate-50 border border-slate-100 rounded-md w-12 h-12">
                                         <span className={cn("text-xs font-bold uppercase", isToday ? "text-violet-600" : "text-slate-500")}>
-                                            {new Date(event.start_at.slice(0, 10) + 'T12:00').toLocaleDateString('en-US', { month: 'short' })}
+                                            {new Date(event.start_at).toLocaleDateString('en-US', { month: 'short' })}
                                         </span>
                                         <span className="text-lg font-bold text-slate-800 leading-none">
-                                            {new Date(event.start_at.slice(0, 10) + 'T12:00').toLocaleDateString('en-US', { day: 'numeric' })}
+                                            {new Date(event.start_at).toLocaleDateString('en-US', { day: 'numeric' })}
                                         </span>
                                     </div>
 

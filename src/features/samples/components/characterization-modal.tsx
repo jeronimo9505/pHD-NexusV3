@@ -47,11 +47,14 @@ export function CharacterizationModal({
     const [notes, setNotes] = useState('');
     const [fileOrigin, setFileOrigin] = useState('');
     const [driveFileLink, setDriveFileLink] = useState('');
+    const [performedAt, setPerformedAt] = useState(new Date().toISOString().split('T')[0]);
 
     // UI States
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isGeneratingDoc, setIsGeneratingDoc] = useState(false);
     const [scriptsLoaded, setScriptsLoaded] = useState(false);
+    const [updateBatch, setUpdateBatch] = useState(false);
+    const [hasBulkId, setHasBulkId] = useState(false);
 
     // Initialize Google Scripts
     useEffect(() => {
@@ -74,6 +77,8 @@ export function CharacterizationModal({
                 setNotes(initialData.data.notes || '');
                 setFileOrigin(initialData.data.file_origin || '');
                 setDriveFileLink(initialData.data.drive_file_link || '');
+                setPerformedAt(initialData.performed_at ? initialData.performed_at.split('T')[0] : new Date().toISOString().split('T')[0]);
+                setHasBulkId(!!initialData.data?.__bulk_id__);
 
                 const fields: { key: string; value: string; unit: string }[] = [];
                 const data = initialData.data;
@@ -115,6 +120,9 @@ export function CharacterizationModal({
                 setNotes('');
                 setFileOrigin('');
                 setDriveFileLink('');
+                setPerformedAt(new Date().toISOString().split('T')[0]);
+                setHasBulkId(false);
+                setUpdateBatch(false);
 
                 // Set type (default Raman or keep last? typically default to first)
                 // Actually if we just opened, we can default to Raman.
@@ -255,15 +263,18 @@ export function CharacterizationModal({
             res = await updateCharacterizationAction({
                 id: initialData.id,
                 group_id: groupId,
+                type,
                 data: cleanData,
-                type
+                performed_at: performedAt ? new Date(performedAt).toISOString() : undefined,
+                updateBatch: updateBatch
             });
         } else {
             res = await createCharacterizationAction({
                 group_id: groupId,
                 sample_id: sample.id,
                 type,
-                data: cleanData
+                data: cleanData,
+                performed_at: performedAt ? new Date(performedAt).toISOString() : undefined
             });
         }
 
@@ -398,6 +409,16 @@ export function CharacterizationModal({
                                             onChange={e => setEquipment(e.target.value)}
                                             placeholder="Equipment Name (e.g. Horiba)"
                                             className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all placeholder:text-slate-400"
+                                        />
+                                    </div>
+
+                                    <div className="space-y-1.5 pt-2">
+                                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Experiment Date</label>
+                                        <input
+                                            type="date"
+                                            value={performedAt}
+                                            onChange={e => setPerformedAt(e.target.value)}
+                                            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none font-medium text-slate-700"
                                         />
                                     </div>
                                 </div>
@@ -562,13 +583,23 @@ export function CharacterizationModal({
                             {/* Notes Area */}
                             <div className="space-y-1.5">
                                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Notes & Observations</label>
-                                <textarea
-                                    value={notes}
-                                    onChange={e => setNotes(e.target.value)}
-                                    placeholder="Enter additional details..."
-                                    className="w-full h-24 text-sm border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 resize-none bg-slate-50/30"
-                                />
+                                <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Enter additional details..." className="w-full h-24 text-sm border border-slate-200 rounded-lg px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 resize-none bg-slate-50/30" />
                             </div>
+
+                            {hasBulkId && (
+                                <div className="p-4 bg-orange-50 border border-orange-100 rounded-lg flex items-center gap-3">
+                                    <input
+                                        type="checkbox"
+                                        id="updateBatch"
+                                        checked={updateBatch}
+                                        onChange={e => setUpdateBatch(e.target.checked)}
+                                        className="h-4 w-4 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+                                    />
+                                    <label htmlFor="updateBatch" className="text-sm font-medium text-orange-800 cursor-pointer">
+                                        Update all samples in this batch <span className="text-xs font-normal opacity-70">(Apply changes to grouped records)</span>
+                                    </label>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

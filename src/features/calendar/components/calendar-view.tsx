@@ -167,7 +167,7 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
         localEvents.filter(e => e.start_at >= todayStr).forEach(e => {
             items.push({
                 id: `evt-${e.id}`, type: 'event', title: e.title,
-                dateStr: e.start_at.slice(0, 10),
+                dateStr: new Date(e.start_at).toLocaleDateString('en-CA'), // Get local YYYY-MM-DD
                 startTime: e.all_day ? undefined : isoToLocal(e.start_at),
                 color: e.color, original: e
             });
@@ -179,15 +179,15 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
     const handleCreate = async () => {
         if (!formTitle || !formDate) { toast.error('Título y fecha son obligatorios'); return; }
         setCreating(true);
-        const startAt = formAllDay ? `${formDate}T00:00:00` : `${formDate}T${formStart}:00`;
-        const endAt = formAllDay ? `${formEndDate || formDate}T23:59:59` : `${formEndDate || formDate}T${formEnd}:00`;
+        const startAtStr = formAllDay ? `${formDate}T12:00:00Z` : `${formDate}T${formStart}:00`;
+        const endAtStr = formAllDay ? `${formEndDate || formDate}T13:00:00Z` : `${formEndDate || formDate}T${formEnd}:00`;
 
         const payload = {
             groupId, title: formTitle, description: formDesc || undefined,
             location: formLocation || undefined, url: formUrl || undefined,
             allDay: formAllDay,
-            startAt: new Date(startAt).toISOString(),
-            endAt: new Date(endAt).toISOString(),
+            startAt: formAllDay ? startAtStr : new Date(startAtStr).toISOString(),
+            endAt: formAllDay ? endAtStr : new Date(endAtStr).toISOString(),
             color: formColor,
         };
 
@@ -535,7 +535,7 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
                                         <p className="text-xs text-slate-600 flex items-center gap-2">
                                             <CalendarDays size={12} className="text-slate-400 mt-0.5 shrink-0" />
                                             <span className="leading-tight">
-                                                {new Date(selectedItem.dateStr + 'T12:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                                {new Date(selectedItem.dateStr + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
                                                 {selectedItem.startTime && <span className="font-medium text-slate-800 ml-1">· {selectedItem.startTime}{selectedItem.endTime && ` - ${selectedItem.endTime}`}</span>}
                                             </span>
                                         </p>
