@@ -15,15 +15,19 @@ import {
     FileText,
     Settings,
     MoreHorizontal,
-    CopyPlus // For derive icon? Or just Plus
+    CopyPlus, // For derive icon? Or just Plus
+    X,
+    Clock
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SampleForm } from './sample-form';
 import { ConfigModal } from './config-modal';
 import { CharacterizationModal } from './characterization-modal';
+import { BulkCharacterizationModal } from './bulk-characterization-modal';
 import { formatCellValue, formatDate } from '../utils';
 
 import { SampleDetailSheet } from './sample-detail-sheet';
+import { ActivityLogDrawer } from './activity-log-drawer';
 
 interface SampleGridProps {
     groupId: string;
@@ -81,6 +85,12 @@ export function SampleGrid({
     const [detailSample, setDetailSample] = useState<Sample | null>(null);
     const [deriveFrom, setDeriveFrom] = useState<Sample | null>(null);
     const [initialCharData, setInitialCharData] = useState<any>(null);
+    const [initialCharId, setInitialCharId] = useState<string | null>(null);
+
+    // Selection State
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [bulkCharOpen, setBulkCharOpen] = useState(false);
+    const [activityLogOpen, setActivityLogOpen] = useState(false);
 
     // Lifted state for Unit History (Parameter-scoped) — persisted in localStorage
     // parameterUnits: { "Laser": ["nm"], "Power": ["%"] }
@@ -217,6 +227,23 @@ export function SampleGrid({
         setFormOpen(true);
     };
 
+    const toggleSelectAll = () => {
+        if (selectedIds.size === tree.length && tree.length > 0) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(tree.map(s => s.id)));
+        }
+    };
+
+    const toggleSelect = (id: string) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
     return (
         <>
             <div className="h-full flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -260,6 +287,13 @@ export function SampleGrid({
                             </button>
                         )}
                         <button
+                            onClick={() => setActivityLogOpen(true)}
+                            className="p-2 text-slate-600 hover:bg-slate-200 rounded-lg transition-colors tooltip"
+                            title="Activity Log"
+                        >
+                            <Clock size={20} />
+                        </button>
+                        <button
                             onClick={() => { setEditingSample(null); setDeriveFrom(null); setFormOpen(true); }}
                             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
                         >
@@ -274,6 +308,14 @@ export function SampleGrid({
                     <table className="w-full text-left text-sm border-collapse">
                         <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-10 shadow-sm">
                             <tr>
+                                <th className="px-4 py-3 border-b border-r border-slate-200 w-10 text-center">
+                                    <input
+                                        type="checkbox"
+                                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                        checked={selectedIds.size === tree.length && tree.length > 0}
+                                        onChange={toggleSelectAll}
+                                    />
+                                </th>
                                 <th className="px-4 py-3 border-b border-r border-slate-200 w-32 min-w-[120px]">Code</th>
                                 <th className="px-4 py-3 border-b border-r border-slate-200 w-64 min-w-[200px]">Name</th>
                                 <th className="px-4 py-3 border-b border-r border-slate-200 w-32">Created</th>
@@ -305,7 +347,23 @@ export function SampleGrid({
                                 </tr>
                             )}
                             {tree.map(row => (
-                                <tr key={row.id} className="hover:bg-blue-50/50 group transition-colors">
+                                <tr
+                                    key={row.id}
+                                    className={cn(
+                                        "hover:bg-blue-50/50 group transition-colors",
+                                        selectedIds.has(row.id) && "bg-blue-50/30"
+                                    )}
+                                >
+                                    {/* Checkbox */}
+                                    <td className="w-10 px-4 py-2 border-r border-slate-100 text-center">
+                                        <input
+                                            type="checkbox"
+                                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                            checked={selectedIds.has(row.id)}
+                                            onChange={() => toggleSelect(row.id)}
+                                        />
+                                    </td>
+
                                     {/* Code (with tree connector for children) */}
                                     <td className="px-4 py-2 border-r border-slate-100 font-mono text-xs text-slate-500">
                                         <div className="flex items-center" style={{ paddingLeft: `${row.level * 16}px` }}>
@@ -368,16 +426,17 @@ export function SampleGrid({
                                                         key={i}
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            // Find the latest characterization of this type
+                                                            // Instead of opening the modal to create/edit, we open the detail sheet
+                                                            // and tell it which characterization to highlight/expand.
                                                             const char = row.characterizations?.find((c: any) => c.type === type);
-                                                            setEditingSample(row);
-                                                            setDeriveFrom(null); // Ensure we are not deriving
-                                                            // We need a way to pass initialData to the modal. 
-                                                            // The modal accesses `initialData` from props.
-                                                            // Currently SampleGrid doesn't have a state for `initialCharData`.
-                                                            // We need to add that state or pass it through.
-                                                            if (char) setInitialCharData(char);
-                                                            setCharModalOpen(true);
+                                                            if (char) {
+                                                                setInitialCharId(char.id);
+                                                                setDetailSample(row);
+                                                            } else {
+                                                                // Fallback: if no char found, open the detail sheet on the char tab
+                                                                setInitialCharId(null);
+                                                                setDetailSample(row);
+                                                            }
                                                         }}
                                                         className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-100 hover:bg-purple-100 hover:border-purple-300 transition-colors cursor-pointer"
                                                     >
@@ -391,7 +450,7 @@ export function SampleGrid({
                                     </td>
 
                                     {/* Status (Dropdown) */}
-                                    <td className="px-4 py-2 border-r border-slate-100">
+                                    < td className="px-4 py-2 border-r border-slate-100" >
                                         <select
                                             value={row.status}
                                             onChange={(e) => handleStatusChange(row.id, e.target.value as SampleStatus)}
@@ -471,13 +530,14 @@ export function SampleGrid({
                             ))}
                         </tbody>
                     </table>
-                </div>
-            </div>
+                </div >
+            </div >
 
             {/* Modals */}
-            <ConfigModal
+            < ConfigModal
                 isOpen={configOpen}
-                onClose={() => setConfigOpen(false)}
+                onClose={() => setConfigOpen(false)
+                }
                 groupId={groupId}
                 logbookId={logbookId}
                 nomenclatures={nomenclatures}
@@ -501,38 +561,124 @@ export function SampleGrid({
                 />
             )}
 
-            {(editingSample || deriveFrom) && charModalOpen && (
-                <CharacterizationModal
-                    isOpen={charModalOpen}
-                    onClose={() => { setCharModalOpen(false); setEditingSample(null); setInitialCharData(null); }}
-                    sample={editingSample!}
-                    initialData={initialCharData}
-                    groupId={groupId}
-                    parameterUnits={parameterUnits}
-                    setParameterUnits={setParameterUnits}
-                    lastUnits={lastUnits}
-                    setLastUnits={setLastUnits}
-                    parameterOrder={parameterOrder}
-                    setParameterOrder={setParameterOrder}
-                    driveSettings={driveSettings}
-                />
+            {
+                (editingSample || deriveFrom) && charModalOpen && (
+                    <CharacterizationModal
+                        isOpen={charModalOpen}
+                        onClose={() => { setCharModalOpen(false); setEditingSample(null); setInitialCharData(null); }}
+                        sample={editingSample!}
+                        initialData={initialCharData}
+                        groupId={groupId}
+                        parameterUnits={parameterUnits}
+                        setParameterUnits={setParameterUnits}
+                        lastUnits={lastUnits}
+                        setLastUnits={setLastUnits}
+                        parameterOrder={parameterOrder}
+                        setParameterOrder={setParameterOrder}
+                        driveSettings={driveSettings}
+                    />
+                )
+            }
+
+            {
+                detailSample && (
+                    <SampleDetailSheet
+                        sample={detailSample}
+                        allSamples={tree}
+                        onSelectSample={setDetailSample}
+                        groupId={groupId}
+                        fields={fields}
+                        onClose={() => { setDetailSample(null); setInitialCharId(null); }}
+                        initialCharId={initialCharId || undefined}
+                        parameterUnits={parameterUnits}
+                        setParameterUnits={setParameterUnits}
+                        lastUnits={lastUnits}
+                        setLastUnits={setLastUnits}
+                        parameterOrder={parameterOrder}
+                        setParameterOrder={setParameterOrder}
+                        driveSettings={driveSettings}
+                    />
+                )
+            }
+
+            {/* ──── BATCH ACTIONS BAR ──── */}
+            {selectedIds.size > 0 && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-6 animate-in slide-in-from-bottom-4 duration-300 z-50">
+                    <div className="flex items-center gap-3 border-r border-slate-700 pr-6">
+                        <span className="bg-blue-600 text-[10px] font-bold px-2 py-0.5 rounded-full">{selectedIds.size}</span>
+                        <span className="text-sm font-medium">Selected</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setBulkCharOpen(true)}
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded-lg transition-colors text-sm"
+                        >
+                            <Settings size={16} className="text-purple-400" />
+                            Bulk Characterize
+                        </button>
+
+                        <button
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded-lg transition-colors text-sm text-red-400"
+                            onClick={async () => {
+                                if (!confirm(`Delete ${selectedIds.size} samples?`)) return;
+                                // Bulk delete implementation...
+                                toast.promise(Promise.all(Array.from(selectedIds).map(id => deleteSampleAction(id, groupId))), {
+                                    loading: 'Deleting...',
+                                    success: () => {
+                                        setSelectedIds(new Set());
+                                        return 'Deleted successfully';
+                                    },
+                                    error: 'Failed to delete some samples'
+                                });
+                            }}
+                        >
+                            <Trash2 size={16} />
+                            Delete Selective
+                        </button>
+                    </div>
+
+                    <button
+                        onClick={() => setSelectedIds(new Set())}
+                        className="ml-4 p-1 hover:bg-slate-800 rounded-full text-slate-400"
+                    >
+                        <X size={16} />
+                    </button>
+                </div>
             )}
 
-            {detailSample && (
-                <SampleDetailSheet
-                    sample={detailSample}
-                    groupId={groupId}
-                    fields={fields}
-                    onClose={() => setDetailSample(null)}
-                    parameterUnits={parameterUnits}
-                    setParameterUnits={setParameterUnits}
-                    lastUnits={lastUnits}
-                    setLastUnits={setLastUnits}
-                    parameterOrder={parameterOrder}
-                    setParameterOrder={setParameterOrder}
-                    driveSettings={driveSettings}
-                />
-            )}
+            {/* ──── BULK CHARACTERIZATION MODAL ──── */}
+            <BulkCharacterizationModal
+                isOpen={bulkCharOpen}
+                onClose={() => setBulkCharOpen(false)}
+                sampleIds={Array.from(selectedIds)}
+                groupId={groupId}
+                onSuccess={() => {
+                    setBulkCharOpen(false);
+                    setSelectedIds(new Set());
+                }}
+                parameterUnits={parameterUnits}
+                setParameterUnits={setParameterUnits}
+                lastUnits={lastUnits}
+                setLastUnits={setLastUnits}
+                parameterOrder={parameterOrder}
+                setParameterOrder={setParameterOrder}
+            />
+
+            <ActivityLogDrawer
+                groupId={groupId}
+                isOpen={activityLogOpen}
+                onClose={() => setActivityLogOpen(false)}
+                onSelectSample={(id) => {
+                    const s = samples.find(samp => samp.id === id);
+                    if (s) {
+                        setDetailSample(s);
+                        setActivityLogOpen(false);
+                    } else {
+                        toast.error("Sample not found in current view");
+                    }
+                }}
+            />
         </>
     );
 }

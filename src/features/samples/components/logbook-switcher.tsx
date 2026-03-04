@@ -31,6 +31,7 @@ export function LogbookSwitcher({ groupId, logbooks, currentLogbookId }: Logbook
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [editingLogbook, setEditingLogbook] = useState<Logbook | null>(null);
     const [deletingLogbook, setDeletingLogbook] = useState<Logbook | null>(null);
+    const [duplicatingLogbook, setDuplicatingLogbook] = useState<Logbook | null>(null);
 
     const handleSwitch = (logbookId: string) => {
         const params = new URLSearchParams(searchParams.toString());
@@ -72,6 +73,13 @@ export function LogbookSwitcher({ groupId, logbooks, currentLogbookId }: Logbook
                                     <Edit size={11} />
                                 </button>
                                 <button
+                                    onClick={(e) => { e.stopPropagation(); setDuplicatingLogbook(logbook); }}
+                                    className="p-0.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                    title="Duplicate"
+                                >
+                                    <Copy size={11} />
+                                </button>
+                                <button
                                     onClick={(e) => { e.stopPropagation(); setDeletingLogbook(logbook); }}
                                     className="p-0.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
                                     title="Delete"
@@ -94,11 +102,16 @@ export function LogbookSwitcher({ groupId, logbooks, currentLogbookId }: Logbook
                 </button>
             </div>
 
-            {showCreateModal && (
+            {(showCreateModal || duplicatingLogbook) && (
                 <CreateLogbookModal
                     groupId={groupId}
-                    onClose={() => setShowCreateModal(false)}
+                    onClose={() => { setShowCreateModal(false); setDuplicatingLogbook(null); }}
                     logbooks={logbooks}
+                    initialData={duplicatingLogbook ? {
+                        name: `Copy of ${duplicatingLogbook.name}`,
+                        prefix: duplicatingLogbook.prefix.length < 4 ? `${duplicatingLogbook.prefix}C` : duplicatingLogbook.prefix,
+                        templateId: duplicatingLogbook.id
+                    } : undefined}
                 />
             )}
 
@@ -121,11 +134,21 @@ export function LogbookSwitcher({ groupId, logbooks, currentLogbookId }: Logbook
     );
 }
 
-function CreateLogbookModal({ groupId, onClose, logbooks }: { groupId: string; onClose: () => void; logbooks: Logbook[] }) {
-    const [name, setName] = useState('');
-    const [prefix, setPrefix] = useState('');
+function CreateLogbookModal({
+    groupId,
+    onClose,
+    logbooks,
+    initialData
+}: {
+    groupId: string;
+    onClose: () => void;
+    logbooks: Logbook[];
+    initialData?: { name: string; prefix: string; templateId: string };
+}) {
+    const [name, setName] = useState(initialData?.name || '');
+    const [prefix, setPrefix] = useState(initialData?.prefix || '');
     const [description, setDescription] = useState('');
-    const [templateId, setTemplateId] = useState<string>(''); // Default to none? Or first?
+    const [templateId, setTemplateId] = useState<string>(initialData?.templateId || ''); // Default to none? Or first?
     const [loading, setLoading] = useState(false);
     const router = useRouter();
 

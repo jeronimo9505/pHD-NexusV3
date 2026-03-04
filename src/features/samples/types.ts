@@ -56,6 +56,7 @@ export interface SampleCharacterization {
     images: string[];
     created_by: string;
     created_at: string;
+    performed_at: string; // New: Experiment date
 }
 
 export type SampleFieldType = 'text' | 'number' | 'select' | 'date' | 'nomenclature' | 'boolean' | 'rich-text';

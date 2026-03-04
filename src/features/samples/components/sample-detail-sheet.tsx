@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { Sample, SampleFieldConfig, SampleCharacterization } from '../types';
-import { getCharacterizationsAction, deleteCharacterizationAction, updateSampleAction, updateCharacterizationAction } from '../actions';
-import { X, Calendar, User, FlaskConical, FileText, Plus, ExternalLink, Microscope, Settings, Edit, MessageSquareText, Trash2, Pencil, Check, StickyNote, ArrowLeft } from 'lucide-react';
+import { getCharacterizationsAction, deleteCharacterizationAction, updateSampleAction, updateCharacterizationAction, createCharacterizationAction, getBulkSamplesAction } from '../actions';
+import { X, Calendar, User, FlaskConical, FileText, Plus, ExternalLink, Microscope, Settings, Edit, MessageSquareText, Trash2, Pencil, Check, StickyNote, ArrowLeft, Edit2, ChevronDown, ChevronUp, Loader2, Save, History, Clock, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { formatCellValue } from '../utils';
 import { CharacterizationModal } from './characterization-modal';
+import { format } from 'date-fns';
 import { SampleCommentsSection } from './sample-comments-section';
 
 interface SampleDetailSheetProps {
@@ -22,12 +23,16 @@ interface SampleDetailSheetProps {
     parameterOrder: Record<string, string[]>;
     setParameterOrder: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
     driveSettings?: { clientId?: string; apiKey?: string; folderId?: string; sampleFolderId?: string };
+    initialCharId?: string;
+    allSamples?: (Sample & { level: number })[];
+    onSelectSample?: (sample: Sample) => void;
 }
 
 export function SampleDetailSheet({
     sample, groupId, fields, onClose,
     parameterUnits, setParameterUnits, lastUnits, setLastUnits,
-    parameterOrder, setParameterOrder, driveSettings
+    parameterOrder, setParameterOrder, driveSettings, initialCharId,
+    allSamples = [], onSelectSample
 }: SampleDetailSheetProps) {
     const [activeTab, setActiveTab] = useState<'overview' | 'characterization'>('overview');
     const [characterizations, setCharacterizations] = useState<SampleCharacterization[]>([]);
@@ -43,15 +48,58 @@ export function SampleDetailSheet({
     // Inline Editing State (overview tab)
     const [editingSection, setEditingSection] = useState<'description' | number | null>(null);
     const [editValue, setEditValue] = useState('');
+    // Quick Navigation Sidebar State
+    const [showNav, setShowNav] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+
+    // Bulk Characterization State
+    const [bulkSamples, setBulkSamples] = useState<{ id: string, sample_code: string, name: string }[]>([]);
+    const [isLoadingBulk, setIsLoadingBulk] = useState(false);
+
 
     useEffect(() => {
         if (sample && activeTab === 'characterization') loadCharacterizations();
     }, [sample, activeTab]);
 
+    // Reset expanded detail when switching samples
+    useEffect(() => {
+        setExpandedChar(null);
+    }, [sample?.id]);
+
+    // Auto-expand if initialCharId is provided
+    useEffect(() => {
+        if (initialCharId) {
+            setActiveTab('characterization');
+        }
+    }, [initialCharId]);
+
+    useEffect(() => {
+        if (initialCharId && characterizations.length > 0 && activeTab === 'characterization') {
+            const char = characterizations.find(c => c.id === initialCharId);
+            if (char) setExpandedChar(char);
+        }
+    }, [initialCharId, characterizations, activeTab]);
+
     useEffect(() => {
         setCharNotes(expandedChar?.data?.notes || '');
+
+        // Fetch bulk samples if part of a bulk operation
+        const bulkId = expandedChar?.data?.__bulk_id__;
+        if (bulkId) {
+            loadBulkSamples(bulkId);
+        } else {
+            setBulkSamples([]);
+        }
     }, [expandedChar]);
+
+    const loadBulkSamples = async (bulkId: string) => {
+        setIsLoadingBulk(true);
+        const res = await getBulkSamplesAction(bulkId);
+        if (res.error) console.error(res.error);
+        else setBulkSamples(res.data || []);
+        setIsLoadingBulk(false);
+    };
+
 
     const loadCharacterizations = async () => {
         if (!sample) return;
@@ -179,7 +227,7 @@ export function SampleDetailSheet({
         <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="absolute inset-0" onClick={onClose} />
 
-            {/* ──── LEFT: Detail Panel (slides in from left when a record is expanded) ──── */}
+            {/* ──── LEFT: Detail Panel (expanded characterization) ──── */}
             {isExpanded && (
                 <div
                     className="relative w-full max-w-lg bg-white shadow-2xl h-full flex flex-col border-r border-slate-200 animate-in slide-in-from-right-4 duration-300"
@@ -193,15 +241,47 @@ export function SampleDetailSheet({
                                 {/* Detail Header */}
                                 <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50">
                                     <div className="flex items-center justify-between mb-2">
-                                        <button
-                                            onClick={() => setExpandedChar(null)}
-                                            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition-colors"
-                                        >
-                                            <ArrowLeft size={14} /> Close Detail
-                                        </button>
+                                        <div className="flex flex-col gap-2">
+                                            <button
+                                                onClick={() => setExpandedChar(null)}
+                                                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition-colors"
+                                            >
+                                                <ArrowLeft size={14} /> Close Detail
+                                            </button>
+
+                                            {expandedChar!.data.__bulk_id__ && (
+                                                <div className="animate-in fade-in slide-in-from-top-1 duration-300">
+                                                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                                                        <History size={10} className="text-blue-400" /> Characterized together with:
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {isLoadingBulk ? (
+                                                            <div className="flex items-center gap-2 px-2 py-1 rounded bg-slate-100 animate-pulse">
+                                                                <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce" />
+                                                                <div className="w-12 h-2 bg-slate-200 rounded" />
+                                                            </div>
+                                                        ) : bulkSamples.filter(s => s.id !== sample.id).length > 0 ? (
+                                                            bulkSamples.filter(s => s.id !== sample.id).map(s => (
+                                                                <div
+                                                                    key={s.id}
+                                                                    onClick={() => onSelectSample?.(s as any)}
+                                                                    className="group flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 hover:bg-blue-600 hover:text-white hover:border-blue-600 cursor-pointer transition-all shadow-sm group/tag"
+                                                                    title={`${s.sample_code}: ${s.name}`}
+                                                                >
+                                                                    <span className="text-[11px] font-bold truncate max-w-[120px]">{s.name}</span>
+                                                                    <span className="text-[9px] opacity-60 font-mono tracking-tighter group-hover/tag:text-blue-100 transition-colors shrink-0">{s.sample_code}</span>
+                                                                </div>
+                                                            ))
+                                                        ) : (
+                                                            <span className="text-[10px] text-slate-400 italic">No other samples in this batch.</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
                                         <button
                                             onClick={() => handleEditChar(expandedChar!)}
-                                            className="flex items-center gap-1.5 text-xs bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 transition-colors shadow-sm"
+                                            className="flex items-center gap-1.5 text-xs bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 transition-colors shadow-sm self-start"
                                         >
                                             <Edit size={12} /> Edit Record
                                         </button>
@@ -228,6 +308,25 @@ export function SampleDetailSheet({
                                 {/* Scrollable Content */}
                                 <div className="flex-1 overflow-y-auto p-5 space-y-5 scrollbar-thin scrollbar-thumb-slate-200">
                                     {/* Data Points Table */}
+                                    <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 mb-6">
+                                        <h3 className="text-xs font-bold text-slate-800 uppercase mb-2 flex items-center gap-2">
+                                            <Microscope size={14} className="text-purple-500" />
+                                            {expandedChar.type}
+                                        </h3>
+                                        {expandedChar.data.equipment && (
+                                            <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
+                                                <span className="font-medium">Equipment:</span>
+                                                <span>{expandedChar.data.equipment}</span>
+                                            </div>
+                                        )}
+                                        {expandedChar.performed_at && (
+                                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                                                <Calendar size={12} className="text-slate-400" />
+                                                <span className="font-medium">Date:</span>
+                                                <span>{format(new Date(expandedChar.performed_at), 'PPPP')}</span>
+                                            </div>
+                                        )}
+                                    </div>
                                     <div>
                                         <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                                             <Microscope size={12} className="text-purple-500" /> Data Points
@@ -325,7 +424,7 @@ export function SampleDetailSheet({
                 </div>
             )}
 
-            {/* ──── RIGHT: Original Sidebar (unchanged) ──── */}
+            {/* ──── MIDDLE: Original Sidebar (Sample Detail) ──── */}
             <div
                 className="relative w-full max-w-xl bg-white shadow-2xl h-full flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-300"
                 onClick={(e) => e.stopPropagation()}
@@ -347,9 +446,23 @@ export function SampleDetailSheet({
                             </div>
                             <h2 className="text-lg font-bold text-slate-900 leading-tight">{sample.name}</h2>
                         </div>
-                        <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
-                            <X size={18} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                            {allSamples.length > 0 && (
+                                <button
+                                    onClick={() => setShowNav(!showNav)}
+                                    className={cn(
+                                        "p-1.5 rounded-full transition-colors",
+                                        showNav ? "bg-blue-100 text-blue-600" : "hover:bg-slate-200 text-slate-400 hover:text-slate-600"
+                                    )}
+                                    title="Quick Navigation"
+                                >
+                                    <History size={18} />
+                                </button>
+                            )}
+                            <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+                                <X size={18} />
+                            </button>
+                        </div>
                     </div>
                     <div className="flex items-center gap-4 text-xs text-slate-500">
                         <div className="flex items-center gap-1">
@@ -542,28 +655,50 @@ export function SampleDetailSheet({
                                         >
                                             <div className="flex items-center gap-3 overflow-hidden">
                                                 <span className={cn(
-                                                    "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 shrink-0",
-                                                    char.type === 'Raman' && "bg-purple-100 text-purple-700",
-                                                    char.type === 'AFM' && "bg-blue-100 text-blue-700"
+                                                    "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0",
+                                                    char.type === 'Raman' ? "bg-purple-100 text-purple-700" :
+                                                        char.type === 'AFM' ? "bg-blue-100 text-blue-700" :
+                                                            "bg-slate-100 text-slate-600"
                                                 )}>
                                                     {char.type}
                                                 </span>
                                                 <div className="flex flex-col min-w-0">
                                                     <span className="text-xs font-medium text-slate-800 truncate group-hover:text-blue-700 transition-colors">{getSummaryString(char) || 'No params'}</span>
-                                                    <span className="text-[10px] text-slate-400">{new Date(char.created_at).toLocaleDateString()} {char.data.equipment ? `• ${char.data.equipment}` : ''}</span>
+                                                    <div className="flex items-center gap-2 mt-0.5">
+                                                        <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                                                            <Clock size={10} />
+                                                            {new Date(char.created_at).toLocaleDateString()}
+                                                        </span>
+                                                        {char.performed_at && (
+                                                            <span className="text-[10px] text-blue-500 bg-blue-50 px-1 rounded flex items-center gap-1">
+                                                                <Calendar size={10} />
+                                                                {format(new Date(char.performed_at), 'dd/MM/yy')}
+                                                            </span>
+                                                        )}
+                                                        {char.data.equipment && (
+                                                            <span className="text-[10px] text-slate-400 shrink-0">• {char.data.equipment}</span>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-1">
-                                                {char.data.drive_file_link && (
-                                                    <a href={char.data.drive_file_link} target="_blank" onClick={(e) => e.stopPropagation()} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors">
-                                                        <ExternalLink size={12} />
-                                                    </a>
-                                                )}
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        // Duplicate: data without ID
+                                                        setSelectedChar({ ...char, id: '' });
+                                                        setIsCharModalOpen(true);
+                                                    }}
+                                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                                                    title="Duplicate"
+                                                >
+                                                    <Copy size={13} />
+                                                </button>
                                                 <button onClick={(e) => { e.stopPropagation(); handleEditChar(char); }} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-100 rounded transition-colors">
-                                                    <Edit size={12} />
+                                                    <Edit size={13} />
                                                 </button>
                                                 <button onClick={(e) => { e.stopPropagation(); handleDeleteChar(char.id); }} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-100 rounded transition-colors">
-                                                    <Trash2 size={12} />
+                                                    <Trash2 size={13} />
                                                 </button>
                                             </div>
                                         </div>
@@ -590,6 +725,47 @@ export function SampleDetailSheet({
                 setParameterOrder={setParameterOrder}
                 driveSettings={driveSettings}
             />
+            {/* ──── RIGHT: Quick Navigation Sidebar ──── */}
+            {showNav && allSamples.length > 0 && (
+                <div className="relative w-64 bg-slate-50 border-l border-slate-200 h-full flex flex-col animate-in slide-in-from-right duration-300">
+                    <div className="p-4 border-b border-slate-200 bg-white">
+                        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                            <History size={14} /> Quick Nav
+                        </h3>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin">
+                        {allSamples.map((s) => (
+                            <button
+                                key={s.id}
+                                onClick={() => onSelectSample?.(s)}
+                                className={cn(
+                                    "w-full text-left px-3 py-2 rounded-lg text-xs transition-all flex flex-col gap-0.5 group",
+                                    sample?.id === s.id
+                                        ? "bg-blue-600 text-white shadow-md shadow-blue-200"
+                                        : "hover:bg-white hover:shadow-sm text-slate-600 hover:text-blue-600"
+                                )}
+                                style={{ marginLeft: `${s.level * 12}px`, width: `calc(100% - ${s.level * 12}px)` }}
+                            >
+                                <div className="flex items-center justify-between">
+                                    <span className="font-bold truncate">{s.sample_code || s.display_id}</span>
+                                    <span className={cn(
+                                        "text-[9px] uppercase px-1 rounded",
+                                        sample?.id === s.id ? "bg-blue-500 text-white" : "bg-slate-200 text-slate-500"
+                                    )}>
+                                        {s.status}
+                                    </span>
+                                </div>
+                                <span className={cn(
+                                    "truncate opacity-70",
+                                    sample?.id === s.id ? "text-blue-50" : "text-slate-400"
+                                )}>
+                                    {s.name}
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

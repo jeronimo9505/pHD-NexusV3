@@ -45,6 +45,13 @@ export async function createLogbookAction(input: {
 
     // 2. Clone from template if provided
     if (input.template_logbook_id) {
+        // Get template logbook details (especially prefix)
+        const { data: templateLogbook } = await supabase
+            .from('logbooks')
+            .select('prefix')
+            .eq('id', input.template_logbook_id)
+            .single();
+
         // Clone Nomenclatures
         const { data: noms } = await supabase
             .from('sample_nomenclatures')
@@ -81,9 +88,94 @@ export async function createLogbookAction(input: {
             }));
             await supabase.from('sample_fields_config').insert(newFields);
         }
-    } else {
-        // If no template, maybe standard defaults/seeds could go here?
-        // For now, empty logbook.
+
+        // 3. Clone Samples (with parent relationship preservation and prefix replacement)
+        const { data: samples } = await supabase
+            .from('samples')
+            .select('*')
+            .eq('logbook_id', input.template_logbook_id)
+            .order('created_at', { ascending: true });
+
+        if (samples && samples.length > 0) {
+            const oldToNewIdMap: Record<string, string> = {};
+            const user = (await supabase.auth.getUser()).data.user;
+            const oldPrefix = templateLogbook?.prefix;
+
+            // Helper to update IDs based on new prefix to avoid unique constraint violations
+            const updateIds = (val: string | null) => {
+                if (!val || !oldPrefix) return val;
+                if (val.startsWith(`${oldPrefix}-`)) {
+                    return val.replace(`${oldPrefix}-`, `${input.prefix}-`);
+                }
+                return val;
+            };
+
+            for (const s of samples) {
+                const newSamplePayload = {
+                    group_id: input.group_id,
+                    logbook_id: logbook.id,
+                    display_id: updateIds(s.display_id),
+                    sample_code: updateIds(s.sample_code),
+                    name: s.name,
+                    description: s.description,
+                    parent_id: s.parent_id ? (oldToNewIdMap[s.parent_id] || null) : null,
+                    type: s.type,
+                    status: s.status,
+                    attributes: s.attributes,
+                    composition: s.composition,
+                    created_by: user?.id || s.created_by
+                };
+
+                const { data: newSample, error: sampleError } = await supabase
+                    .from('samples')
+                    .insert(newSamplePayload)
+                    .select()
+                    .single();
+
+                if (sampleError) {
+                    console.error('Error cloning sample:', sampleError);
+                    // Continue with other samples or return? Let's try to continue but log.
+                    continue;
+                }
+
+                if (newSample) {
+                    oldToNewIdMap[s.id] = newSample.id;
+
+                    // 4. Clone Characterizations for this sample
+                    const { data: chars } = await supabase
+                        .from('sample_characterizations')
+                        .select('*')
+                        .eq('sample_id', s.id);
+
+                    if (chars && chars.length > 0) {
+                        const newChars = chars.map(c => ({
+                            sample_id: newSample.id,
+                            type: c.type,
+                            data: c.data,
+                            images: c.images,
+                            created_by: user?.id || c.created_by,
+                            performed_at: (c as any).performed_at
+                        }));
+                        await supabase.from('sample_characterizations').insert(newChars);
+                    }
+
+                    // 5. Clone Comments for this sample
+                    const { data: comments } = await supabase
+                        .from('sample_comments')
+                        .select('*')
+                        .eq('sample_id', s.id);
+
+                    if (comments && comments.length > 0) {
+                        const newComments = comments.map(c => ({
+                            sample_id: newSample.id,
+                            author_id: user?.id || c.author_id,
+                            content: c.content
+                        }));
+                        await supabase.from('sample_comments').insert(newComments);
+                    }
+                }
+            }
+        }
     }
 
     revalidatePath(`/${input.group_id}/samples`);
@@ -140,7 +232,7 @@ export async function getSamplesAction(groupId: string, logbookId: string) {
             *,
             parent:parent_id(id, display_id),
             created_by_user:created_by(full_name, email),
-            characterizations:sample_characterizations(id, type, data, created_at)
+            characterizations:sample_characterizations(id, type, data, created_at, performed_at)
         `)
         .eq('group_id', groupId)
         .eq('logbook_id', logbookId) // Filter by logbook
@@ -181,30 +273,41 @@ export async function createSampleAction(input: CreateSampleInput, logbookId: st
     let sampleCode = '';
 
     if (input.parent_id) {
-        // Derived: append -r{n} to parent's code
+        // Derived: more compact logic for future samples
         const { data: parent } = await supabase
             .from('samples')
-            .select('sample_code')
+            .select('sample_code, parent_id') // Get parent_id to check if it's a root
             .eq('id', input.parent_id)
             .single();
 
         const parentCode = parent?.sample_code || `${LOGBOOK_PREFIX}-?`;
 
-        // Count existing children of this parent to determine branch index
+        // Count existing children of this parent to determine branch/mod index
         const { count: siblingCount } = await supabase
             .from('samples')
             .select('*', { count: 'exact', head: true })
             .eq('parent_id', input.parent_id)
             .eq('group_id', input.group_id);
 
-        sampleCode = `${parentCode}-r${(siblingCount || 0) + 1}`;
+        const index = (siblingCount || 0) + 1;
+
+        if (!parent?.parent_id) {
+            // Level 1 (Child of Root): Modification -> Append 'r' + number (no hyphen)
+            // Example: A-2 -> A-2r1
+            sampleCode = `${parentCode}r${index}`;
+        } else {
+            // Level 2+ (Sub-branch): Append a lowercase letter
+            // Example: A-2r1 -> A-2r1a, A-2r1b
+            const letter = String.fromCharCode(96 + index); // 1->a, 2->b...
+            sampleCode = `${parentCode}${letter}`;
+        }
     } else {
-        // Stock (root): sequential number
+        // Stock (root): remains {Prefix}-{Number}
         const { count } = await supabase
             .from('samples')
             .select('*', { count: 'exact', head: true })
             .eq('group_id', input.group_id)
-            .eq('logbook_id', logbookId) // Count only in this logbook
+            .eq('logbook_id', logbookId)
             .is('parent_id', null);
 
         sampleCode = `${LOGBOOK_PREFIX}-${(count || 0) + 1}`;
@@ -331,6 +434,7 @@ export async function createCharacterizationAction(input: {
     group_id: string;
     type: string;
     data: Record<string, any>;
+    performed_at?: string;
 }) {
     const supabase = await createClient();
     const user = await supabase.auth.getUser();
@@ -339,7 +443,8 @@ export async function createCharacterizationAction(input: {
         sample_id: input.sample_id,
         type: input.type,
         data: input.data,
-        created_by: user.data.user?.id
+        created_by: user.data.user?.id,
+        performed_at: input.performed_at || new Date().toISOString()
     };
 
     const { error } = await supabase.from('sample_characterizations').insert(payload);
@@ -350,24 +455,78 @@ export async function createCharacterizationAction(input: {
     return { success: true };
 }
 
+export async function createBulkCharacterizationAction(input: {
+    sample_ids: string[];
+    group_id: string;
+    type: string;
+    data: Record<string, any>;
+    performed_at?: string;
+}) {
+    const supabase = await createClient();
+    const user = await supabase.auth.getUser();
+    const bulkId = crypto.randomUUID();
+
+    const payloads = input.sample_ids.map(id => ({
+        sample_id: id,
+        type: input.type,
+        data: { ...input.data, __bulk_id__: bulkId },
+        created_by: user.data.user?.id,
+        performed_at: input.performed_at || new Date().toISOString()
+    }));
+
+    const { error } = await supabase.from('sample_characterizations').insert(payloads);
+
+    if (error) return { error: error.message };
+
+    revalidatePath(`/${input.group_id}/samples`);
+    return { success: true };
+}
+
+
 export async function updateCharacterizationAction(input: {
     id: string;
     group_id: string;
     data: Record<string, any>;
     type?: string;
+    performed_at?: string;
+    updateBatch?: boolean;
 }) {
     const supabase = await createClient();
 
-    // Check ownership or role? Assuming basic RLS handles it for now
-    const { error } = await supabase
+    // 1. Get current record to check for bulk_id
+    const { data: current } = await supabase
         .from('sample_characterizations')
-        .update({
-            data: input.data,
-            type: input.type // Optional update if needed
-        })
-        .eq('id', input.id);
+        .select('data')
+        .eq('id', input.id)
+        .single();
 
-    if (error) return { error: error.message };
+    const bulkId = (current?.data as any)?.__bulk_id__;
+
+    if (input.updateBatch && bulkId) {
+        // Update all related records
+        const { error } = await supabase
+            .from('sample_characterizations')
+            .update({
+                data: { ...input.data, __bulk_id__: bulkId },
+                type: input.type,
+                performed_at: input.performed_at
+            })
+            .contains('data', { __bulk_id__: bulkId });
+
+        if (error) return { error: error.message };
+    } else {
+        // Update only this one
+        const { error } = await supabase
+            .from('sample_characterizations')
+            .update({
+                data: input.updateBatch ? { ...input.data, __bulk_id__: bulkId } : input.data,
+                type: input.type,
+                performed_at: input.performed_at
+            })
+            .eq('id', input.id);
+
+        if (error) return { error: error.message };
+    }
 
     revalidatePath(`/${input.group_id}/samples`);
     return { success: true };
@@ -399,6 +558,27 @@ export async function getCharacterizationsAction(sampleId: string) {
 
     if (error) return { error: error.message };
     return { data };
+}
+
+export async function getBulkSamplesAction(bulkId: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+        .from('sample_characterizations')
+        .select(`
+            sample:sample_id(id, sample_code, name)
+        `)
+        .contains('data', { __bulk_id__: bulkId });
+
+    if (error) return { error: error.message };
+
+    const samplesMap = new Map();
+    (data || []).forEach((item: any) => {
+        if (item.sample) {
+            samplesMap.set(item.sample.id, item.sample);
+        }
+    });
+
+    return { data: Array.from(samplesMap.values()) };
 }
 
 export async function deleteSampleAction(sampleId: string, groupId: string) {
@@ -572,3 +752,95 @@ export async function deleteSampleCommentAction(commentId: string, groupId: stri
     }
 }
 
+// ─── ACTIVITY LOG ──────────────────────────────────────────────────
+
+export async function getActivityLogAction(groupId: string) {
+    const supabase = await createClient();
+
+    // 1. Fetch Audit Logs
+    const { data: audits, error: auditError } = await supabase
+        .from('sample_audit_log')
+        .select(`
+            id,
+            sample_id,
+            action,
+            created_at,
+            sample:sample_id(sample_code, name),
+            user:user_id(full_name)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+    // 2. Fetch Characterizations
+    const { data: chars, error: charError } = await supabase
+        .from('sample_characterizations')
+        .select(`
+            id,
+            sample_id,
+            type,
+            data,
+            created_at,
+            sample:sample_id(sample_code, name),
+            created_by_user:created_by(full_name)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+    if (auditError || charError) return { error: (auditError || charError)?.message };
+
+    // 3. Group and Consolidate
+    const groupedChars = new Map<string, any>();
+    const singleChars: any[] = [];
+
+    (chars || []).forEach((c: any) => {
+        const bId = c.data?.__bulk_id__;
+        if (bId) {
+            if (!groupedChars.has(bId)) {
+                groupedChars.set(bId, {
+                    id: bId,
+                    type: 'characterization',
+                    isBulk: true,
+                    action: c.type,
+                    created_at: c.created_at,
+                    samples: [],
+                    user_name: (c.created_by_user as any)?.full_name || 'System'
+                });
+            }
+            const group = groupedChars.get(bId);
+            group.samples.push({
+                id: c.sample_id,
+                code: (c.sample as any)?.sample_code || '?',
+                name: (c.sample as any)?.name
+            });
+        } else {
+            singleChars.push({
+                id: c.id,
+                type: 'characterization',
+                action: c.type,
+                created_at: c.created_at,
+                sample_id: c.sample_id,
+                sample_code: (c.sample as any)?.sample_code,
+                sample_name: (c.sample as any)?.name,
+                user_name: (c.created_by_user as any)?.full_name || 'System'
+            });
+        }
+    });
+
+    const consolidated = [
+        ...(audits || []).map(a => ({
+            id: a.id,
+            type: 'audit',
+            action: a.action,
+            created_at: a.created_at,
+            sample_id: a.sample_id,
+            sample_code: (a.sample as any)?.sample_code,
+            sample_name: (a.sample as any)?.name,
+            user_name: (a.user as any)?.full_name || 'System'
+        })),
+        ...singleChars,
+        ...Array.from(groupedChars.values())
+    ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 50);
+
+    return { data: consolidated };
+}
