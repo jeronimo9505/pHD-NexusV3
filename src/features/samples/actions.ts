@@ -267,51 +267,31 @@ export async function createSampleAction(input: CreateSampleInput, logbookId: st
         ? input.composition.map(c => c.code).join('-')
         : 'New Sample'; // Fallback
 
-    // Auto-generate sample_code
-    // Stock (root):   {prefix}-{n}           e.g. S-1, S-2
-    // Derived:        {parentCode}-r{n}      e.g. S-1-r1, S-1-r2, S-1-r1-r1
+    // Auto-generate sample_code: A1, A2 (Level 0), B1, B2 (Level 1), etc.
     let sampleCode = '';
+    let level = 0;
 
     if (input.parent_id) {
-        // Derived: more compact logic for future samples
+        // Get parent level
         const { data: parent } = await supabase
             .from('samples')
-            .select('sample_code, parent_id') // Get parent_id to check if it's a root
+            .select('level')
             .eq('id', input.parent_id)
             .single();
 
-        const parentCode = parent?.sample_code || `${LOGBOOK_PREFIX}-?`;
-
-        // Count existing children of this parent to determine branch/mod index
-        const { count: siblingCount } = await supabase
-            .from('samples')
-            .select('*', { count: 'exact', head: true })
-            .eq('parent_id', input.parent_id)
-            .eq('group_id', input.group_id);
-
-        const index = (siblingCount || 0) + 1;
-
-        if (!parent?.parent_id) {
-            // Level 1 (Child of Root): Modification -> Append 'r' + number (no hyphen)
-            // Example: A-2 -> A-2r1
-            sampleCode = `${parentCode}r${index}`;
-        } else {
-            // Level 2+ (Sub-branch): Append a lowercase letter
-            // Example: A-2r1 -> A-2r1a, A-2r1b
-            const letter = String.fromCharCode(96 + index); // 1->a, 2->b...
-            sampleCode = `${parentCode}${letter}`;
-        }
-    } else {
-        // Stock (root): remains {Prefix}-{Number}
-        const { count } = await supabase
-            .from('samples')
-            .select('*', { count: 'exact', head: true })
-            .eq('group_id', input.group_id)
-            .eq('logbook_id', logbookId)
-            .is('parent_id', null);
-
-        sampleCode = `${LOGBOOK_PREFIX}-${(count || 0) + 1}`;
+        level = (parent?.level ?? 0) + 1;
     }
+
+    // Count existing samples at this level to determine next number
+    const { count: levelCount } = await supabase
+        .from('samples')
+        .select('*', { count: 'exact', head: true })
+        .eq('group_id', input.group_id)
+        .eq('level', level);
+
+    const char = String.fromCharCode(65 + level); // 0->A, 1->B, 2->C...
+    const index = (levelCount || 0) + 1;
+    sampleCode = `${char}${index}`;
 
     const payload: any = {
         group_id: input.group_id,

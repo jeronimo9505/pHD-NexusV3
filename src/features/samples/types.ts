@@ -31,6 +31,7 @@ export interface Sample {
     status: SampleStatus;
     attributes: Record<string, any>;
     composition: SampleCompositionItem[];
+    level: number;
     created_by: string;
     created_at: string;
     updated_at: string;
@@ -80,6 +81,7 @@ export interface CreateSampleInput {
     attributes: Record<string, any>;
     composition: SampleCompositionItem[];
     description?: string;
+    level?: number;
 }
 
 export interface UpdateSampleInput {
