@@ -36,11 +36,15 @@ export function RamanWorkspace({ samples, driveSettings }: RamanWorkspaceProps) 
         if (!search.trim()) return ramanData;
         const q = search.toLowerCase();
         return ramanData.filter(({ sample, char }) => {
+            const compositionString = sample.composition ? sample.composition.map(c => c.value).join(' ') : '';
+            const charDataString = Object.values(char.data || {}).join(' ');
+
             return (
                 sample.sample_code?.toLowerCase().includes(q) ||
+                sample.display_id?.toLowerCase().includes(q) ||
                 sample.name?.toLowerCase().includes(q) ||
-                char.data.equipment?.toLowerCase().includes(q) ||
-                char.data.notes?.toLowerCase().includes(q)
+                compositionString.toLowerCase().includes(q) ||
+                charDataString.toLowerCase().includes(q)
             );
         });
     }, [ramanData, search]);
@@ -56,6 +60,20 @@ export function RamanWorkspace({ samples, driveSettings }: RamanWorkspaceProps) 
     };
 
     const clearSelection = () => setSelectedIds(new Set());
+
+    const selectAll = () => {
+        const allIds = filteredData.map(d => d.char.id);
+        setSelectedIds(new Set(allIds));
+    };
+
+    // Helper for abbreviations
+    const getAbbr = (data: any) => {
+        const parts = [];
+        if (data.laser_wavelength) parts.push(`${data.laser_wavelength}nm`);
+        if (data.laser_power) parts.push(`${data.laser_power}`);
+        if (data.analyte) parts.push(data.analyte);
+        return parts.join(' | ');
+    }
 
     return (
         <div className="flex h-full bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -114,14 +132,21 @@ export function RamanWorkspace({ samples, driveSettings }: RamanWorkspaceProps) 
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="text-[10px] text-slate-500 truncate" title={sample.name}>
+                                        <div className="text-[10px] text-slate-500 font-medium truncate mb-0.5" title={sample.name}>
                                             {sample.name}
                                         </div>
-                                        {char.data.equipment && (
-                                            <div className="text-[9px] mt-1 inline-flex items-center px-1.5 py-0.5 rounded-sm bg-slate-100 text-slate-600">
-                                                {char.data.equipment}
-                                            </div>
-                                        )}
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                            {getAbbr(char.data) && (
+                                                <span className="text-[9px] inline-flex items-center px-1.5 py-0.5 rounded-sm bg-purple-100 text-purple-700 font-medium">
+                                                    {getAbbr(char.data)}
+                                                </span>
+                                            )}
+                                            {char.data.equipment && (
+                                                <span className="text-[9px] inline-flex items-center px-1.5 py-0.5 rounded-sm bg-slate-100 text-slate-600">
+                                                    {char.data.equipment}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             );
@@ -130,14 +155,25 @@ export function RamanWorkspace({ samples, driveSettings }: RamanWorkspaceProps) 
                 </div>
 
                 {/* Footer Selection Status */}
-                {selectedIds.size > 0 && (
-                    <div className="p-3 bg-purple-600 text-white text-xs flex items-center justify-between shadow-lg z-10 animate-in slide-in-from-bottom">
-                        <span className="font-medium">{selectedIds.size} selected</span>
-                        <button onClick={clearSelection} className="text-purple-100 hover:text-white underline">
-                            Clear
-                        </button>
+                <div className="p-3 bg-white border-t border-slate-200 text-xs flex items-center justify-between z-10">
+                    {selectedIds.size > 0 ? (
+                        <span className="font-medium text-purple-600">{selectedIds.size} selected</span>
+                    ) : (
+                        <span className="text-slate-400">{filteredData.length} available</span>
+                    )}
+                    <div className="flex gap-3">
+                        {filteredData.length > 0 && selectedIds.size < filteredData.length && (
+                            <button onClick={selectAll} className="text-slate-500 hover:text-purple-600 font-medium">
+                                Select All
+                            </button>
+                        )}
+                        {selectedIds.size > 0 && (
+                            <button onClick={clearSelection} className="text-slate-500 hover:text-red-600 font-medium">
+                                Clear
+                            </button>
+                        )}
                     </div>
-                )}
+                </div>
             </div>
 
             {/* RIGHT PANEL: Graph */}
@@ -155,9 +191,12 @@ export function RamanWorkspace({ samples, driveSettings }: RamanWorkspaceProps) 
                         <MultiSpectrumGraph
                             selectedConfigs={Array.from(selectedIds).map(id => {
                                 const entry = ramanData.find(d => d.char.id === id);
+                                const abbr = getAbbr(entry!.char.data);
+                                const code = entry!.sample.sample_code || entry!.sample.display_id;
                                 return {
                                     fileId: entry!.char.data.raman_spectrum_file_id,
-                                    label: entry!.sample.sample_code || entry!.sample.display_id,
+                                    label: entry!.sample.name || code,
+                                    subLabel: `${code}${abbr ? ` - ${abbr}` : ''}`,
                                     charId: id
                                 };
                             })}
