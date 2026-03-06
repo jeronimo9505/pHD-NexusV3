@@ -4,8 +4,10 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Sample, SampleCharacterization } from '../types';
 import { createCharacterizationAction, updateCharacterizationAction } from '../actions';
 import { toast } from 'sonner';
-import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List } from 'lucide-react';
+import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { uploadFileToDrive } from '@/lib/google/upload';
+import { ensureAuth } from '@/lib/google/auth';
 
 interface CharacterizationModalProps {
     groupId: string;
@@ -48,6 +50,7 @@ export function CharacterizationModal({
     const [fileOrigin, setFileOrigin] = useState('');
     const [driveFileLink, setDriveFileLink] = useState('');
     const [performedAt, setPerformedAt] = useState(new Date().toISOString().split('T')[0]);
+    const [ramanSpectrum, setRamanSpectrum] = useState('');
 
     // UI States
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -79,6 +82,7 @@ export function CharacterizationModal({
                 setDriveFileLink(initialData.data.drive_file_link || '');
                 setPerformedAt(initialData.performed_at ? initialData.performed_at.split('T')[0] : new Date().toISOString().split('T')[0]);
                 setHasBulkId(!!initialData.data?.__bulk_id__);
+                setRamanSpectrum(''); // Always reset for new session
 
                 const fields: { key: string; value: string; unit: string }[] = [];
                 const data = initialData.data;
@@ -123,6 +127,7 @@ export function CharacterizationModal({
                 setPerformedAt(new Date().toISOString().split('T')[0]);
                 setHasBulkId(false);
                 setUpdateBatch(false);
+                setRamanSpectrum('');
 
                 // Set type (default Raman or keep last? typically default to first)
                 // Actually if we just opened, we can default to Raman.
@@ -250,6 +255,55 @@ export function CharacterizationModal({
         if (fileOrigin.trim()) cleanData['file_origin'] = fileOrigin.trim();
         if (driveFileLink.trim()) cleanData['drive_file_link'] = driveFileLink.trim();
 
+        // Raman Spectrum Logic
+        if (type === 'Raman' && ramanSpectrum.trim()) {
+            try {
+                const parseXYData = (text: string) => {
+                    return text.trim().split('\n').map(line => {
+                        const parts = line.trim().split(/\s+/);
+                        if (parts.length >= 2) {
+                            const x = parseFloat(parts[0]);
+                            const y = parseFloat(parts[1]);
+                            if (!isNaN(x) && !isNaN(y)) return { x, y };
+                        }
+                        return null;
+                    }).filter(Boolean);
+                };
+
+                const spectrumData = parseXYData(ramanSpectrum);
+                if (spectrumData.length > 0) {
+                    const payload = {
+                        sample_id: sample.id,
+                        sample_code: sample.sample_code,
+                        sample_name: sample.name,
+                        date: performedAt,
+                        equipment: equipment,
+                        parameters: cleanData,
+                        data: spectrumData
+                    };
+                    const jsonString = JSON.stringify(payload, null, 2);
+                    const docName = [
+                        sample.sample_code || sample.display_id,
+                        sample.name || '',
+                        'Spectrum'
+                    ].filter(Boolean).join('_');
+
+                    const blob = new Blob([jsonString], { type: 'application/json' });
+                    const file = new File([blob], `${docName}.json`, { type: 'application/json' });
+
+                    const targetFolderId = driveSettings?.sampleFolderId || driveSettings?.folderId;
+                    const driveFile = await uploadFileToDrive(file, targetFolderId);
+
+                    if (driveFile && driveFile.id) {
+                        cleanData['raman_spectrum_file_id'] = driveFile.id;
+                    }
+                }
+            } catch (err) {
+                console.error('Error uploading Raman spectrum:', err);
+                toast.error('Failed to upload spectrum data to Drive');
+            }
+        }
+
         // Critical: Save the order
         cleanData['__order__'] = orderedKeys;
 
@@ -259,7 +313,7 @@ export function CharacterizationModal({
         }
 
         let res;
-        if (initialData) {
+        if (initialData?.id) {
             res = await updateCharacterizationAction({
                 id: initialData.id,
                 group_id: groupId,
@@ -283,7 +337,7 @@ export function CharacterizationModal({
         if (res.error) {
             toast.error(res.error);
         } else {
-            toast.success(initialData ? 'Updated' : 'Created');
+            toast.success(initialData?.id ? 'Updated' : 'Created');
             onClose();
         }
     };
@@ -367,7 +421,7 @@ export function CharacterizationModal({
                         </div>
                         <div>
                             <h2 className="text-lg font-bold text-slate-800 leading-tight">
-                                {initialData ? 'Edit Characterization' : 'New Characterization'}
+                                {initialData?.id ? 'Edit Characterization' : 'New Characterization'}
                             </h2>
                             <div className="flex items-center gap-2 text-xs text-slate-500">
                                 <span className="font-medium text-slate-700">{sample.name}</span>
@@ -598,6 +652,32 @@ export function CharacterizationModal({
                                     <label htmlFor="updateBatch" className="text-sm font-medium text-orange-800 cursor-pointer">
                                         Update all samples in this batch <span className="text-xs font-normal opacity-70">(Apply changes to grouped records)</span>
                                     </label>
+                                </div>
+                            )}
+
+                            {/* Raman Spectrum Field */}
+                            {type === 'Raman' && (
+                                <div className="p-5 bg-purple-50/50 border border-purple-100 rounded-xl space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <div className="p-1.5 bg-purple-100 text-purple-600 rounded-lg">
+                                                <Activity size={16} />
+                                            </div>
+                                            <div>
+                                                <h4 className="text-sm font-bold text-slate-800">Raman Spectrum Data</h4>
+                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Paste XY values (Tab/Space separated)</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <textarea
+                                        value={ramanSpectrum}
+                                        onChange={e => setRamanSpectrum(e.target.value)}
+                                        placeholder="369.28  744.15&#10;372.51  740.00&#10;..."
+                                        className="w-full h-48 text-[11px] font-mono border border-purple-200 rounded-lg px-3 py-2.5 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 resize-none bg-white shadow-inner"
+                                    />
+                                    <p className="text-[10px] text-slate-400 italic">
+                                        Note: Data will be saved as a JSON file in Google Drive and linked here.
+                                    </p>
                                 </div>
                             )}
                         </div>

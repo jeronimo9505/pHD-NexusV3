@@ -1,4 +1,5 @@
 import { SampleFieldConfig, SampleNomenclature } from "./types";
+import { formatDate as libFormatDate } from "@/lib/utils";
 
 /**
  * Generates a Smart ID based on the selected attributes and nomenclature definitions.
@@ -60,19 +61,7 @@ export function generateSmartId(
  * Uses es-ES locale for DD/MM/YYYY format.
  */
 export function formatDate(date: string | Date | null | undefined): string {
-    if (!date) return '-';
-    try {
-        const d = new Date(date);
-        // Force UTC or specific timezone if needed, but for now consistent locale is key.
-        // using 'es-ES' guarantees DD/MM/YYYY
-        return d.toLocaleDateString('es-ES', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric'
-        });
-    } catch {
-        return '-';
-    }
+    return libFormatDate(date);
 }
 
 /**

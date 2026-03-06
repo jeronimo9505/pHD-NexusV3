@@ -1,6 +1,7 @@
 import { Database } from "@/types/supabase";
 import { FileText, Calendar, CheckCircle2, Clock } from "lucide-react";
 import Link from "next/link";
+import { formatDate } from "@/lib/utils";
 
 type DriveReport = Database['public']['Tables']['drive_reports']['Row'];
 
@@ -49,7 +50,7 @@ export function ActivityFeed({ reports, groupId }: ActivityFeedProps) {
                                 <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
                                     <span className="flex items-center gap-1">
                                         <Calendar size={12} />
-                                        {new Date(report.created_at).toLocaleDateString('es-ES')}
+                                        {formatDate(report.created_at)}
                                     </span>
                                     <span className={`flex items-center gap-1 capitalize px-1.5 py-0.5 rounded-full ${report.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'
                                         }`}>

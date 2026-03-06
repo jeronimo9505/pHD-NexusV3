@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Pencil, Trash2, Plus, Loader2, StickyNote } from 'lucide-react';
 import { createGroupNoteAction, deleteGroupNoteAction } from '../actions';
 import { toast } from 'sonner';
+import { formatDate } from '@/lib/utils';
 
 export function NotesWidget({ groupId, initialNotes }: { groupId: string, initialNotes: any[] }) {
     const [notes, setNotes] = useState(initialNotes);
@@ -64,7 +65,7 @@ export function NotesWidget({ groupId, initialNotes }: { groupId: string, initia
                                 <Trash2 size={14} />
                             </button>
                             <p className="text-[10px] text-amber-600/60 mt-2 font-medium">
-                                By {note.creator?.full_name || 'Someone'} · {new Date(note.created_at).toLocaleDateString()}
+                                By {note.creator?.full_name || 'Someone'} · {formatDate(note.created_at)}
                             </p>
                         </div>
                     ))

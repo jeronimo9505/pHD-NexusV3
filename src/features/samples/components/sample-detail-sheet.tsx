@@ -10,6 +10,7 @@ import { formatCellValue } from '../utils';
 import { CharacterizationModal } from './characterization-modal';
 import { format } from 'date-fns';
 import { SampleCommentsSection } from './sample-comments-section';
+import { SpectrumGraph } from './spectrum-graph';
 
 interface SampleDetailSheetProps {
     sample: Sample | null;
@@ -385,6 +386,16 @@ export function SampleDetailSheet({
                                             >
                                                 <ExternalLink size={12} /> Open File in Drive
                                             </a>
+                                        </div>
+                                    )}
+
+                                    {/* Raman Spectrum Graph */}
+                                    {expandedChar!.type === 'Raman' && expandedChar!.data.raman_spectrum_file_id && (
+                                        <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+                                            <SpectrumGraph
+                                                fileId={expandedChar!.data.raman_spectrum_file_id}
+                                                title={`Raman Spectrum - ${sample.sample_code || sample.display_id}`}
+                                            />
                                         </div>
                                     )}
 

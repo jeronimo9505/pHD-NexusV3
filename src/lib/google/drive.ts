@@ -105,3 +105,20 @@ export async function syncDriveFilesRecursive(rootFolderId: string, accessToken:
 
     return allFiles;
 }
+
+export async function getFileContent(fileId: string, accessToken: string) {
+    if (!accessToken) throw new Error("Access Token required");
+
+    // We use the drive.files.get method with alt=media to get the file content
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: {
+            'Authorization': `Bearer ${accessToken}`
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to fetch file content: ${response.statusText}`);
+    }
+
+    return await response.json();
+}

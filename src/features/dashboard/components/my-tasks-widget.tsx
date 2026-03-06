@@ -2,7 +2,7 @@
 
 import { CheckSquare, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
-import { cn } from '@/lib/utils';
+import { cn, formatDate } from '@/lib/utils';
 
 interface Task {
     id: string;
@@ -63,7 +63,7 @@ export function MyPendingTasksWidget({ groupId, tasks }: { groupId: string, task
                                             {task.due_date && (
                                                 <span className={cn("text-[11px] font-medium flex items-center gap-1", isOverdue ? "text-red-600" : "text-slate-500")}>
                                                     {isOverdue && <AlertCircle size={10} />}
-                                                    {new Date(task.due_date).toLocaleDateString()}
+                                                    {formatDate(task.due_date)}
                                                 </span>
                                             )}
                                         </div>
