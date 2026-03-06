@@ -28,6 +28,7 @@ import { formatCellValue, formatDate } from '../utils';
 
 import { SampleDetailSheet } from './sample-detail-sheet';
 import { ActivityLogDrawer } from './activity-log-drawer';
+import { CharacterizationSearch } from './characterization-search';
 
 interface SampleGridProps {
     groupId: string;
@@ -62,6 +63,7 @@ export function SampleGrid({
 }: SampleGridProps) {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<SampleStatus | 'all'>('all');
+    const [view, setView] = useState<'samples' | 'characterizations'>('samples');
     // Collapsed tracks which parent IDs the user has manually collapsed.
     // Empty = everything expanded (default behavior).
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
@@ -165,11 +167,20 @@ export function SampleGrid({
         const flat: (Sample & { level: number, hasChildren: boolean })[] = [];
 
         const traverse = (nodes: any[], level: number) => {
+            const searchLower = search.toLowerCase();
             for (const node of nodes) {
-                const matchesSearch = search ?
-                    (node.display_id.toLowerCase().includes(search.toLowerCase()) ||
-                        JSON.stringify(node.attributes).toLowerCase().includes(search.toLowerCase()))
-                    : true;
+                const matchesSearch = !search || (
+                    (node.sample_code?.toLowerCase().includes(searchLower)) ||
+                    (node.display_id?.toLowerCase().includes(searchLower)) ||
+                    (node.name?.toLowerCase().includes(searchLower)) ||
+                    (node.description?.toLowerCase().includes(searchLower)) ||
+                    (node.composition?.some((c: any) =>
+                        c.code?.toLowerCase().includes(searchLower) ||
+                        c.name?.toLowerCase().includes(searchLower)
+                    )) ||
+                    (JSON.stringify(node.attributes).toLowerCase().includes(searchLower)) ||
+                    (node.characterization_types?.some((t: string) => t.toLowerCase().includes(searchLower)))
+                );
 
                 const matchesStatus = statusFilter === 'all' || node.status === statusFilter;
 
@@ -184,11 +195,23 @@ export function SampleGrid({
         };
 
         if (search || statusFilter !== 'all') {
-            return samples.filter(s =>
-                (s.display_id.toLowerCase().includes(search.toLowerCase()) ||
-                    JSON.stringify(s.attributes).toLowerCase().includes(search.toLowerCase())) &&
-                (statusFilter === 'all' || s.status === statusFilter)
-            ).map(s => ({ ...s, level: 0, hasChildren: false }));
+            const searchLower = search.toLowerCase();
+            return samples.filter(s => {
+                const matchesSearch = !search || (
+                    (s.sample_code?.toLowerCase().includes(searchLower)) ||
+                    (s.display_id?.toLowerCase().includes(searchLower)) ||
+                    (s.name?.toLowerCase().includes(searchLower)) ||
+                    (s.description?.toLowerCase().includes(searchLower)) ||
+                    (s.composition?.some((c: any) =>
+                        c.code?.toLowerCase().includes(searchLower) ||
+                        c.name?.toLowerCase().includes(searchLower)
+                    )) ||
+                    (JSON.stringify(s.attributes).toLowerCase().includes(searchLower)) ||
+                    (s.characterization_types?.some((t: string) => t.toLowerCase().includes(searchLower)))
+                );
+                const matchesStatus = statusFilter === 'all' || s.status === statusFilter;
+                return matchesSearch && matchesStatus;
+            }).map(s => ({ ...s, level: 0, hasChildren: false }));
         }
 
         traverse(roots, 0);
@@ -247,6 +270,32 @@ export function SampleGrid({
     return (
         <>
             <div className="h-full flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                {/* Tabs */}
+                <div className="flex border-b border-slate-200">
+                    <button
+                        onClick={() => setView('samples')}
+                        className={cn(
+                            "px-6 py-3 text-sm font-medium transition-colors border-b-2",
+                            view === 'samples'
+                                ? "border-blue-600 text-blue-600 bg-blue-50/30"
+                                : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                        )}
+                    >
+                        Samples
+                    </button>
+                    <button
+                        onClick={() => setView('characterizations')}
+                        className={cn(
+                            "px-6 py-3 text-sm font-medium transition-colors border-b-2",
+                            view === 'characterizations'
+                                ? "border-blue-600 text-blue-600 bg-blue-50/30"
+                                : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                        )}
+                    >
+                        Characterizations
+                    </button>
+                </div>
+
                 {/* Toolbar */}
                 <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-4 bg-slate-50/50">
                     <div className="flex items-center gap-3 flex-1">
@@ -303,233 +352,239 @@ export function SampleGrid({
                     </div>
                 </div>
 
-                {/* Grid */}
-                <div className="flex-1 overflow-auto">
-                    <table className="w-full text-left text-sm border-collapse">
-                        <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-10 shadow-sm">
-                            <tr>
-                                <th className="px-4 py-3 border-b border-r border-slate-200 w-10 text-center">
-                                    <input
-                                        type="checkbox"
-                                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                        checked={selectedIds.size === tree.length && tree.length > 0}
-                                        onChange={toggleSelectAll}
-                                    />
-                                </th>
-                                <th className="px-4 py-3 border-b border-r border-slate-200 w-32 min-w-[120px]">Code</th>
-                                <th className="px-4 py-3 border-b border-r border-slate-200 w-64 min-w-[200px]">Name</th>
-                                <th className="px-4 py-3 border-b border-r border-slate-200 w-32">Created</th>
-
-                                {/* Replaced Composition with Description/Comments */}
-                                <th className="px-4 py-3 border-b border-r border-slate-200 min-w-[200px]">Comments</th>
-
-                                {/* Added Characterization */}
-                                <th className="px-4 py-3 border-b border-r border-slate-200 min-w-[150px]">Characterization</th>
-
-                                <th className="px-4 py-3 border-b border-r border-slate-200 w-32">Status</th>
-
-                                {/* Dynamic Headers (Metadata Only) */}
-                                {fields.map(field => (
-                                    <th key={field.id} className="px-4 py-3 border-b border-r border-slate-200 min-w-[150px] whitespace-nowrap">
-                                        {field.label}
-                                    </th>
-                                ))}
-
-                                <th className="px-4 py-3 border-b border-slate-200 w-32 text-center">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {tree.length === 0 && (
+                {/* Grid Content */}
+                <div className="flex-1 overflow-auto relative">
+                    {view === 'samples' ? (
+                        <table className="w-full text-left text-sm border-collapse">
+                            <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-10 shadow-sm">
                                 <tr>
-                                    <td colSpan={7 + fields.length} className="px-4 py-12 text-center text-slate-400">
-                                        No samples found. Create one to get started.
-                                    </td>
-                                </tr>
-                            )}
-                            {tree.map(row => (
-                                <tr
-                                    key={row.id}
-                                    className={cn(
-                                        "hover:bg-blue-50/50 group transition-colors",
-                                        selectedIds.has(row.id) && "bg-blue-50/30"
-                                    )}
-                                >
-                                    {/* Checkbox */}
-                                    <td className="w-10 px-4 py-2 border-r border-slate-100 text-center">
+                                    <th className="px-4 py-3 border-b border-r border-slate-200 w-10 text-center">
                                         <input
                                             type="checkbox"
                                             className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                            checked={selectedIds.has(row.id)}
-                                            onChange={() => toggleSelect(row.id)}
+                                            checked={selectedIds.size === tree.length && tree.length > 0}
+                                            onChange={toggleSelectAll}
                                         />
-                                    </td>
+                                    </th>
+                                    <th className="px-4 py-3 border-b border-r border-slate-200 w-32 min-w-[120px]">Code</th>
+                                    <th className="px-4 py-3 border-b border-r border-slate-200 w-64 min-w-[200px]">Name</th>
+                                    <th className="px-4 py-3 border-b border-r border-slate-200 w-32">Created</th>
 
-                                    {/* Code (with tree connector for children) */}
-                                    <td className="px-4 py-2 border-r border-slate-100 font-mono text-xs text-slate-500">
-                                        <div className="flex items-center" style={{ paddingLeft: `${row.level * 16}px` }}>
-                                            {row.level > 0 && (
-                                                <span className="text-slate-300 mr-1.5 select-none">└</span>
-                                            )}
-                                            <span className={cn(
-                                                row.level === 0 && "font-semibold text-slate-700"
-                                            )}>
-                                                {row.sample_code || '-'}
-                                            </span>
-                                        </div>
-                                    </td>
+                                    {/* Replaced Composition with Description/Comments */}
+                                    <th className="px-4 py-3 border-b border-r border-slate-200 min-w-[200px]">Comments</th>
 
-                                    {/* Name (Hierarchy) - Clickable for details */}
-                                    <td className="px-4 py-2 border-r border-slate-100 font-medium text-slate-900 truncate">
-                                        <div className="flex items-center" style={{ paddingLeft: `${row.level * 20}px` }}>
-                                            {row.hasChildren && !search && statusFilter === 'all' ? (
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleToggleExpand(row.id); }}
-                                                    className="p-0.5 mr-1 text-slate-400 hover:text-blue-600 rounded"
-                                                >
-                                                    {collapsed[row.id] ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                                                </button>
-                                            ) : (
-                                                <span className="w-4 mr-1" />
-                                            )}
-                                            <button
-                                                onClick={() => setDetailSample(row)}
-                                                className="truncate hover:text-blue-600 hover:underline text-left"
-                                                title="View Details"
-                                            >
-                                                {row.name || row.display_id}
-                                            </button>
-                                        </div>
-                                    </td>
+                                    {/* Added Characterization */}
+                                    <th className="px-4 py-3 border-b border-r border-slate-200 min-w-[150px]">Characterization</th>
 
-                                    {/* Created At */}
-                                    <td className="px-4 py-2 border-r border-slate-100 text-slate-500 text-xs whitespace-nowrap">
-                                        {formatDate(row.created_at)}
-                                    </td>
+                                    <th className="px-4 py-3 border-b border-r border-slate-200 w-32">Status</th>
 
-                                    {/* Description / Comments */}
-                                    <td className="px-4 py-2 border-r border-slate-100 max-w-[200px]">
-                                        {row.description ? (
-                                            <div className="truncate text-xs text-slate-600" title={row.description}>
-                                                {row.description}
-                                            </div>
-                                        ) : (
-                                            <span className="text-slate-300 text-xs">-</span>
+                                    {/* Dynamic Headers (Metadata Only) */}
+                                    {fields.map(field => (
+                                        <th key={field.id} className="px-4 py-3 border-b border-r border-slate-200 min-w-[150px] whitespace-nowrap">
+                                            {field.label}
+                                        </th>
+                                    ))}
+
+                                    <th className="px-4 py-3 border-b border-slate-200 w-32 text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {tree.length === 0 && (
+                                    <tr>
+                                        <td colSpan={7 + fields.length} className="px-4 py-12 text-center text-slate-400">
+                                            No samples found. Create one to get started.
+                                        </td>
+                                    </tr>
+                                )}
+                                {tree.map(row => (
+                                    <tr
+                                        key={row.id}
+                                        className={cn(
+                                            "hover:bg-blue-50/50 group transition-colors",
+                                            selectedIds.has(row.id) && "bg-blue-50/30"
                                         )}
-                                    </td>
+                                    >
+                                        {/* Checkbox */}
+                                        <td className="w-10 px-4 py-2 border-r border-slate-100 text-center">
+                                            <input
+                                                type="checkbox"
+                                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                                checked={selectedIds.has(row.id)}
+                                                onChange={() => toggleSelect(row.id)}
+                                            />
+                                        </td>
 
-                                    {/* Characterization Types */}
-                                    <td className="px-4 py-2 border-r border-slate-100 max-w-[150px]">
-                                        {row.characterization_types && row.characterization_types.length > 0 ? (
-                                            <div className="flex flex-wrap gap-1">
-                                                {row.characterization_types.map((type, i) => (
+                                        {/* Code (with tree connector for children) */}
+                                        <td className="px-4 py-2 border-r border-slate-100 font-mono text-xs text-slate-500">
+                                            <div className="flex items-center" style={{ paddingLeft: `${row.level * 16}px` }}>
+                                                {row.level > 0 && (
+                                                    <span className="text-slate-300 mr-1.5 select-none">└</span>
+                                                )}
+                                                <span className={cn(
+                                                    row.level === 0 && "font-semibold text-slate-700"
+                                                )}>
+                                                    {row.sample_code || '-'}
+                                                </span>
+                                            </div>
+                                        </td>
+
+                                        {/* Name (Hierarchy) - Clickable for details */}
+                                        <td className="px-4 py-2 border-r border-slate-100 font-medium text-slate-900 truncate">
+                                            <div className="flex items-center" style={{ paddingLeft: `${row.level * 20}px` }}>
+                                                {row.hasChildren && !search && statusFilter === 'all' ? (
                                                     <button
-                                                        key={i}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            // Instead of opening the modal to create/edit, we open the detail sheet
-                                                            // and tell it which characterization to highlight/expand.
-                                                            const char = row.characterizations?.find((c: any) => c.type === type);
-                                                            if (char) {
-                                                                setInitialCharId(char.id);
-                                                                setDetailSample(row);
-                                                            } else {
-                                                                // Fallback: if no char found, open the detail sheet on the char tab
-                                                                setInitialCharId(null);
-                                                                setDetailSample(row);
-                                                            }
-                                                        }}
-                                                        className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-100 hover:bg-purple-100 hover:border-purple-300 transition-colors cursor-pointer"
+                                                        onClick={(e) => { e.stopPropagation(); handleToggleExpand(row.id); }}
+                                                        className="p-0.5 mr-1 text-slate-400 hover:text-blue-600 rounded"
                                                     >
-                                                        {type}
+                                                        {collapsed[row.id] ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                                                     </button>
-                                                ))}
+                                                ) : (
+                                                    <span className="w-4 mr-1" />
+                                                )}
+                                                <button
+                                                    onClick={() => setDetailSample(row)}
+                                                    className="truncate hover:text-blue-600 hover:underline text-left"
+                                                    title="View Details"
+                                                >
+                                                    {row.name || row.display_id}
+                                                </button>
                                             </div>
-                                        ) : (
-                                            <span className="text-slate-300 text-xs">-</span>
-                                        )}
-                                    </td>
+                                        </td>
 
-                                    {/* Status (Dropdown) */}
-                                    < td className="px-4 py-2 border-r border-slate-100" >
-                                        <select
-                                            value={row.status}
-                                            onChange={(e) => handleStatusChange(row.id, e.target.value as SampleStatus)}
-                                            className={cn(
-                                                "block w-full text-xs font-medium rounded-md border-0 py-1 pl-2 pr-6 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600 sm:text-xs",
-                                                // Dynamic color based on current value matching our options
-                                                STATUS_OPTIONS.find(o => o.value === row.status)?.color || "bg-slate-50 text-slate-500"
+                                        {/* Created At */}
+                                        <td className="px-4 py-2 border-r border-slate-100 text-slate-500 text-xs whitespace-nowrap">
+                                            {formatDate(row.created_at)}
+                                        </td>
+
+                                        {/* Description / Comments */}
+                                        <td className="px-4 py-2 border-r border-slate-100 max-w-[200px]">
+                                            {row.description ? (
+                                                <div className="truncate text-xs text-slate-600" title={row.description}>
+                                                    {row.description}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-300 text-xs">-</span>
                                             )}
-                                            onClick={(e) => e.stopPropagation()}
-                                        >
-                                            {STATUS_OPTIONS.map(opt => (
-                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                            ))}
-                                        </select>
-                                    </td>
+                                        </td>
 
-                                    {/* Dynamic Fields */}
-                                    {fields.map(field => {
-                                        const val = row.attributes[field.name];
-                                        const formatted = formatCellValue(val, field.type);
+                                        {/* Characterization Types */}
+                                        <td className="px-4 py-2 border-r border-slate-100 max-w-[150px]">
+                                            {row.characterization_types && row.characterization_types.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1">
+                                                    {row.characterization_types.map((type, i) => (
+                                                        <button
+                                                            key={i}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                const char = row.characterizations?.find((c: any) => c.type === type);
+                                                                if (char) {
+                                                                    setInitialCharId(char.id);
+                                                                    setDetailSample(row);
+                                                                } else {
+                                                                    setInitialCharId(null);
+                                                                    setDetailSample(row);
+                                                                }
+                                                            }}
+                                                            className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-100 hover:bg-purple-100 hover:border-purple-300 transition-colors cursor-pointer"
+                                                        >
+                                                            {type}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-300 text-xs">-</span>
+                                            )}
+                                        </td>
 
-                                        if (field.type === 'boolean') {
+                                        {/* Status (Dropdown) */}
+                                        < td className="px-4 py-2 border-r border-slate-100" >
+                                            <select
+                                                value={row.status}
+                                                onChange={(e) => handleStatusChange(row.id, e.target.value as SampleStatus)}
+                                                className={cn(
+                                                    "block w-full text-xs font-medium rounded-md border-0 py-1 pl-2 pr-6 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600 sm:text-xs",
+                                                    STATUS_OPTIONS.find(o => o.value === row.status)?.color || "bg-slate-50 text-slate-500"
+                                                )}
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
+                                                {STATUS_OPTIONS.map(opt => (
+                                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                ))}
+                                            </select>
+                                        </td>
+
+                                        {/* Dynamic Fields */}
+                                        {fields.map(field => {
+                                            const val = row.attributes[field.name];
+                                            const formatted = formatCellValue(val, field.type);
+
+                                            if (field.type === 'boolean') {
+                                                return (
+                                                    <td key={field.id} className="px-4 py-2 border-r border-slate-100">
+                                                        <span className={cn(
+                                                            "px-2 py-0.5 rounded-md text-xs font-semibold",
+                                                            val === true ? "bg-green-100 text-green-700" :
+                                                                val === false ? "bg-purple-100 text-purple-700" : "text-slate-400"
+                                                        )}>
+                                                            {val === true ? 'Yes' : val === false ? 'No' : '-'}
+                                                        </span>
+                                                    </td>
+                                                );
+                                            }
+
                                             return (
-                                                <td key={field.id} className="px-4 py-2 border-r border-slate-100">
-                                                    <span className={cn(
-                                                        "px-2 py-0.5 rounded-md text-xs font-semibold",
-                                                        val === true ? "bg-green-100 text-green-700" :
-                                                            val === false ? "bg-purple-100 text-purple-700" : "text-slate-400"
-                                                    )}>
-                                                        {val === true ? 'Yes' : val === false ? 'No' : '-'}
-                                                    </span>
+                                                <td key={field.id} className="px-4 py-2 border-r border-slate-100 text-slate-600 truncate max-w-[200px] text-xs" title={String(val)}>
+                                                    {formatted}
                                                 </td>
                                             );
-                                        }
+                                        })}
 
-                                        return (
-                                            <td key={field.id} className="px-4 py-2 border-r border-slate-100 text-slate-600 truncate max-w-[200px] text-xs" title={String(val)}>
-                                                {formatted}
-                                            </td>
-                                        );
-                                    })}
-
-                                    {/* Actions */}
-                                    <td className="px-4 py-2 text-center bg-white">
-                                        <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button
-                                                onClick={() => handleDerive(row)}
-                                                className="p-1 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded"
-                                                title="Create Derived Sample"
-                                            >
-                                                <Plus size={16} strokeWidth={2.5} />
-                                            </button>
-                                            <button
-                                                onClick={() => { setEditingSample(row); setDeriveFrom(null); setCharModalOpen(true); }}
-                                                className="p-1 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded"
-                                                title="Characterize"
-                                            >
-                                                <FileText size={14} />
-                                            </button>
-                                            <button
-                                                onClick={() => { setEditingSample(row); setDeriveFrom(null); setFormOpen(true); }}
-                                                className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded"
-                                                title="Edit"
-                                            >
-                                                <Edit size={14} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleDelete(row.id)}
-                                                className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
-                                                title="Delete"
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                                        {/* Actions */}
+                                        <td className="px-4 py-2 text-center bg-white">
+                                            <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={() => handleDerive(row)}
+                                                    className="p-1 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded"
+                                                    title="Create Derived Sample"
+                                                >
+                                                    <Plus size={16} strokeWidth={2.5} />
+                                                </button>
+                                                <button
+                                                    onClick={() => { setEditingSample(row); setDeriveFrom(null); setCharModalOpen(true); }}
+                                                    className="p-1 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded"
+                                                    title="Characterize"
+                                                >
+                                                    <FileText size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => { setEditingSample(row); setDeriveFrom(null); setFormOpen(true); }}
+                                                    className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded"
+                                                    title="Edit"
+                                                >
+                                                    <Edit size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDelete(row.id)}
+                                                    className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
+                                                    title="Delete"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    ) : (
+                        <CharacterizationSearch
+                            samples={samples}
+                            onSelectSample={(sample, charId) => {
+                                setInitialCharId(charId || null);
+                                setDetailSample(sample);
+                            }}
+                        />
+                    )}
                 </div >
             </div >
 
