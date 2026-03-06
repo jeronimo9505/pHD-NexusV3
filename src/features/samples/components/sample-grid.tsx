@@ -332,6 +332,17 @@ export function SampleGrid({
                     >
                         Characterizations
                     </button>
+                    <button
+                        onClick={() => setView('raman')}
+                        className={cn(
+                            "px-6 py-3 text-sm font-bold transition-colors border-b-2 flex items-center gap-1.5",
+                            view === 'raman'
+                                ? "border-purple-600 text-purple-600 bg-purple-50/50"
+                                : "border-transparent text-slate-500 hover:text-purple-600 hover:bg-purple-50/30"
+                        )}
+                    >
+                        <Activity size={16} /> Raman View
+                    </button>
                 </div>
 
                 {/* Toolbar */}
