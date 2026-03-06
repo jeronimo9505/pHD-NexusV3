@@ -19,8 +19,15 @@ const LINE_COLORS = [
     '#059669', // Emerald
 ];
 
+interface SpectrumConfig {
+    fileId: string;
+    label: string;
+    subLabel?: string;
+    charId: string;
+}
+
 interface MultiSpectrumGraphProps {
-    selectedConfigs: { fileId: string; label: string; charId: string }[];
+    selectedConfigs: SpectrumConfig[];
 }
 
 export function MultiSpectrumGraph({ selectedConfigs }: MultiSpectrumGraphProps) {
@@ -240,17 +247,36 @@ export function MultiSpectrumGraph({ selectedConfigs }: MultiSpectrumGraphProps)
                             contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                             labelStyle={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '4px' }}
                             labelFormatter={(v) => `Raman Shift: ${Number(v).toFixed(2)} cm⁻¹`}
-                            formatter={(value: any, name: any) => {
-                                const config = selectedConfigs.find(c => c.charId === name);
-                                return [Number(value).toFixed(2), config?.label || name];
+                            formatter={(value: any, name: any, props: any) => {
+                                // name is the dataKey by default unless overriden. We overrode it on <Line> to be config.label
+                                return [Number(value).toFixed(2), name];
                             }}
                         />
 
                         <Legend
                             verticalAlign="top"
                             align="right"
-                            wrapperStyle={{ paddingBottom: '20px', fontSize: '12px', fontWeight: 500 }}
-                            onClick={(e: any) => toggleSeries(e.dataKey)}
+                            content={(props: any) => {
+                                const { payload } = props;
+                                return (
+                                    <ul className="flex flex-wrap gap-4 justify-center text-xs pb-4">
+                                        {payload.map((entry: any, index: number) => {
+                                            // Since we use name={config.label} in Line, entry.value is the label, and entry.dataKey is charId
+                                            const config = selectedConfigs.find(c => c.charId === entry.dataKey);
+                                            const isHidden = hiddenSeries.has(entry.dataKey);
+                                            return (
+                                                <li key={`item-${index}`} className="flex items-center gap-1.5 cursor-pointer opacity-90 hover:opacity-100 transition-opacity" onClick={() => toggleSeries(entry.dataKey)}>
+                                                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: isHidden ? '#cbd5e1' : entry.color }} />
+                                                    <div className={`flex items-baseline gap-1 ${isHidden ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                                                        <span className="font-semibold">{config?.label || entry.value}</span>
+                                                        {config?.subLabel && <span className="text-[10px] text-slate-400">({config.subLabel})</span>}
+                                                    </div>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                );
+                            }}
                         />
 
                         {selectedConfigs.map((config, index) => {
@@ -261,7 +287,7 @@ export function MultiSpectrumGraph({ selectedConfigs }: MultiSpectrumGraphProps)
                                     key={config.charId}
                                     type="monotone"
                                     dataKey={config.charId}
-                                    name={config.charId} // We format the name in Tooltip formatter
+                                    name={config.label}
                                     stroke={color}
                                     strokeWidth={isHidden ? 0 : 2}
                                     dot={false}
