@@ -272,26 +272,37 @@ export async function createSampleAction(input: CreateSampleInput, logbookId: st
     let level = 0;
 
     if (input.parent_id) {
-        // Get parent level
+        // Derived: Get parent info
         const { data: parent } = await supabase
             .from('samples')
-            .select('level')
+            .select('sample_code, level')
             .eq('id', input.parent_id)
             .single();
 
+        const parentCode = parent?.sample_code || `${LOGBOOK_PREFIX}?`;
         level = (parent?.level ?? 0) + 1;
+
+        // Count siblings of this parent
+        const { count: siblingCount } = await supabase
+            .from('samples')
+            .select('*', { count: 'exact', head: true })
+            .eq('parent_id', input.parent_id);
+
+        const firstLetterCode = LOGBOOK_PREFIX?.charCodeAt(0) || 65; // Use first letter of LOGBOOK_PREFIX or 'A'
+        const nextLetter = String.fromCharCode(firstLetterCode + level);
+        const nextIndex = (siblingCount || 0) + 1;
+        sampleCode = `${parentCode}-${nextLetter}${nextIndex}`;
+    } else {
+        // Stock (root): LOGBOOK_PREFIX + next count
+        const { count: rootCount } = await supabase
+            .from('samples')
+            .select('*', { count: 'exact', head: true })
+            .eq('logbook_id', logbookId)
+            .is('parent_id', null);
+
+        const nextIndex = (rootCount || 0) + 1;
+        sampleCode = `${LOGBOOK_PREFIX}${nextIndex}`;
     }
-
-    // Count existing samples at this level to determine next number
-    const { count: levelCount } = await supabase
-        .from('samples')
-        .select('*', { count: 'exact', head: true })
-        .eq('group_id', input.group_id)
-        .eq('level', level);
-
-    const char = String.fromCharCode(65 + level); // 0->A, 1->B, 2->C...
-    const index = (levelCount || 0) + 1;
-    sampleCode = `${char}${index}`;
 
     const payload: any = {
         group_id: input.group_id,
