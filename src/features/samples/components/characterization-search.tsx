@@ -1,155 +1,201 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { Sample, SampleCharacterization } from '../types';
-import { Search, Filter, Calendar, ExternalLink, FlaskConical } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import React, { useMemo } from 'react';
+import { Sample } from '../types';
+import { Calendar, ChevronRight, Hash, FlaskConical, ExternalLink, ClipboardList, Activity } from 'lucide-react';
 import { formatDate } from '../utils';
+import { cn } from '@/lib/utils';
 
 interface CharacterizationSearchProps {
     samples: Sample[];
+    search: string;
+    typeFilter: string;
     onSelectSample: (sample: Sample, charId?: string) => void;
 }
 
-export function CharacterizationSearch({ samples, onSelectSample }: CharacterizationSearchProps) {
-    const [search, setSearch] = useState('');
-    const [typeFilter, setTypeFilter] = useState('all');
+export function CharacterizationSearch({ samples, search, typeFilter, onSelectSample }: CharacterizationSearchProps) {
+    // Summary generator for high density
+    const getSentenceSummary = (data: any) => {
+        const priority = ['analyte', 'laser', 'power', 'objective', 'acquisition_time', 'accumulation', 'acc'];
+        const ignore = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', '__bulk_id__', 'manual_date']);
 
-    const flatChars = useMemo(() => {
-        const chars: any[] = [];
-        samples.forEach(s => {
-            (s.characterizations || []).forEach(c => {
-                chars.push({
-                    ...c,
-                    sample_code: s.sample_code,
-                    sample_name: s.name,
-                    sample_id: s.id,
-                    sample_full: s
-                });
-            });
-        });
-        return chars.sort((a, b) => new Date(b.performed_at || b.created_at).getTime() - new Date(a.performed_at || a.created_at).getTime());
-    }, [samples]);
+        const parts: string[] = [];
 
-    const types = useMemo(() => {
-        const t = new Set<string>();
-        flatChars.forEach(c => t.add(c.type));
-        return Array.from(t).sort();
-    }, [flatChars]);
-
-    const filtered = useMemo(() => {
-        const searchLower = search.toLowerCase();
-        return flatChars.filter(c => {
-            const matchesType = typeFilter === 'all' || c.type === typeFilter;
-            const matchesSearch = !search || (
-                c.type.toLowerCase().includes(searchLower) ||
-                c.sample_code?.toLowerCase().includes(searchLower) ||
-                c.sample_name?.toLowerCase().includes(searchLower) ||
-                JSON.stringify(c.data).toLowerCase().includes(searchLower)
-            );
-            return matchesType && matchesSearch;
-        });
-    }, [flatChars, search, typeFilter]);
-
-    const getSummary = (data: any) => {
-        const ignore = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', '__bulk_id__']);
-        const entries = Object.entries(data)
-            .filter(([k, v]) => !ignore.has(k) && v)
-            .map(([k, v]) => {
-                if (typeof v === 'object' && v !== null && 'value' in v) {
-                    return `${k}: ${(v as any).value}${(v as any).unit || ''}`;
+        // Add priority items first
+        priority.forEach(key => {
+            const val = data[key];
+            if (val !== undefined && val !== null && val !== '') {
+                if (typeof val === 'object' && 'value' in val) {
+                    parts.push(`${(val as any).value}${(val as any).unit || ''}`);
+                } else {
+                    parts.push(String(val));
                 }
-                return `${k}: ${v}`;
-            });
-        return entries.slice(0, 3).join(' | ') + (entries.length > 3 ? '...' : '');
+            }
+        });
+
+        // Add other items
+        Object.entries(data).forEach(([key, val]) => {
+            if (!priority.includes(key) && !ignore.has(key) && val) {
+                if (typeof val === 'object' && 'value' in val && (val as any).value) {
+                    parts.push(`${key}: ${(val as any).value}${(val as any).unit || ''}`);
+                } else if (typeof val !== 'object') {
+                    parts.push(`${key}: ${val}`);
+                }
+            }
+        });
+
+        return parts.join(' - ');
     };
+
+    // Grouping and Filtering (Simplified to avoid duplicates and fix grouping bug)
+    const groupedChars = useMemo(() => {
+        const searchLower = search.toLowerCase();
+        const groupMap = new Map<string, { sample: Sample; measurements: any[] }>();
+
+        samples.forEach(s => {
+            const charList = s.characterizations || [];
+            const matches = charList.filter(c => {
+                const matchesType = typeFilter === 'all' || c.type === typeFilter;
+                const summary = getSentenceSummary(c.data);
+
+                const matchesSearch = !search || (
+                    c.type.toLowerCase().includes(searchLower) ||
+                    s.sample_code?.toLowerCase().includes(searchLower) ||
+                    s.name?.toLowerCase().includes(searchLower) ||
+                    summary.toLowerCase().includes(searchLower)
+                );
+
+                return matchesType && matchesSearch;
+            });
+
+            if (matches.length > 0) {
+                groupMap.set(s.id, {
+                    sample: s,
+                    measurements: matches.map(m => ({
+                        ...m,
+                        sentence_summary: getSentenceSummary(m.data)
+                    }))
+                });
+            }
+        });
+
+        // Convert Map back to sorted array by latest measurement
+        return Array.from(groupMap.values()).sort((a: any, b: any) => {
+            const latestA = Math.max(...a.measurements.map((m: any) => new Date(m.performed_at || m.created_at).getTime()));
+            const latestB = Math.max(...b.measurements.map((m: any) => new Date(m.performed_at || m.created_at).getTime()));
+            return latestB - latestA;
+        });
+    }, [samples, search, typeFilter]);
 
     return (
         <div className="flex flex-col h-full bg-slate-50/30">
-            {/* Toolbar */}
-            <div className="p-4 border-b border-slate-200 bg-white flex items-center gap-4">
-                <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                    <input
-                        value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        placeholder="Search measurements, types, samples..."
-                        className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    />
-                </div>
+            {/* Compact Table */}
+            <div className="flex-1 overflow-auto p-6 pt-2">
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                    <table className="w-full border-collapse text-xs">
+                        <thead className="bg-slate-50/80 sticky top-0 z-10 border-b border-slate-200">
+                            <tr className="text-slate-400 text-[10px] uppercase font-bold text-left">
+                                <th className="px-4 py-3 w-[100px]">Técnica</th>
+                                <th className="px-4 py-3 w-[120px]">Fecha</th>
+                                <th className="px-4 py-3">Resumen de Medición</th>
+                                <th className="px-4 py-3 w-[140px]">Instrumento</th>
+                                <th className="px-4 py-3 w-[40px]"></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {groupedChars.map((group: any) => (
+                                <React.Fragment key={group.sample.id}>
+                                    {/* Group Header Row */}
+                                    <tr className="bg-slate-50/40">
+                                        <td colSpan={5} className="px-4 py-1.5 border-y border-slate-100/80">
+                                            <div className="flex items-center gap-3">
+                                                <div className="h-5 w-5 rounded bg-blue-600 flex items-center justify-center text-white text-[9px] shadow-sm">
+                                                    <Hash size={12} />
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => onSelectSample(group.sample)}
+                                                        className="font-bold text-slate-900 text-[13px] hover:text-blue-600 hover:underline transition-colors"
+                                                    >
+                                                        {group.sample.sample_code}
+                                                    </button>
+                                                    <span className="text-slate-300">|</span>
+                                                    <span className="font-semibold text-slate-600 truncate max-w-[500px] text-[12px]">{group.sample.name}</span>
+                                                    {group.sample.composition?.length > 0 && (
+                                                        <div className="flex items-center gap-1 ml-2">
+                                                            {group.sample.composition.map((c: any) => (
+                                                                <span key={c.code} className="text-[8px] bg-emerald-50 text-emerald-700 px-1 py-0.5 border border-emerald-100 rounded font-mono">
+                                                                    {c.code}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    onClick={() => onSelectSample(group.sample)}
+                                                    className="ml-auto text-slate-400 hover:text-blue-600 p-1 hover:bg-white rounded transition-all shadow-sm border border-transparent hover:border-slate-200"
+                                                    title="Ver detalles de muestra"
+                                                >
+                                                    <ExternalLink size={12} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {/* Measurement Rows */}
+                                    {group.measurements.map((char: any) => (
+                                        <tr
+                                            key={char.id}
+                                            onClick={() => onSelectSample(group.sample, char.id)}
+                                            className="hover:bg-blue-50/40 cursor-pointer group transition-colors"
+                                        >
+                                            <td className="px-4 py-1.5 font-bold">
+                                                <span className={cn(
+                                                    "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shadow-sm flex items-center gap-1",
+                                                    char.type === 'Raman' ? "bg-purple-100 text-purple-700 border border-purple-200" : "bg-slate-100 text-slate-600 border border-slate-200"
+                                                )}>
+                                                    {char.type}
+                                                    {char.data.raman_spectrum_file_id && <Activity size={10} className="text-purple-500 animate-pulse" />}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-1.5 text-slate-500 font-medium">
+                                                <div className="flex items-center gap-2">
+                                                    <Calendar size={12} className="text-slate-300" />
+                                                    {formatDate(char.performed_at || char.created_at)}
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-1.5">
+                                                <div className="text-slate-700 font-semibold text-[12px] group-hover:text-blue-700 transition-colors">
+                                                    {char.sentence_summary}
+                                                </div>
+                                                {char.data.notes && (
+                                                    <div className="flex items-center gap-1.5 mt-0.5 text-[9px] text-slate-400 italic">
+                                                        <FlaskConical size={10} className="text-amber-500/60" />
+                                                        <span className="truncate max-w-[600px]">{char.data.notes}</span>
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-1.5 text-slate-500 italic font-medium">
+                                                {char.equipment || '-'}
+                                            </td>
+                                            <td className="px-4 py-1.5 text-right">
+                                                <div className="p-0.5 rounded-md group-hover:bg-blue-100/50 group-hover:text-blue-600 text-slate-200 transition-all inline-block">
+                                                    <ChevronRight size={16} />
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </React.Fragment>
+                            ))}
+                        </tbody>
+                    </table>
 
-                <div className="flex items-center gap-2">
-                    <Filter size={14} className="text-slate-400" />
-                    <select
-                        value={typeFilter}
-                        onChange={e => setTypeFilter(e.target.value)}
-                        className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    >
-                        <option value="all">All Types</option>
-                        {types.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                </div>
-
-                <div className="ml-auto text-xs text-slate-400 font-medium">
-                    Found {filtered.length} measurements
-                </div>
-            </div>
-
-            {/* List */}
-            <div className="flex-1 overflow-auto p-4">
-                <div className="grid grid-cols-1 gap-3">
-                    {filtered.map((char) => (
-                        <div
-                            key={char.id}
-                            className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md transition-all cursor-pointer group"
-                            onClick={() => onSelectSample(char.sample_full, char.id)}
-                        >
-                            <div className="flex items-start justify-between gap-4">
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
-                                            {char.type}
-                                        </span>
-                                        <span className="text-slate-400 text-xs">•</span>
-                                        <span className="text-slate-900 font-semibold text-sm group-hover:text-blue-600 transition-colors">
-                                            {char.sample_code}
-                                        </span>
-                                        <span className="text-slate-400 text-xs">—</span>
-                                        <span className="text-slate-500 text-xs truncate max-w-[200px]">
-                                            {char.sample_name}
-                                        </span>
-                                    </div>
-
-                                    <div className="text-slate-600 text-xs font-medium bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                        {getSummary(char.data) || <span className="text-slate-300 italic">No details available</span>}
-                                    </div>
-
-                                    {char.data.notes && (
-                                        <div className="mt-2 flex items-start gap-1.5 text-slate-400 italic text-[11px]">
-                                            <span className="mt-0.5"><FlaskConical size={12} /></span>
-                                            <p className="line-clamp-1">{char.data.notes}</p>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="flex flex-col items-end gap-2 text-right shrink-0">
-                                    <div className="flex items-center gap-1.5 text-slate-400 text-[11px]">
-                                        <Calendar size={12} />
-                                        {formatDate(char.performed_at || char.created_at)}
-                                    </div>
-                                    <button className="text-blue-600 hover:text-blue-700 text-xs font-medium flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        View Details <ExternalLink size={12} />
-                                    </button>
-                                </div>
+                    {groupedChars.length === 0 && (
+                        <div className="py-40 text-center bg-white">
+                            <div className="bg-slate-50 h-16 w-16 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-100">
+                                <FlaskConical className="text-slate-200" size={32} />
                             </div>
-                        </div>
-                    ))}
-
-                    {filtered.length === 0 && (
-                        <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200">
-                            <Search className="mx-auto text-slate-200 mb-4" size={48} />
-                            <h3 className="text-slate-900 font-medium">No results found</h3>
-                            <p className="text-slate-500 text-sm">Try adjusting your search or filters</p>
+                            <h3 className="text-slate-900 font-bold text-lg">Sin resultados</h3>
+                            <p className="text-slate-500 text-sm max-w-xs mx-auto">No encontramos mediciones que coincidan con los criterios actuales.</p>
                         </div>
                     )}
                 </div>

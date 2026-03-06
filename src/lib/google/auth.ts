@@ -123,17 +123,28 @@ export const ensureAuth = async (): Promise<string> => {
     await loadGoogleScripts();
     const gapi = (window as any).gapi;
 
+    // Ensure client is loaded
+    if (!gapi.client) {
+        await new Promise<void>((resolve, reject) => {
+            gapi.load('client', { callback: resolve, onerror: reject });
+        });
+    }
+
     // 1. Check if token is already active in GAPI
-    const tokenObj = gapi.client.getToken();
-    if (tokenObj && tokenObj.access_token) {
-        // We assume GAPI keeps it valid or we manage it via localStorage
-        return tokenObj.access_token;
+    if (gapi.client && typeof gapi.client.getToken === 'function') {
+        const tokenObj = gapi.client.getToken();
+        if (tokenObj && tokenObj.access_token) {
+            // We assume GAPI keeps it valid or we manage it via localStorage
+            return tokenObj.access_token;
+        }
     }
 
     // 2. Check localStorage
     const savedToken = loadToken();
     if (savedToken) {
-        gapi.client.setToken({ access_token: savedToken });
+        if (gapi.client && typeof gapi.client.setToken === 'function') {
+            gapi.client.setToken({ access_token: savedToken });
+        }
         return savedToken;
     }
 

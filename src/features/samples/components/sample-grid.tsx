@@ -12,12 +12,16 @@ import {
     Edit,
     Search,
     Filter,
+    Hash,
     FileText,
     Settings,
     MoreHorizontal,
     CopyPlus, // For derive icon? Or just Plus
     X,
-    Clock
+    Clock,
+    FlaskConical,
+    ClipboardList,
+    Activity
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SampleForm } from './sample-form';
@@ -29,6 +33,7 @@ import { formatCellValue, formatDate } from '../utils';
 import { SampleDetailSheet } from './sample-detail-sheet';
 import { ActivityLogDrawer } from './activity-log-drawer';
 import { CharacterizationSearch } from './characterization-search';
+import { RamanWorkspace } from './raman-workspace';
 
 interface SampleGridProps {
     groupId: string;
@@ -63,7 +68,8 @@ export function SampleGrid({
 }: SampleGridProps) {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<SampleStatus | 'all'>('all');
-    const [view, setView] = useState<'samples' | 'characterizations'>('samples');
+    const [view, setView] = useState<'samples' | 'characterizations' | 'raman'>('samples');
+    const [typeFilter, setTypeFilter] = useState('all');
     // Collapsed tracks which parent IDs the user has manually collapsed.
     // Empty = everything expanded (default behavior).
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
@@ -219,6 +225,38 @@ export function SampleGrid({
 
     }, [samples, search, statusFilter, collapsed]);
 
+    // Stats calculation for Characterization View
+    const charStats = useMemo(() => {
+        if (view !== 'characterizations') return { samples: 0, measurements: 0 };
+
+        let sampleCount = 0;
+        let measurementCount = 0;
+        const searchLower = search.toLowerCase();
+
+        samples.forEach(s => {
+            const charList = s.characterizations || [];
+            const matches = charList.filter(c => {
+                const matchesType = typeFilter === 'all' || c.type === typeFilter;
+
+                // Simplified search match logic for stats (matching CharacterizationSearch)
+                const matchesSearch = !search || (
+                    c.type.toLowerCase().includes(searchLower) ||
+                    s.sample_code?.toLowerCase().includes(searchLower) ||
+                    s.name?.toLowerCase().includes(searchLower)
+                );
+
+                return matchesType && matchesSearch;
+            });
+
+            if (matches.length > 0) {
+                sampleCount++;
+                measurementCount += matches.length;
+            }
+        });
+
+        return { samples: sampleCount, measurements: measurementCount };
+    }, [samples, search, typeFilter, view]);
+
     const handleToggleExpand = (id: string) => {
         setCollapsed(prev => {
             const next = { ...prev };
@@ -313,7 +351,7 @@ export function SampleGrid({
                             <select
                                 value={statusFilter}
                                 onChange={e => setStatusFilter(e.target.value as any)}
-                                className="pl-9 pr-8 py-2 text-sm border border-slate-200 rounded-lg appearance-none bg-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                                className="pl-9 pr-8 py-2 text-sm border border-slate-200 rounded-lg appearance-none bg-white focus:outline-none focus:border-blue-500 cursor-pointer text-slate-600 font-medium"
                             >
                                 <option value="all">All Status</option>
                                 {STATUS_OPTIONS.map(opt => (
@@ -323,6 +361,36 @@ export function SampleGrid({
                             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                         </div>
+
+                        {/* Technique Filter (Only for Characterizations) */}
+                        {view === 'characterizations' && (
+                            <div className="relative">
+                                <select
+                                    value={typeFilter}
+                                    onChange={e => setTypeFilter(e.target.value)}
+                                    className="pl-9 pr-8 py-2 text-sm border border-slate-200 rounded-lg appearance-none bg-white focus:outline-none focus:border-blue-500 cursor-pointer text-slate-600 font-medium"
+                                >
+                                    <option value="all">Todas las Técnicas</option>
+                                    {Array.from(new Set(samples.flatMap(s => s.characterization_types || []))).sort().map(t => (
+                                        <option key={t} value={t}>{t}</option>
+                                    ))}
+                                </select>
+                                <FlaskConical className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                            </div>
+                        )}
+
+                        {/* Inline Stats */}
+                        {view === 'characterizations' && charStats.measurements > 0 && (
+                            <div className="flex items-center gap-2 ml-1">
+                                <div className="flex items-center gap-1.5 text-blue-600 bg-blue-50/50 px-2.5 py-1 rounded-lg border border-blue-100 text-[11px] font-bold whitespace-nowrap">
+                                    <Hash size={12} /> {charStats.samples} Muestras
+                                </div>
+                                <div className="flex items-center gap-1.5 text-purple-600 bg-purple-50/50 px-2.5 py-1 rounded-lg border border-purple-100 text-[11px] font-bold whitespace-nowrap">
+                                    <ClipboardList size={12} /> {charStats.measurements} Mediciones
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -354,7 +422,7 @@ export function SampleGrid({
 
                 {/* Grid Content */}
                 <div className="flex-1 overflow-auto relative">
-                    {view === 'samples' ? (
+                    {view === 'samples' && (
                         <table className="w-full text-left text-sm border-collapse">
                             <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-10 shadow-sm">
                                 <tr>
@@ -576,20 +644,30 @@ export function SampleGrid({
                                 ))}
                             </tbody>
                         </table>
-                    ) : (
+                    )}
+
+                    {view === 'characterizations' && (
                         <CharacterizationSearch
                             samples={samples}
+                            search={search}
+                            typeFilter={typeFilter}
                             onSelectSample={(sample, charId) => {
                                 setInitialCharId(charId || null);
                                 setDetailSample(sample);
                             }}
                         />
                     )}
-                </div >
-            </div >
+
+                    {view === 'raman' && (
+                        <div className="h-full flex flex-col p-4 bg-slate-50 min-h-[500px]">
+                            <RamanWorkspace samples={samples} driveSettings={driveSettings} />
+                        </div>
+                    )}
+                </div>
+            </div>
 
             {/* Modals */}
-            < ConfigModal
+            <ConfigModal
                 isOpen={configOpen}
                 onClose={() => setConfigOpen(false)
                 }

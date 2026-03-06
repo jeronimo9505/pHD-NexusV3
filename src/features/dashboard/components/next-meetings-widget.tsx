@@ -1,7 +1,7 @@
 'use client';
 
 import { CalendarDays, Clock, MapPin, ExternalLink } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatMonthShort, formatDayNumeric, formatDayLong, formatTimeShort } from '@/lib/utils';
 import Link from 'next/link';
 
 interface CalendarEvent {
@@ -26,7 +26,7 @@ const COLOR_CHIP: Record<string, string> = {
 };
 
 function formatEventTime(isoString: string): string {
-    return new Date(isoString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return formatTimeShort(isoString);
 }
 
 function getRelativeDayLabel(dateString: string): string {
@@ -43,9 +43,9 @@ function getRelativeDayLabel(dateString: string): string {
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Tomorrow';
     if (diffDays < 7 && diffDays > 1) {
-        return date.toLocaleDateString('en-US', { weekday: 'long' });
+        return formatDayLong(date);
     }
-    return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+    return `${formatMonthShort(date)} ${formatDayNumeric(date)}`;
 }
 
 export function NextMeetingsWidget({ groupId, events }: { groupId: string, events: CalendarEvent[] }) {
@@ -77,10 +77,10 @@ export function NextMeetingsWidget({ groupId, events }: { groupId: string, event
                                 <div className="p-3 bg-white border border-slate-100 hover:border-violet-200 rounded-lg shadow-sm transition-all hover:shadow-md flex items-start gap-3">
                                     <div className="shrink-0 flex flex-col items-center justify-center bg-slate-50 border border-slate-100 rounded-md w-12 h-12">
                                         <span className={cn("text-xs font-bold uppercase", isToday ? "text-violet-600" : "text-slate-500")}>
-                                            {new Date(event.start_at).toLocaleDateString('en-US', { month: 'short' })}
+                                            {formatMonthShort(event.start_at)}
                                         </span>
                                         <span className="text-lg font-bold text-slate-800 leading-none">
-                                            {new Date(event.start_at).toLocaleDateString('en-US', { day: 'numeric' })}
+                                            {formatDayNumeric(event.start_at)}
                                         </span>
                                     </div>
 
