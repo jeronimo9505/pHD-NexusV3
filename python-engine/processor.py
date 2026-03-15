@@ -13,11 +13,12 @@ from typing import Tuple, Dict, Any, Optional
 
 def _build_h5_filename(metadata: Dict[str, Any]) -> str:
     """
-    Smart rename: {SampleId}_{Technique}_{Laser}nm_{Power}uW_{Date}.h5
+    Smart rename: {SampleCode}_{Technique}_{Laser}nm_{Power}uW_{Date}.h5
     Falls back gracefully if metadata is missing.
     """
     parts = []
     
+    # Prefer sample_code or sample_id as the primary identifier
     sample = metadata.get("sample_id") or metadata.get("analyte") or "unknown"
     parts.append(str(sample)[:20])
     
@@ -40,12 +41,23 @@ def _build_h5_filename(metadata: Dict[str, Any]) -> str:
 
 def _build_vault_subpath(metadata: Dict[str, Any]) -> str:
     """
-    Organize into: /{group_id}/{technique}/{year}/{month}/
+    Human-readable folder structure: /{SampleCode}/{Technique}/{Year}/
+    - First level: the sample identifier (easy to find manually)
+    - Second level: technique (Raman, SERS, AFM...)
+    - Third level: year (keeps it tidy over time)
     """
-    group_id = metadata.get("group_id", "default")[:8]  # first 8 chars of UUID
-    technique = metadata.get("technique", "raman").lower()
-    now = datetime.now()
-    return f"{group_id}/{technique}/{now.year}/{now.month:02d}"
+    # Use sample_id (UUID prefix) or analyte as folder name
+    sample = metadata.get("sample_id") or metadata.get("analyte") or "unknown"
+    # Use short UUID prefix for IDs, or full analyte name
+    if len(str(sample)) == 36 and "-" in str(sample):  # looks like a UUID
+        sample_folder = str(sample)[:8]  # first 8 chars
+    else:
+        sample_folder = str(sample)[:30].replace(" ", "_").replace("/", "-")
+    
+    technique = metadata.get("technique", "raman").upper()
+    year = datetime.now().year
+    return f"{sample_folder}/{technique}/{year}"
+
 
 
 def convert_to_h5(
