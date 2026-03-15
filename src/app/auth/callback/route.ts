@@ -18,7 +18,10 @@ export async function GET(request: NextRequest) {
         const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
         if (!error) {
-            const redirectTarget = isPopup ? `${origin}/auth/popup-close` : `${origin}${next}`;
+            // Force direct redirect if coming from a local/desktop environment (localhost)
+            // regardless of the isPopup flag, to avoid getting stuck in a dead-end popup window.
+            const isLocal = origin.includes('localhost');
+            const redirectTarget = (isPopup && !isLocal) ? `${origin}/auth/popup-close` : `${origin}${next}`;
             const response = NextResponse.redirect(redirectTarget);
 
             // If the user logged in with Google OAuth, the provider_token is the

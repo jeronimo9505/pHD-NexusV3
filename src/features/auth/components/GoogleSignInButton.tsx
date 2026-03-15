@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getGoogleOAuthUrlAction } from '@/features/auth/actions';
+import { isDesktop } from '@/lib/desktop';
 
 export function GoogleSignInButton() {
     const [loading, setLoading] = useState(false);
@@ -14,7 +15,7 @@ export function GoogleSignInButton() {
         setError(null);
 
         try {
-            const result = await getGoogleOAuthUrlAction(window.location.origin);
+            const result = await getGoogleOAuthUrlAction(window.location.origin, !isDesktop);
 
             if (result.error || !result.url) {
                 setError(result.error || 'Could not connect to Google');
@@ -22,9 +23,17 @@ export function GoogleSignInButton() {
                 return;
             }
 
-            // Open a centered popup window
+            // Desktop (Tauri) Fix: Just do a full redirect. 
+            // The server already correctly set popup=0 in the redirect URL.
+            if (isDesktop) {
+                window.location.href = result.url;
+                return;
+            }
+
+            // Web: Open a centered popup window
             const width = 520;
             const height = 620;
+
             const left = window.screenX + (window.outerWidth - width) / 2;
             const top = window.screenY + (window.outerHeight - height) / 2;
 

@@ -3,7 +3,8 @@
  * Returns true only when the app is running inside a Tauri desktop window.
  * Use this to conditionally show/hide desktop-exclusive features.
  */
-export const isDesktop = typeof window !== "undefined" && "__TAURI__" in window;
+export const isDesktop = typeof window !== "undefined" && 
+    ("__TAURI__" in window || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
 /** 
  * URL of the local Python science engine sidecar.
