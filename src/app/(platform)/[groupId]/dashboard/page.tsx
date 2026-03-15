@@ -4,6 +4,7 @@ import { PendingReviewCard } from "@/features/dashboard/components/pending-revie
 import { NotesWidget } from "@/features/dashboard/components/notes-widget";
 import { MyPendingTasksWidget } from "@/features/dashboard/components/my-tasks-widget";
 import { NextMeetingsWidget } from "@/features/dashboard/components/next-meetings-widget";
+import { DashboardActions } from "@/features/dashboard/components/dashboard-actions";
 import { Users } from "lucide-react";
 
 export default async function GroupDashboardPage({
@@ -86,16 +87,7 @@ export default async function GroupDashboardPage({
                         Overview for <span className="font-semibold">{group?.name}</span>
                     </p>
                 </div>
-                {/* Active Members pill */}
-                <div className="flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-4 py-2.5 shadow-sm">
-                    <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
-                        <Users size={16} className="text-emerald-600" />
-                    </div>
-                    <div>
-                        <p className="text-xs font-medium text-slate-500">Active Members</p>
-                        <p className="text-xl font-bold text-slate-900 leading-tight">{memberCount ?? 0}</p>
-                    </div>
-                </div>
+                <DashboardActions groupId={groupId} memberCount={memberCount ?? 0} />
             </div>
 
             {/* Top row: Pending Review + Next Meetings */}

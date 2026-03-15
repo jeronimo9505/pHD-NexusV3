@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { RegularReport } from "./types";
+import { logActivity } from "@/lib/activity-log";
 
 const createReportSchema = z.object({
     group_id: z.string().uuid(),
@@ -53,6 +54,11 @@ export async function createRegularReportAction(formData: FormData) {
         .single();
 
     if (error) return { error: error.message };
+
+    // Log Activity
+    await logActivity(validation.data.group_id, 'created', 'report', data.id, {
+        week_start: validation.data.week_start
+    });
 
     // Create default sections
     const defaultSections = ['context', 'experimental', 'findings', 'difficulties', 'nextSteps'];
@@ -128,6 +134,11 @@ export async function updateReportStatusAction(reportId: string, status: 'draft'
         .eq('id', reportId);
 
     if (error) return { error: error.message };
+
+    // Log Activity
+    await logActivity(groupId, status === 'submitted' ? 'submitted' : 'reviewed', 'report', reportId, {
+        feedback_preview: feedback?.substring(0, 100)
+    });
 
     revalidatePath(`/${groupId}/reports/${reportId}`);
     revalidatePath(`/${groupId}/reports`);

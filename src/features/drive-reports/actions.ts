@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { logActivity } from "@/lib/activity-log";
 
 const createSchema = z.object({
     title: z.string().min(3, { message: "Title must be at least 3 characters long" }),
@@ -75,6 +76,12 @@ export async function createDriveReportAction(formData: FormData) {
             console.error('Create error:', insertError);
             return { error: `Failed to create report: ${insertError.message || insertError.code || 'Unknown error'}` };
         }
+
+        // Log Activity
+        await logActivity(validation.data.group_id, 'created', 'report', (validation.data as any).id || '', {
+            title: validation.data.title,
+            type: validation.data.type
+        });
 
         revalidatePath(`/${validation.data.group_id}/drive-reports`);
         return { success: true };
@@ -497,6 +504,12 @@ export async function addCommentAction(reportId: string, content: string, groupI
             console.error('Add comment error:', error);
             return { error: 'Failed to add comment' };
         }
+
+        // Log Activity
+        await logActivity(groupId, 'commented', 'report', reportId, {
+            comment_id: data.id,
+            preview: content.trim().substring(0, 100)
+        });
 
         revalidatePath(`/${groupId}/drive-reports`);
         return { success: true, comment: data };
