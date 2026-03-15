@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { logActivity } from "@/lib/activity-log";
 
 export type KnowledgeItem = {
     id?: string;
@@ -98,6 +99,12 @@ export async function createKnowledgeItemAction(item: {
         console.error('Create error:', error);
         return { error: error.message };
     }
+
+    // Log Activity
+    await logActivity(item.group_id, 'created', 'knowledge', (item as any).id || '', {
+        title: item.title,
+        category: item.category
+    });
 
     revalidatePath(`/${item.group_id}/knowledge`);
     return { success: true };

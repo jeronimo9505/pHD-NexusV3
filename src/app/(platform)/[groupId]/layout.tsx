@@ -4,6 +4,7 @@ import { Shell } from "@/components/layout/shell";
 import { Sidebar } from "@/components/layout/sidebar";
 import { getGroupRole, getSystemRole } from "@/lib/auth/roles";
 import { GoogleTokenSync } from "@/components/layout/GoogleTokenSync";
+import { SessionTracker } from "@/components/layout/SessionTracker";
 
 interface GroupLayoutProps {
     children: React.ReactNode;
@@ -69,6 +70,7 @@ export default async function GroupLayout(props: GroupLayoutProps) {
             />
         }>
             <GoogleTokenSync />
+            <SessionTracker groupId={groupId} />
             {props.children}
         </Shell>
     );

@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
+import { logActivity } from "@/lib/activity-log";
 
 export async function signInAction(formData: FormData) {
     const email = formData.get("email") as string;
@@ -91,5 +92,36 @@ export async function getGoogleOAuthUrlAction(clientOrigin?: string): Promise<{ 
     }
 
     return { url: data.url };
+}
+
+export async function logVisitAction(groupId: string) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) return { error: "Unauthorized" };
+
+    // Check for recent visit log to avoid spamming the database
+    // "Recent" = last 4 hours
+    const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+
+    const { data: recentLog } = await supabase
+        .from('activity_log')
+        .select('id')
+        .eq('group_id', groupId)
+        .eq('user_id', user.id)
+        .eq('action', 'visit')
+        .gt('created_at', fourHoursAgo)
+        .limit(1)
+        .single();
+
+    if (recentLog) {
+        return { success: true, alreadyLogged: true };
+    }
+
+    await logActivity(groupId, 'visit', 'user', user.id, {
+        source: 'dashboard_visit'
+    });
+
+    return { success: true };
 }
 

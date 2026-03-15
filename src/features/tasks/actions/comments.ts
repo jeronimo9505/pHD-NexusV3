@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { logActivity } from "@/lib/activity-log";
 
 export type TaskComment = {
     id: string;
@@ -67,6 +68,12 @@ export async function createTaskCommentAction(taskId: string, groupId: string, c
         console.error("Error creating comment:", error);
         return { error: error.message };
     }
+
+    // Log Activity
+    await logActivity(groupId, 'commented', 'task', taskId, {
+        comment_id: comment.id,
+        preview: content.trim().substring(0, 100)
+    });
 
     revalidatePath(`/${groupId}/tasks`);
     return { data: comment as TaskComment };

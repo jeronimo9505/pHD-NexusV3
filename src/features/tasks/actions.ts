@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { cookies } from "next/headers";
+import { logActivity } from "@/lib/activity-log";
 
 export type Subtask = {
     id: string;
@@ -175,6 +176,11 @@ export async function createTaskAction(prevState: any, formData: FormData) {
         if (assignError) console.error("Error assigning users:", assignError);
     }
 
+    // Log Activity
+    await logActivity(newTask.group_id, 'created', 'task', newTask.id, {
+        title: newTask.title
+    });
+
     revalidatePath(`/${taskData.group_id}/tasks`);
     return { success: true, task: newTask };
 }
@@ -189,6 +195,11 @@ export async function updateTaskStatusAction(taskId: string, newStatus: string, 
         .eq('id', taskId);
 
     if (error) return { error: error.message };
+
+    // Log Activity
+    await logActivity(groupId, 'updated', 'task', taskId, {
+        new_status: newStatus
+    });
 
     revalidatePath(`/${groupId}/tasks`);
     return { success: true };
@@ -218,6 +229,11 @@ export async function updateTaskAction(taskId: string, groupId: string, updates:
         .eq('id', taskId);
 
     if (error) return { error: error.message };
+
+    // Log Activity
+    await logActivity(groupId, 'updated', 'task', taskId, {
+        updated_fields: Object.keys(tableUpdates)
+    });
 
     revalidatePath(`/${groupId}/tasks`);
     return { success: true };
