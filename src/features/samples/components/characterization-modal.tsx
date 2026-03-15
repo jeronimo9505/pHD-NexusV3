@@ -4,10 +4,11 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Sample, SampleCharacterization } from '../types';
 import { createCharacterizationAction, updateCharacterizationAction } from '../actions';
 import { toast } from 'sonner';
-import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity } from 'lucide-react';
+import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity, HardDrive, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { uploadFileToDrive } from '@/lib/google/upload';
 import { ensureAuth } from '@/lib/google/auth';
+import { isDesktop, ingestFile, checkEngineHealth, SCIENCE_ENGINE_URL } from '@/lib/desktop';
 
 interface CharacterizationModalProps {
     groupId: string;
@@ -52,6 +53,14 @@ export function CharacterizationModal({
     const [performedAt, setPerformedAt] = useState(new Date().toISOString().split('T')[0]);
     const [ramanSpectrum, setRamanSpectrum] = useState('');
 
+    // Desktop file ingestion state
+    const [localFilePath, setLocalFilePath] = useState('');
+    const [vaultRoot, setVaultRoot] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('phdnexus_vault_root') || '') : '');
+    const [ingestStatus, setIngestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+    const [h5RelativePath, setH5RelativePath] = useState('');
+    const [spectrumPreviewB64, setSpectrumPreviewB64] = useState('');
+    const [engineOnline, setEngineOnline] = useState(false);
+
     // UI States
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isGeneratingDoc, setIsGeneratingDoc] = useState(false);
@@ -68,7 +77,54 @@ export function CharacterizationModal({
                     .catch((e) => console.warn('Google init failed:', e));
             });
         }
+        // Check Python engine health when on desktop
+        if (isOpen && isDesktop) {
+            checkEngineHealth().then(setEngineOnline);
+        }
     }, [isOpen, driveSettings, scriptsLoaded]);
+
+    const handleVaultRootChange = (val: string) => {
+        setVaultRoot(val);
+        localStorage.setItem('phdnexus_vault_root', val);
+    };
+
+    const handleDesktopFileIngest = async () => {
+        if (!localFilePath.trim()) {
+            toast.error('Please enter the path to your raw data file.');
+            return;
+        }
+        if (!vaultRoot.trim()) {
+            toast.error('Please configure your local Data Vault folder first.');
+            return;
+        }
+        setIngestStatus('loading');
+        try {
+            const analyte = dataFields.find(f => f.key.toLowerCase().includes('analyte'))?.value || '';
+            const laserField = dataFields.find(f => f.key.toLowerCase().includes('laser'))?.value || '';
+            const laserNm = parseInt(laserField.replace(/\D/g, '')) || undefined;
+            const powerField = dataFields.find(f => f.key.toLowerCase().includes('power'))?.value || '';
+            const powerUw = parseFloat(powerField.replace(/[^\d.]/g, '')) || undefined;
+
+            const result = await ingestFile({
+                file_path: localFilePath.trim(),
+                vault_root: vaultRoot.trim(),
+                group_id: groupId,
+                sample_id: sample.id,
+                analyte,
+                laser_wavelength_nm: laserNm,
+                laser_power_uw: powerUw,
+                technique: type.toLowerCase(),
+            });
+
+            setH5RelativePath(result.h5_relative_path);
+            if (result.preview_base64) setSpectrumPreviewB64(result.preview_base64);
+            setIngestStatus('success');
+            toast.success(`File processed → ${result.h5_relative_path}`);
+        } catch (err: any) {
+            setIngestStatus('error');
+            toast.error(err.message || 'Python engine error');
+        }
+    };
 
     // Load Initial Data
     useEffect(() => {
@@ -254,6 +310,9 @@ export function CharacterizationModal({
         if (equipment.trim()) cleanData['equipment'] = equipment.trim();
         if (fileOrigin.trim()) cleanData['file_origin'] = fileOrigin.trim();
         if (driveFileLink.trim()) cleanData['drive_file_link'] = driveFileLink.trim();
+        // Desktop: store the local HDF5 path
+        if (h5RelativePath.trim()) cleanData['local_h5_path'] = h5RelativePath.trim();
+        if (localFilePath.trim()) cleanData['original_file'] = localFilePath.trim();
 
         // Raman Spectrum Logic
         if (type === 'Raman' && ramanSpectrum.trim()) {
@@ -655,29 +714,113 @@ export function CharacterizationModal({
                                 </div>
                             )}
 
-                            {/* Raman Spectrum Field */}
-                            {type === 'Raman' && (
-                                <div className="p-5 bg-purple-50/50 border border-purple-100 rounded-xl space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <div className="p-1.5 bg-purple-100 text-purple-600 rounded-lg">
-                                                <Activity size={16} />
-                                            </div>
-                                            <div>
-                                                <h4 className="text-sm font-bold text-slate-800">Raman Spectrum Data</h4>
-                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Paste XY values (Tab/Space separated)</p>
-                                            </div>
+                            {/* Raman / SERS Spectrum Section */}
+                            {(type === 'Raman' || type === 'SERS') && (
+                                <div className="p-5 bg-purple-50/50 border border-purple-100 rounded-xl space-y-4">
+                                    <div className="flex items-center gap-2">
+                                        <div className="p-1.5 bg-purple-100 text-purple-600 rounded-lg">
+                                            <Activity size={16} />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-sm font-bold text-slate-800">{type} Spectrum Data</h4>
+                                            <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+                                                {isDesktop ? 'Local file ingestion (Desktop)' : 'Paste XY values (Web)'}
+                                            </p>
                                         </div>
                                     </div>
-                                    <textarea
-                                        value={ramanSpectrum}
-                                        onChange={e => setRamanSpectrum(e.target.value)}
-                                        placeholder="369.28  744.15&#10;372.51  740.00&#10;..."
-                                        className="w-full h-48 text-[11px] font-mono border border-purple-200 rounded-lg px-3 py-2.5 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 resize-none bg-white shadow-inner"
-                                    />
-                                    <p className="text-[10px] text-slate-400 italic">
-                                        Note: Data will be saved as a JSON file in Google Drive and linked here.
-                                    </p>
+
+                                    {isDesktop ? (
+                                        /* ─── DESKTOP: File Ingestion UI ─── */
+                                        <div className="space-y-3">
+                                            {/* Engine status */}
+                                            <div className={cn(
+                                                "flex items-center gap-2 text-[10px] font-semibold px-3 py-1.5 rounded-lg",
+                                                engineOnline ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                                            )}>
+                                                {engineOnline
+                                                    ? <><CheckCircle2 size={12} /> Python Engine Online</>  
+                                                    : <><AlertCircle size={12} /> Python Engine Offline — run <code className="mx-1 font-mono bg-amber-100 px-1 rounded">python start.py</code> in python-engine/</>}
+                                            </div>
+
+                                            {/* Vault Root Config */}
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                                                    <HardDrive size={11} /> Local Data Vault Root
+                                                </label>
+                                                <input
+                                                    value={vaultRoot}
+                                                    onChange={e => handleVaultRootChange(e.target.value)}
+                                                    placeholder="e.g. C:\Users\Rodrigo\OneDrive\PhD_Datos"
+                                                    className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-purple-400 bg-white"
+                                                />
+                                                <p className="text-[10px] text-slate-400">Saved per-device. Files will be organized under this folder automatically.</p>
+                                            </div>
+
+                                            {/* File Path */}
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Raw Data File Path (.txt, .mat)</label>
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        value={localFilePath}
+                                                        onChange={e => setLocalFilePath(e.target.value)}
+                                                        placeholder="C:\Users\Rodrigo\Desktop\medicion.txt"
+                                                        className="flex-1 text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-purple-400 bg-white"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleDesktopFileIngest}
+                                                        disabled={ingestStatus === 'loading' || !engineOnline}
+                                                        className={cn(
+                                                            "px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap",
+                                                            engineOnline
+                                                                ? "bg-purple-600 text-white hover:bg-purple-700 shadow-sm"
+                                                                : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                                                        )}
+                                                    >
+                                                        {ingestStatus === 'loading'
+                                                            ? <><Loader2 size={12} className="animate-spin" /> Processing...</>
+                                                            : <><Activity size={12} /> Ingest File</>}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Result: Preview + Path */}
+                                            {ingestStatus === 'success' && (
+                                                <div className="space-y-2">
+                                                    {spectrumPreviewB64 && (
+                                                        <img
+                                                            src={`data:image/png;base64,${spectrumPreviewB64}`}
+                                                            alt="Spectrum preview"
+                                                            className="w-full rounded-lg border border-purple-200 shadow-sm"
+                                                        />
+                                                    )}
+                                                    <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                                                        <CheckCircle2 size={14} className="text-emerald-600 flex-shrink-0" />
+                                                        <span className="text-[10px] font-mono text-emerald-700 break-all">{h5RelativePath}</span>
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {ingestStatus === 'error' && (
+                                                <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                                                    <AlertCircle size={14} className="text-red-500" />
+                                                    <span className="text-[10px] text-red-600">Processing failed. Check that the file path is correct and the engine is running.</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        /* ─── WEB: Paste XY textarea (unchanged) ─── */
+                                        <div className="space-y-2">
+                                            <textarea
+                                                value={ramanSpectrum}
+                                                onChange={e => setRamanSpectrum(e.target.value)}
+                                                placeholder={"369.28  744.15\n372.51  740.00\n..."}
+                                                className="w-full h-48 text-[11px] font-mono border border-purple-200 rounded-lg px-3 py-2.5 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 resize-none bg-white shadow-inner"
+                                            />
+                                            <p className="text-[10px] text-slate-400 italic">
+                                                Note: Data will be saved as a JSON file in Google Drive and linked here.
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
