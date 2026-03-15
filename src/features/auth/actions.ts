@@ -53,7 +53,7 @@ export async function signUpAction(formData: FormData) {
     return { error: 'Unknown registration error' };
 }
 
-export async function getGoogleOAuthUrlAction(clientOrigin?: string): Promise<{ url?: string; error?: string }> {
+export async function getGoogleOAuthUrlAction(clientOrigin?: string, isPopup: boolean = true): Promise<{ url?: string; error?: string }> {
     const supabase = await createClient();
 
     // Determine the base URL: prioritize origin passed from client, then fallback to headers
@@ -72,7 +72,7 @@ export async function getGoogleOAuthUrlAction(clientOrigin?: string): Promise<{ 
     const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-            redirectTo: `${origin}/auth/callback?popup=1`,
+            redirectTo: `${origin}/auth/callback?popup=${isPopup ? '1' : '0'}`,
             scopes: [
                 'https://www.googleapis.com/auth/drive.file',
                 'https://www.googleapis.com/auth/documents',
