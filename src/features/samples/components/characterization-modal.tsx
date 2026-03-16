@@ -8,7 +8,8 @@ import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, Chevr
 import { cn } from '@/lib/utils';
 import { uploadFileToDrive } from '@/lib/google/upload';
 import { ensureAuth } from '@/lib/google/auth';
-import { isDesktop, ingestFile, checkEngineHealth, SCIENCE_ENGINE_URL } from '@/lib/desktop';
+import { isDesktop, ingestFile, checkEngineHealth, SCIENCE_ENGINE_URL, fetchRepresentativeSpectrum } from '@/lib/desktop';
+import { open } from '@tauri-apps/plugin-dialog';
 
 interface CharacterizationModalProps {
     groupId: string;
@@ -54,10 +55,9 @@ export function CharacterizationModal({
     const [ramanSpectrum, setRamanSpectrum] = useState('');
 
     // Desktop file ingestion state
-    const [localFilePath, setLocalFilePath] = useState('');
-    const [vaultRoot, setVaultRoot] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('phdnexus_vault_root') || '') : '');
+    const [localFilePaths, setLocalFilePaths] = useState<string[]>([]);
     const [ingestStatus, setIngestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-    const [h5RelativePath, setH5RelativePath] = useState('');
+    const [h5RelativePaths, setH5RelativePaths] = useState<string[]>([]);
     const [spectrumPreviewB64, setSpectrumPreviewB64] = useState('');
     const [engineOnline, setEngineOnline] = useState(false);
 
@@ -83,20 +83,37 @@ export function CharacterizationModal({
         }
     }, [isOpen, driveSettings, scriptsLoaded]);
 
-    const handleVaultRootChange = (val: string) => {
-        setVaultRoot(val);
-        localStorage.setItem('phdnexus_vault_root', val);
+    const handleSelectRawFile = async () => {
+        try {
+            const selected = await open({
+                multiple: true,
+                title: 'Select Raw Data File(s)',
+                filters: [{
+                    name: 'Data Files',
+                    extensions: ['txt', 'mat', 'csv', 'h5', 'hdf5']
+                }]
+            });
+            if (selected) {
+                setLocalFilePaths(Array.isArray(selected) ? selected : [selected]);
+                setIngestStatus('idle'); // Reset status on new selection
+            }
+        } catch (err) {
+            console.error('Error opening dialog:', err);
+        }
     };
 
     const handleDesktopFileIngest = async () => {
-        if (!localFilePath.trim()) {
-            toast.error('Please enter the path to your raw data file.');
+        if (localFilePaths.length === 0) {
+            toast.error('Please select at least one raw data file.');
             return;
         }
-        if (!vaultRoot.trim()) {
-            toast.error('Please configure your local Data Vault folder first.');
+        
+        const currentVaultRoot = typeof window !== 'undefined' ? localStorage.getItem('phdnexus_vault_root') : null;
+        if (!currentVaultRoot || !currentVaultRoot.trim()) {
+            toast.error('Local Data Vault Root is not configured. Please set it up in Group Settings > Drive Integration.');
             return;
         }
+
         setIngestStatus('loading');
         try {
             const analyte = dataFields.find(f => f.key.toLowerCase().includes('analyte'))?.value || '';
@@ -105,25 +122,59 @@ export function CharacterizationModal({
             const powerField = dataFields.find(f => f.key.toLowerCase().includes('power'))?.value || '';
             const powerUw = parseFloat(powerField.replace(/[^\d.]/g, '')) || undefined;
 
-            const result = await ingestFile({
-                file_path: localFilePath.trim(),
-                vault_root: vaultRoot.trim(),
-                group_id: groupId,
-                sample_id: sample.id,
-                analyte,
-                laser_wavelength_nm: laserNm,
-                laser_power_uw: powerUw,
-                technique: type.toLowerCase(),
+            const parameters: Record<string, string> = {};
+            dataFields.forEach(f => {
+                const val = (typeof f.value === 'string' ? f.value : '').trim();
+                const unit = (f.unit || '').trim();
+                if (val) {
+                    parameters[f.key] = unit ? `${val} ${unit}` : val;
+                }
             });
 
-            setH5RelativePath(result.h5_relative_path);
-            if (result.preview_base64) setSpectrumPreviewB64(result.preview_base64);
+            const newH5Paths: string[] = [...h5RelativePaths];
+            let lastPreview = '';
+
+            for (const filePath of localFilePaths) {
+                // Skip if already in list (basic check)
+                if (initialData?.data?.original_files?.includes(filePath)) continue;
+
+                const result = await ingestFile({
+                    file_path: filePath.trim(),
+                    vault_root: currentVaultRoot.trim(),
+                    group_id: groupId,
+                    sample_id: sample.id,
+                    sample_code: sample.sample_code,
+                    sample_name: sample.name,
+                    analyte,
+                    laser_wavelength_nm: laserNm,
+                    laser_power_uw: powerUw,
+                    technique: type.toLowerCase(),
+                    parameters,
+                });
+                newH5Paths.push(result.h5_relative_path);
+                if (result.preview_base64) lastPreview = result.preview_base64;
+            }
+
+            setH5RelativePaths(newH5Paths);
+            // Append rather than replace original file paths
+            if (initialData) {
+                 const ogFiles = initialData?.data?.original_files || [];
+                 const combined = Array.from(new Set([...ogFiles, ...localFilePaths]));
+                 setLocalFilePaths(combined);
+            }
+            if (lastPreview) setSpectrumPreviewB64(lastPreview);
             setIngestStatus('success');
-            toast.success(`File processed → ${result.h5_relative_path}`);
+            toast.success(`${newH5Paths.length - h5RelativePaths.length} new file(s) processed into Data Vault`);
         } catch (err: any) {
             setIngestStatus('error');
             toast.error(err.message || 'Python engine error');
         }
+    };
+
+    // Remove an ingested file
+    const handleRemoveIngestedFile = (index: number) => {
+        setH5RelativePaths(prev => prev.filter((_, i) => i !== index));
+        setLocalFilePaths(prev => prev.filter((_, i) => i !== index));
     };
 
     // Load Initial Data
@@ -139,6 +190,12 @@ export function CharacterizationModal({
                 setPerformedAt(initialData.performed_at ? initialData.performed_at.split('T')[0] : new Date().toISOString().split('T')[0]);
                 setHasBulkId(!!initialData.data?.__bulk_id__);
                 setRamanSpectrum(''); // Always reset for new session
+                
+                // Desktop Edit Mode fields
+                const h5Paths = initialData.data.local_h5_paths || (initialData.data.local_h5_path ? [initialData.data.local_h5_path] : []);
+                setH5RelativePaths(h5Paths);
+                const ogFiles = initialData.data.original_files || (initialData.data.original_file ? [initialData.data.original_file] : []);
+                setLocalFilePaths(ogFiles);
 
                 const fields: { key: string; value: string; unit: string }[] = [];
                 const data = initialData.data;
@@ -165,7 +222,8 @@ export function CharacterizationModal({
 
                 // 2. Process Remaining Keys
                 Object.entries(data).forEach(([k, v]) => {
-                    if (!processedKeys.has(k) && !['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link'].includes(k)) {
+                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', '__bulk_id__'];
+                    if (!processedKeys.has(k) && !systemKeys.includes(k)) {
                         const { v: val, u: unit } = separateUnit(String(v));
                         fields.push({ key: k, value: val, unit: unit });
                     }
@@ -184,6 +242,10 @@ export function CharacterizationModal({
                 setHasBulkId(false);
                 setUpdateBatch(false);
                 setRamanSpectrum('');
+                setH5RelativePaths([]);
+                setLocalFilePaths([]);
+                setSpectrumPreviewB64('');
+                setIngestStatus('idle');
 
                 // Set type (default Raman or keep last? typically default to first)
                 // Actually if we just opened, we can default to Raman.
@@ -199,7 +261,7 @@ export function CharacterizationModal({
         // Load defaults for this type if creating new
         if (!initialData) {
             const defaults: Record<string, string[]> = {
-                'Raman': ['Laser', 'Objective', 'Acquisition Time', 'Measurement Type', 'Power']
+                'Raman': ['Analyte', 'Laser', 'Power', 'Objective', 'Acquisition Time', 'Measurement Type']
             };
 
             const defaultKeys = defaults[newType] || [];
@@ -279,6 +341,19 @@ export function CharacterizationModal({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // EARLY AUTH FOR RAMAN SPECTRUM
+        if (type === 'Raman') {
+            try {
+                // This ensures the popup is triggered directly from the user's click event
+                await ensureAuth();
+            } catch (err) {
+                console.error("Google Auth failed or blocked", err);
+                toast.error("Google Drive Auth is required to save Raman previews.");
+                return;
+            }
+        }
+
         setIsSubmitting(true);
 
         const cleanData: Record<string, any> = {};
@@ -307,29 +382,46 @@ export function CharacterizationModal({
         });
 
         if (notes.trim()) cleanData['notes'] = notes.trim();
-        if (equipment.trim()) cleanData['equipment'] = equipment.trim();
+        if (equipment.trim()) {
+            cleanData['equipment'] = equipment.trim();
+            if (typeof window !== 'undefined') {
+                localStorage.setItem(`phdnexus_last_equipment_${type}`, equipment.trim());
+            }
+        }
         if (fileOrigin.trim()) cleanData['file_origin'] = fileOrigin.trim();
         if (driveFileLink.trim()) cleanData['drive_file_link'] = driveFileLink.trim();
-        // Desktop: store the local HDF5 path
-        if (h5RelativePath.trim()) cleanData['local_h5_path'] = h5RelativePath.trim();
-        if (localFilePath.trim()) cleanData['original_file'] = localFilePath.trim();
+        // Desktop: store the local HDF5 paths
+        if (h5RelativePaths.length > 0) cleanData['local_h5_paths'] = h5RelativePaths;
+        if (localFilePaths.length > 0) cleanData['original_files'] = localFilePaths;
 
         // Raman Spectrum Logic
-        if (type === 'Raman' && ramanSpectrum.trim()) {
+        if (type === 'Raman') {
             try {
-                const parseXYData = (text: string) => {
-                    return text.trim().split('\n').map(line => {
-                        const parts = line.trim().split(/\s+/);
-                        if (parts.length >= 2) {
-                            const x = parseFloat(parts[0]);
-                            const y = parseFloat(parts[1]);
-                            if (!isNaN(x) && !isNaN(y)) return { x, y };
-                        }
-                        return null;
-                    }).filter(Boolean);
-                };
+                let spectrumData: {x: number, y: number}[] = [];
 
-                const spectrumData = parseXYData(ramanSpectrum);
+                if (isDesktop && h5RelativePaths.length > 0) {
+                    const currentVaultRoot = localStorage.getItem('phdnexus_vault_root');
+                    if (currentVaultRoot) {
+                        const repRes = await fetchRepresentativeSpectrum(currentVaultRoot, h5RelativePaths);
+                        if (repRes.success && repRes.data && repRes.data.length > 0) {
+                            spectrumData = repRes.data;
+                        }
+                    }
+                } else if (ramanSpectrum.trim()) {
+                    const parseXYData = (text: string) => {
+                        return text.trim().split('\n').map(line => {
+                            const parts = line.trim().split(/\s+/);
+                            if (parts.length >= 2) {
+                                const x = parseFloat(parts[0]);
+                                const y = parseFloat(parts[1]);
+                                if (!isNaN(x) && !isNaN(y)) return { x, y };
+                            }
+                            return null;
+                        }).filter(Boolean) as {x: number, y: number}[];
+                    };
+                    spectrumData = parseXYData(ramanSpectrum);
+                }
+
                 if (spectrumData.length > 0) {
                     const payload = {
                         sample_id: sample.id,
@@ -358,8 +450,8 @@ export function CharacterizationModal({
                     }
                 }
             } catch (err) {
-                console.error('Error uploading Raman spectrum:', err);
-                toast.error('Failed to upload spectrum data to Drive');
+                console.error('Error handling Raman spectrum:', err);
+                toast.error('Failed to generate or upload representative spectrum to Drive');
             }
         }
 
@@ -468,9 +560,9 @@ export function CharacterizationModal({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200 p-4">
             <div className="absolute inset-0" onClick={onClose} />
-            <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200">
+            <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200">
 
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
@@ -595,13 +687,53 @@ export function CharacterizationModal({
                                         </h3>
                                         <p className="text-xs text-slate-400">Define experimental conditions and results</p>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleAddField}
-                                        className="text-xs flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition-colors"
-                                    >
-                                        <Plus size={14} /> Add Parameter
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (type === 'Raman') {
+                                                    setDataFields([
+                                                        { key: 'Analyte', value: 'R6G', unit: '10-6' },
+                                                        { key: 'Laser', value: '633', unit: 'nm' },
+                                                        { key: 'Power', value: '70', unit: 'µW' },
+                                                        { key: 'Objective', value: '50', unit: 'x' },
+                                                        { key: 'Acquisition Time', value: '1', unit: 's' },
+                                                        { key: 'Accumulations', value: '10', unit: '' }
+                                                    ]);
+                                                } else if (type === 'AFM') {
+                                                    setDataFields([
+                                                        { key: 'Scan Size', value: '5', unit: 'µm' },
+                                                        { key: 'Scan Rate', value: '1', unit: 'Hz' },
+                                                        { key: 'Tip Type', value: 'Silicon', unit: '' }
+                                                    ]);
+                                                } else {
+                                                    toast.info('No auto-fill template available for this technique yet.');
+                                                }
+                                                // Auto-fill equipment if previously saved
+                                                if (typeof window !== 'undefined') {
+                                                    const lastEq = localStorage.getItem(`phdnexus_last_equipment_${type}`);
+                                                    if (lastEq && !equipment) {
+                                                        setEquipment(lastEq);
+                                                    }
+                                                }
+                                                toast.success('Fields auto-filled!');
+                                            }}
+                                            className="text-xs flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-md font-medium hover:bg-emerald-100 transition-colors"
+                                            title="Auto-fill based on Logbook/Technique"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                            </svg>
+                                            Auto-Fill
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleAddField}
+                                            className="text-xs flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition-colors"
+                                        >
+                                            <Plus size={14} /> Add Parameter
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="border border-slate-200 rounded-lg bg-white overflow-hidden shadow-sm flex flex-col">
@@ -667,7 +799,7 @@ export function CharacterizationModal({
                                                     <datalist id={`units-list-${idx}`}>
                                                         {field.key && parameterUnits[field.key] ?
                                                             parameterUnits[field.key].map(u => <option key={u} value={u} />) :
-                                                            ['nm', 'µm', '%', 's', 'min', 'Hz', 'V', 'mW'].map(u => <option key={u} value={u} />)
+                                                            ['nm', 'µW', 'mW', 'x', 's', 'min', '%', 'Hz', 'V'].map(u => <option key={u} value={u} />)
                                                         }
                                                     </datalist>
                                                 </div>
@@ -742,30 +874,43 @@ export function CharacterizationModal({
                                                     : <><AlertCircle size={12} /> Python Engine Offline — run <code className="mx-1 font-mono bg-amber-100 px-1 rounded">python start.py</code> in python-engine/</>}
                                             </div>
 
-                                            {/* Vault Root Config */}
-                                            <div className="space-y-1">
-                                                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                                                    <HardDrive size={11} /> Local Data Vault Root
-                                                </label>
-                                                <input
-                                                    value={vaultRoot}
-                                                    onChange={e => handleVaultRootChange(e.target.value)}
-                                                    placeholder="e.g. C:\Users\Rodrigo\OneDrive\PhD_Datos"
-                                                    className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-purple-400 bg-white"
-                                                />
-                                                <p className="text-[10px] text-slate-400">Saved per-device. Files will be organized under this folder automatically.</p>
-                                            </div>
-
-                                            {/* File Path */}
                                             <div className="space-y-1">
                                                 <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Raw Data File Path (.txt, .mat)</label>
+                                                <p className="text-[10px] text-slate-400 mb-2">The file will be processed and copied to your global Data Vault Root (configured in Settings).</p>
+                                                <div className="space-y-2">
+                                                    {localFilePaths.length > 0 && (
+                                                        <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-2 bg-slate-50/50 shadow-inner">
+                                                            {localFilePaths.map((fp, i) => {
+                                                                const isIngested = !!h5RelativePaths[i];
+                                                                const filename = fp.split(/[\\/]/).pop();
+                                                                return (
+                                                                    <div key={i} className="flex justify-between items-center bg-white border border-slate-100 px-2 py-1.5 rounded-md shadow-sm group">
+                                                                        <div className="flex items-center gap-2 overflow-hidden">
+                                                                            {isIngested ? (
+                                                                                <CheckCircle2 size={12} className="text-emerald-500 flex-shrink-0" />
+                                                                            ) : (
+                                                                                <div className="w-3 h-3 rounded-full border-2 border-slate-200 border-t-purple-400 animate-spin flex-shrink-0" />
+                                                                            )}
+                                                                            <span className="text-xs font-mono text-slate-600 truncate" title={fp}>{filename}</span>
+                                                                        </div>
+                                                                        <button type="button" onClick={() => handleRemoveIngestedFile(i)} className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-all ml-2 flex-shrink-0">
+                                                                            <X size={12} />
+                                                                        </button>
+                                                                    </div>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+
                                                 <div className="flex gap-2">
-                                                    <input
-                                                        value={localFilePath}
-                                                        onChange={e => setLocalFilePath(e.target.value)}
-                                                        placeholder="C:\Users\Rodrigo\Desktop\medicion.txt"
-                                                        className="flex-1 text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-purple-400 bg-white"
-                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSelectRawFile}
+                                                        className="flex-1 flex items-center justify-center gap-2 text-xs font-medium border border-slate-200 border-dashed rounded-lg px-3 py-2 outline-none hover:border-purple-400 bg-white hover:bg-purple-50 hover:text-purple-600 transition-colors text-slate-500"
+                                                    >
+                                                        <FolderOpen size={14} /> Select Additional Files...
+                                                    </button>
                                                     <button
                                                         type="button"
                                                         onClick={handleDesktopFileIngest}
@@ -785,21 +930,16 @@ export function CharacterizationModal({
                                             </div>
 
                                             {/* Result: Preview + Path */}
-                                            {ingestStatus === 'success' && (
+                                            {ingestStatus === 'success' && spectrumPreviewB64 && (
                                                 <div className="space-y-2">
-                                                    {spectrumPreviewB64 && (
-                                                        <img
-                                                            src={`data:image/png;base64,${spectrumPreviewB64}`}
-                                                            alt="Spectrum preview"
-                                                            className="w-full rounded-lg border border-purple-200 shadow-sm"
-                                                        />
-                                                    )}
-                                                    <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
-                                                        <CheckCircle2 size={14} className="text-emerald-600 flex-shrink-0" />
-                                                        <span className="text-[10px] font-mono text-emerald-700 break-all">{h5RelativePath}</span>
-                                                    </div>
+                                                    <img
+                                                        src={`data:image/png;base64,${spectrumPreviewB64}`}
+                                                        alt="Spectrum preview"
+                                                        className="w-full rounded-lg border border-purple-200 shadow-sm"
+                                                    />
                                                 </div>
                                             )}
+                                            
                                             {ingestStatus === 'error' && (
                                                 <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
                                                     <AlertCircle size={14} className="text-red-500" />

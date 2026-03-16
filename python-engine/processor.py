@@ -11,52 +11,81 @@ from datetime import datetime
 from typing import Tuple, Dict, Any, Optional
 
 
-def _build_h5_filename(metadata: Dict[str, Any]) -> str:
+def _build_h5_filename(metadata: Dict[str, Any], target_dir: Path) -> str:
     """
-    Smart rename: {SampleCode}_{Technique}_{Laser}nm_{Power}uW_{Date}.h5
-    Falls back gracefully if metadata is missing.
+    Smart rename: {SampleCode}_{Technique}_{Param1}..._Spot{X}.h5
+    Falls back gracefully if metadata is missing. Auto-increments Spot {X}.
     """
     parts = []
     
-    # Prefer sample_code or sample_id as the primary identifier
-    sample = metadata.get("sample_id") or metadata.get("analyte") or "unknown"
+    # Prefer sample_code or sample_name as the primary identifier
+    sample = metadata.get("sample_code") or metadata.get("sample_name") or metadata.get("analyte") or metadata.get("sample_id") or "unknown"
     parts.append(str(sample)[:20])
     
     technique = metadata.get("technique", "raman")
     parts.append(technique.upper())
     
-    laser = metadata.get("laser_wavelength_nm")
-    if laser:
-        parts.append(f"{laser}nm")
+    params = metadata.get("parameters", {})
+    if params:
+        # Append parameters with their exact strings (e.g. 70 uW, 1 s)
+        for k, v in params.items():
+            if v:
+                clean_v = str(v).replace(" ", "")
+                parts.append(clean_v)
+    else:
+        # Fallback for old endpoints
+        laser = metadata.get("laser_wavelength_nm")
+        if laser:
+            parts.append(f"{laser}nm")
+        power = metadata.get("laser_power_uw")
+        if power:
+            parts.append(f"{float(power):.1f}uW")
+
+    import re
+    existing_spots = []
+    if target_dir.exists():
+        for f in target_dir.glob("*.h5"):
+            # Check all .h5 files that start with the Sample code to count spots globally for this sample folder
+            if f.name.startswith(parts[0]):
+                match = re.search(r'Spot(\d+)\.h5$', f.name, re.IGNORECASE)
+                if match:
+                    existing_spots.append(int(match.group(1)))
+                    
+    next_spot = max(existing_spots) + 1 if existing_spots else 1
+    parts.append(f"Spot{next_spot}")
     
-    power = metadata.get("laser_power_uw")
-    if power:
-        parts.append(f"{float(power):.1f}uW")
+    filename = "_".join(parts) + ".h5"
     
-    date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    parts.append(date_str)
-    
-    return "_".join(parts) + ".h5"
+    # Safely clean out invalid characters but keep greek micro symbols
+    filename = re.sub(r'[^a-zA-Z0-9_\-\.μµ]', '_', filename)
+    return filename
 
 
 def _build_vault_subpath(metadata: Dict[str, Any]) -> str:
     """
-    Human-readable folder structure: /{SampleCode}/{Technique}/{Year}/
-    - First level: the sample identifier (easy to find manually)
-    - Second level: technique (Raman, SERS, AFM...)
-    - Third level: year (keeps it tidy over time)
+    Global Architecture Data Vault: /{Logbook}/{SampleCode}/{Technique}/{Year}/
     """
-    # Use sample_id (UUID prefix) or analyte as folder name
-    sample = metadata.get("sample_id") or metadata.get("analyte") or "unknown"
-    # Use short UUID prefix for IDs, or full analyte name
-    if len(str(sample)) == 36 and "-" in str(sample):  # looks like a UUID
-        sample_folder = str(sample)[:8]  # first 8 chars
+    # 1. Logbook Level (group_id)
+    logbook = metadata.get("group_id", "Default_Logbook")
+    if len(str(logbook)) == 36 and "-" in str(logbook):
+        logbook_folder = f"Logbook_{str(logbook)[:8]}"
+    else:
+        logbook_folder = str(logbook)[:30].replace(" ", "_").replace("/", "-")
+
+    # 2. Sample Level
+    sample = metadata.get("sample_code") or metadata.get("sample_name") or metadata.get("analyte") or metadata.get("sample_id") or "unknown"
+    if len(str(sample)) == 36 and "-" in str(sample):
+        sample_folder = f"Sample_{str(sample)[:8]}"
     else:
         sample_folder = str(sample)[:30].replace(" ", "_").replace("/", "-")
     
+    # 3. Technique Level
     technique = metadata.get("technique", "raman").upper()
+    
+    # 4. Temporal Level (Year)
     year = datetime.now().year
-    return f"{sample_folder}/{technique}/{year}"
+    
+    return f"{logbook_folder}/{sample_folder}/{technique}/{year}"
 
 
 
@@ -73,11 +102,12 @@ def convert_to_h5(
         h5_path: absolute Path to the created .h5 file
         relative_path: path relative to vault_root (stored in Supabase)
     """
-    filename = _build_h5_filename(metadata)
     subpath = _build_vault_subpath(metadata)
     
     abs_dir = Path(vault_root) / subpath
     abs_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = _build_h5_filename(metadata, abs_dir)
     
     h5_path = abs_dir / filename
     relative_path = f"{subpath}/{filename}"

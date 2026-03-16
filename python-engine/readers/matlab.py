@@ -46,7 +46,14 @@ def read_matlab_mat(path: Path) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]
     if intensities is None:
         raise ValueError("Could not find intensity array. Expected variable named: intensity, spectrum, or y.")
 
-    return wavenumbers.flatten(), intensities.flatten(), metadata
+    wavenumbers = wavenumbers.flatten()
+    intensities = intensities.flatten()
+
+    metadata["wavenumber_min"] = float(np.min(wavenumbers))
+    metadata["wavenumber_max"] = float(np.max(wavenumbers))
+    metadata["total_points"] = len(wavenumbers)
+
+    return wavenumbers, intensities, metadata
 
 
 def _find_array(mat: dict, candidates: list) -> np.ndarray | None:

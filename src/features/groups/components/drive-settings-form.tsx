@@ -3,8 +3,10 @@
 import { useState } from 'react';
 import { updateDriveSettingsAction } from '../actions';
 import { toast } from 'sonner';
-import { Key, Folder, Save, Shield, HelpCircle, Loader2, Search, CalendarDays } from 'lucide-react';
+import { Key, Folder, Save, Shield, HelpCircle, Loader2, Search, CalendarDays, HardDrive } from 'lucide-react';
 import { DriveFileSelectorModal } from '../../drive-reports/components/drive-file-selector-modal';
+import { open } from '@tauri-apps/plugin-dialog';
+import { isDesktop } from '@/lib/desktop';
 
 interface DriveSettingsFormProps {
     groupId: string;
@@ -23,6 +25,11 @@ interface DriveSettingsFormProps {
 export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFormProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [showHelp, setShowHelp] = useState(false);
+
+    // Desktop Local Vault Settings
+    const [localVaultRoot, setLocalVaultRoot] = useState(() => 
+        typeof window !== 'undefined' ? (localStorage.getItem('phdnexus_vault_root') || '') : ''
+    );
 
     // Add new state for folder picker
     const [showFolderModal, setShowFolderModal] = useState(false);
@@ -47,6 +54,24 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
         }
         setShowFolderModal(false);
         setActiveFolderField(null);
+    };
+
+    const handleVaultRootChange = async () => {
+        try {
+            const selected = await open({
+                directory: true,
+                multiple: false,
+                title: 'Select Data Vault Root Folder'
+            });
+            if (selected && typeof selected === 'string') {
+                setLocalVaultRoot(selected);
+                // Save immediately to local storage wrapper
+                localStorage.setItem('phdnexus_vault_root', selected);
+                toast.success('Local Data Vault Root updated');
+            }
+        } catch (err) {
+            console.error('Error opening dialog:', err);
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -92,8 +117,47 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
                 </div>
             </div>
 
+            {/* Desktop Only: Local Data Vault */}
+            {isDesktop && (
+                <div className="p-6 border-b border-slate-100 bg-white">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                        <HardDrive className="w-4 h-4 text-purple-600" />
+                        Local Desktop Settings
+                    </h3>
+                    <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700">Data Vault Root Folder</label>
+                        <div className="flex gap-2">
+                            <input
+                                readOnly
+                                value={localVaultRoot}
+                                placeholder="Click browse to select your central archive folder..."
+                                onClick={handleVaultRootChange}
+                                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors truncate"
+                            />
+                            <button
+                                type="button"
+                                onClick={handleVaultRootChange}
+                                className="px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 font-medium rounded-lg transition"
+                            >
+                                Browse...
+                            </button>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">
+                            This folder will act as the root for all raw data ingested via the Desktop App. Organized automatically by `Logbook / Sample / Technique / Year`.
+                        </p>
+                    </div>
+                </div>
+            )}
+
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
                 <div className="space-y-4">
+                    <div className="border-b border-slate-100 pb-4 mb-4">
+                        <h3 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                            <Shield className="w-4 h-4 text-blue-600" />
+                            Cloud Settings (Google Drive)
+                        </h3>
+                    </div>
+
                     <div className="space-y-1">
                         <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                             <Key className="w-4 h-4 text-slate-400" /> Client ID
