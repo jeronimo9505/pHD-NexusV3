@@ -29,12 +29,15 @@ export type IngestRequest = {
     vault_root: string;
     group_id: string;
     sample_id?: string;
+    sample_code?: string;
+    sample_name?: string;
     analyte?: string;
     laser_wavelength_nm?: number;
     laser_power_uw?: number;
     integration_time_s?: number;
     accumulations?: number;
     technique?: string;
+    parameters?: Record<string, string>;
 };
 
 export type IngestResponse = {
@@ -78,5 +81,30 @@ export async function fetchSpectrum(h5AbsPath: string): Promise<{
         const err = await res.json();
         throw new Error(err.detail || "Could not fetch spectrum");
     }
+    return res.json();
+}
+
+/**
+ * Request the Python engine to compute a representative (median) spectrum
+ * from multiple .h5 files.
+ */
+export async function fetchRepresentativeSpectrum(
+    vaultRoot: string,
+    h5RelativePaths: string[]
+): Promise<{ success: boolean; data: { x: number; y: number }[]; message: string }> {
+    const res = await fetch(`${SCIENCE_ENGINE_URL}/api/representative-spectrum`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            vault_root: vaultRoot,
+            h5_relative_paths: h5RelativePaths,
+        }),
+    });
+    
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Could not fetch representative spectrum");
+    }
+    
     return res.json();
 }

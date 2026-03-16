@@ -14,7 +14,7 @@ import os
 
 from readers.witec import read_witec_txt
 from readers.matlab import read_matlab_mat
-from processor import convert_to_h5, organize_file, generate_preview
+from processor import convert_to_h5, generate_preview
 
 app = FastAPI(
     title="PhD Nexus Science Engine",
@@ -37,6 +37,8 @@ class IngestRequest(BaseModel):
     vault_root: str              # User-configured local vault root path
     group_id: str
     sample_id: Optional[str] = None
+    sample_code: Optional[str] = None
+    sample_name: Optional[str] = None
     analyte: Optional[str] = None
     laser_wavelength_nm: Optional[int] = None
     laser_power_uw: Optional[float] = None
@@ -44,6 +46,7 @@ class IngestRequest(BaseModel):
     accumulations: Optional[int] = 1
     technique: Optional[str] = "raman"
     measured_at: Optional[str] = None
+    parameters: Optional[dict] = None
 
 
 class IngestResponse(BaseModel):
@@ -52,6 +55,16 @@ class IngestResponse(BaseModel):
     preview_base64: Optional[str] = None  # PNG preview as base64
     wavenumber_range: Optional[list] = None
     n_points: Optional[int] = None
+    message: str
+
+
+class RepresentativeSpectrumRequest(BaseModel):
+    vault_root: str
+    h5_relative_paths: list[str]
+
+class RepresentativeSpectrumResponse(BaseModel):
+    success: bool
+    data: Optional[list[dict]] = None
     message: str
 
 
@@ -91,6 +104,8 @@ async def ingest_file(request: IngestRequest):
     full_metadata = {
         "group_id": request.group_id,
         "sample_id": request.sample_id or "",
+        "sample_code": request.sample_code or "",
+        "sample_name": request.sample_name or "",
         "analyte": request.analyte or metadata.get("analyte", ""),
         "laser_wavelength_nm": request.laser_wavelength_nm or metadata.get("laser_wavelength_nm", 0),
         "laser_power_uw": request.laser_power_uw or metadata.get("laser_power_uw", 0.0),
@@ -100,6 +115,7 @@ async def ingest_file(request: IngestRequest):
         "source_format": ext.lstrip("."),
         "original_filename": source_path.name,
         "measured_at": request.measured_at or "",
+        "parameters": request.parameters or {},
     }
 
     # Convert to HDF5 and organize in vault
@@ -154,6 +170,65 @@ def get_spectrum(h5_path: str, dataset_key: str = "/spectrum"):
         "intensities": intensities,
         "metadata": {k: str(v) for k, v in metadata.items()}
     }
+
+@app.post("/api/representative-spectrum", response_model=RepresentativeSpectrumResponse)
+def get_representative_spectrum(request: RepresentativeSpectrumRequest):
+    """
+    Computes a representative (median) spectrum from multiple local H5 files.
+    """
+    import h5py
+    import numpy as np
+    from scipy.interpolate import interp1d
+
+    if not request.h5_relative_paths:
+        return RepresentativeSpectrumResponse(success=False, message="No paths provided", data=[])
+    
+    vault_root = Path(request.vault_root)
+    all_x = []
+    all_y = []
+    
+    for rel_path in request.h5_relative_paths:
+        abs_path = vault_root / rel_path
+        if not abs_path.exists():
+            continue
+            
+        try:
+            with h5py.File(abs_path, 'r') as f:
+                if "spectrum/wavenumbers" in f and "spectrum/intensities" in f:
+                    x = f["spectrum/wavenumbers"][:]
+                    y = f["spectrum/intensities"][:]
+                    # Sort by x just in case
+                    idx = np.argsort(x)
+                    all_x.append(x[idx])
+                    all_y.append(y[idx])
+        except Exception:
+            pass
+            
+    if not all_x:
+        return RepresentativeSpectrumResponse(success=False, message="Could not read any valid spectra", data=[])
+        
+    # Find a common x-axis if they vary slightly (very common)
+    min_x = max([x[0] for x in all_x])
+    max_x = min([x[-1] for x in all_x])
+    
+    # We'll base the number of points on the first valid spectrum
+    num_points = len(all_x[0])
+    
+    common_x = np.linspace(min_x, max_x, num_points)
+    interpolated_ys = []
+    
+    for x, y in zip(all_x, all_y):
+        # Only interpolate points within bounds
+        f = interp1d(x, y, kind='linear', bounds_error=False, fill_value="extrapolate")
+        y_int = f(common_x)
+        interpolated_ys.append(y_int)
+        
+    y_stack = np.vstack(interpolated_ys)
+    # Compute median across all Ys to avoid outliers from cosmic rays etc.
+    median_y = np.median(y_stack, axis=0)
+    
+    out_data = [{"x": float(x_val), "y": float(y_val)} for x_val, y_val in zip(common_x, median_y)]
+    return RepresentativeSpectrumResponse(success=True, message="Calculated median spectrum", data=out_data)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,11 @@
-import { ensureAuth } from "./auth";
+import { ensureAuth, clearToken } from "./auth";
 
 /**
  * Uploads a file to Google Drive.
  * Uses multipart/related to send metadata and content in one request.
  */
 export const uploadFileToDrive = async (file: File, folderId?: string) => {
-    const accessToken = await ensureAuth();
+    let accessToken = await ensureAuth();
 
     const metadata = {
         name: file.name,
@@ -40,7 +40,7 @@ export const uploadFileToDrive = async (file: File, folderId?: string) => {
         base64Data +
         close_delim;
 
-    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,thumbnailLink', {
+    let response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,thumbnailLink', {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -48,6 +48,23 @@ export const uploadFileToDrive = async (file: File, folderId?: string) => {
         },
         body: multipartBody
     });
+
+    if (response.status === 401) {
+        // Token is likely expired or invalid, clear it and retry once
+        clearToken();
+        if (typeof window !== 'undefined' && (window as any).gapi?.client) {
+            (window as any).gapi.client.setToken(null);
+        }
+        accessToken = await ensureAuth();
+        response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,thumbnailLink', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': `multipart/related; boundary=${boundary}`
+            },
+            body: multipartBody
+        });
+    }
 
     if (!response.ok) {
         const error = await response.json();

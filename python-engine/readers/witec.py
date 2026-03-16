@@ -77,4 +77,8 @@ def read_witec_txt(path: Path) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     wavenumbers = array[:, 0]
     intensities = array[:, 1]
 
+    metadata["wavenumber_min"] = float(np.min(wavenumbers))
+    metadata["wavenumber_max"] = float(np.max(wavenumbers))
+    metadata["total_points"] = len(wavenumbers)
+
     return wavenumbers, intensities, metadata

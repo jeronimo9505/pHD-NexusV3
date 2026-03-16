@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Sample, SampleFieldConfig, SampleCharacterization } from '../types';
 import { getCharacterizationsAction, deleteCharacterizationAction, updateSampleAction, updateCharacterizationAction, createCharacterizationAction, getBulkSamplesAction } from '../actions';
-import { X, Calendar, User, FlaskConical, FileText, Plus, ExternalLink, Microscope, Settings, Edit, MessageSquareText, Trash2, Pencil, Check, StickyNote, ArrowLeft, Edit2, ChevronDown, ChevronUp, Loader2, Save, History, Clock, Copy } from 'lucide-react';
+import { X, Calendar, User, FlaskConical, FileText, Plus, ExternalLink, Microscope, Settings, Edit, MessageSquareText, Trash2, Pencil, Check, StickyNote, ArrowLeft, Edit2, ChevronDown, ChevronUp, Loader2, Save, History, Clock, Copy, Database } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { formatCellValue } from '../utils';
@@ -145,7 +145,7 @@ export function SampleDetailSheet({
 
     const getSummaryString = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -159,9 +159,18 @@ export function SampleDetailSheet({
         return keys.filter(key => !ignoreKeys.has(key) && data[key]).map(key => String(data[key])).join(' - ') || '';
     };
 
+    const separateUnit = (val: string): { v: string; u: string } => {
+        if (!val || typeof val !== 'string') return { v: String(val || ''), u: '' };
+        const match = val.match(/^([\d\.]+)\s*([a-zA-Z%μµ°Ω]+)$/);
+        if (match) return { v: match[1], u: match[2] };
+        if (val.match(/^x\d+$/i)) return { v: val.replace(/x/i, ''), u: 'x' };
+        if (val.match(/^\d+x$/i)) return { v: val.replace(/x/i, ''), u: 'x' };
+        return { v: val, u: '' };
+    };
+
     const getParameterRows = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -177,7 +186,8 @@ export function SampleDetailSheet({
             if (raw && typeof raw === 'object' && 'value' in raw) {
                 return { name: key, value: raw.value ?? '', unit: raw.unit ?? '' };
             }
-            return { name: key, value: String(raw ?? ''), unit: '' };
+            const { v, u } = separateUnit(String(raw ?? ''));
+            return { name: key, value: v, unit: u };
         });
     };
 
@@ -368,6 +378,27 @@ export function SampleDetailSheet({
                                             </h4>
                                             <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100 text-xs text-slate-600 font-mono truncate" title={expandedChar!.data.file_origin}>
                                                 {expandedChar!.data.file_origin}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Data Vault Files */}
+                                    {(expandedChar!.data.local_h5_path || (expandedChar!.data.local_h5_paths && expandedChar!.data.local_h5_paths.length > 0)) && (
+                                        <div>
+                                            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                                                <Database size={12} className="text-emerald-500" /> Data Vault
+                                            </h4>
+                                            <div className="bg-emerald-50 rounded-lg p-2.5 border border-emerald-100 flex flex-col gap-1.5 max-h-40 overflow-y-auto scrollbar-thin">
+                                                {expandedChar!.data.local_h5_path && (
+                                                    <div className="text-[10px] text-emerald-700 font-mono break-all" title={expandedChar!.data.local_h5_path}>
+                                                        {expandedChar!.data.local_h5_path.split('/').pop()}
+                                                    </div>
+                                                )}
+                                                {expandedChar!.data.local_h5_paths?.map((path: string, i: number) => (
+                                                    <div key={i} className="text-[10px] text-emerald-700 font-mono break-all" title={path}>
+                                                        {path.split('/').pop()}
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
                                     )}
