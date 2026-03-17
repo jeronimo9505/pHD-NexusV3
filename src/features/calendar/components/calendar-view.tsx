@@ -70,6 +70,7 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
 
     const [localEvents, setLocalEvents] = useState<LocalEvent[]>([]);
     const [loadingEvents, setLoadingEvents] = useState(false);
+    const rangeRef = useRef<{ from: string, to: string } | null>(null);
 
     // UI State
     const [panelOpen, setPanelOpen] = useState(true);
@@ -110,18 +111,25 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
     const [selectedItem, setSelectedItem] = useState<any>(null); // custom event wrapper
 
     /* ── Fetch local events ── */
-    const fetchLocal = useCallback(async () => {
+    const fetchLocal = useCallback(async (from: string, to: string) => {
+        // Only fetch if range changed significantly
+        if (rangeRef.current?.from === from && rangeRef.current?.to === to) return;
+        
         setLoadingEvents(true);
-        // Fetch a wide range (3 months back, 3 months forward)
-        const year = today.getFullYear(), month = today.getMonth();
-        const from = new Date(year, month - 3, 1).toISOString();
-        const to = new Date(year, month + 3, 0, 23, 59, 59).toISOString();
+        rangeRef.current = { from, to };
+        
         const res = await getCalendarEventsAction(groupId, from, to);
         if (res.data) setLocalEvents(res.data as LocalEvent[]);
         setLoadingEvents(false);
     }, [groupId]);
 
-    useEffect(() => { fetchLocal(); }, [fetchLocal]);
+    // handleDatesSet is called by FullCalendar whenever the view or dates change
+    const handleDatesSet = (dateInfo: any) => {
+        const from = dateInfo.startStr;
+        const to = dateInfo.endStr;
+        fetchLocal(from, to);
+        updateTitle();
+    };
 
     /* ── FullCalendar Events array ── */
     const calendarData = useMemo(() => {
@@ -179,15 +187,29 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
     const handleCreate = async () => {
         if (!formTitle || !formDate) { toast.error('Título y fecha son obligatorios'); return; }
         setCreating(true);
-        const startAtStr = formAllDay ? `${formDate}T12:00:00Z` : `${formDate}T${formStart}:00`;
-        const endAtStr = formAllDay ? `${formEndDate || formDate}T13:00:00Z` : `${formEndDate || formDate}T${formEnd}:00`;
+        let startAtStr = '';
+        let endAtStr = '';
+
+        if (formAllDay) {
+            // For all-day events, FullCalendar expects the end date to be the start of the next day
+            // If user says "28/07 to 30/07", in DB we store 28/07 to 31/07 (00:00:00)
+            startAtStr = `${formDate}T00:00:00Z`;
+            const endD = new Date(`${formEndDate || formDate}T00:00:00Z`);
+            endD.setUTCDate(endD.getUTCDate() + 1);
+            endAtStr = endD.toISOString();
+        } else {
+            const s = new Date(`${formDate}T${formStart}:00`);
+            const e = new Date(`${formEndDate || formDate}T${formEnd}:00`);
+            startAtStr = s.toISOString();
+            endAtStr = e.toISOString();
+        }
 
         const payload = {
             groupId, title: formTitle, description: formDesc || undefined,
             location: formLocation || undefined, url: formUrl || undefined,
             allDay: formAllDay,
-            startAt: formAllDay ? startAtStr : new Date(startAtStr).toISOString(),
-            endAt: formAllDay ? endAtStr : new Date(endAtStr).toISOString(),
+            startAt: startAtStr,
+            endAt: endAtStr,
             color: formColor,
         };
 
@@ -204,7 +226,12 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
             setShowForm(false);
             setFormTitle(''); setFormLocation(''); setFormDesc(''); setFormUrl(''); setFormAllDay(false);
             setIsEditing(false); setEditEventId(null);
-            fetchLocal();
+            
+            // Refresh with current range
+            if (rangeRef.current) {
+                const res = await getCalendarEventsAction(groupId, rangeRef.current.from, rangeRef.current.to);
+                if (res.data) setLocalEvents(res.data as LocalEvent[]);
+            }
         }
         setCreating(false);
     };
@@ -237,7 +264,15 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
         if (!confirm('¿Eliminar este evento?')) return;
         const res = await deleteCalendarEventAction(eventId, groupId);
         if (res.error) toast.error(res.error);
-        else { toast.success('Evento eliminado'); setSelectedItem(null); fetchLocal(); }
+        else { 
+            toast.success('Evento eliminado'); 
+            setSelectedItem(null); 
+            // Refresh
+            if (rangeRef.current) {
+                const res = await getCalendarEventsAction(groupId, rangeRef.current.from, rangeRef.current.to);
+                if (res.data) setLocalEvents(res.data as LocalEvent[]);
+            }
+        }
     };
 
     /* ── FullCalendar handlers ── */
@@ -434,6 +469,7 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
                             // Configuration for multiMonthYear
                             multiMonthMaxColumns={3}
                             eventTimeFormat={{ hour: 'numeric', minute: '2-digit', meridiem: false }}
+                            datesSet={handleDatesSet}
                         />
                     </div>
 

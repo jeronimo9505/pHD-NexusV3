@@ -11,6 +11,8 @@ import { CharacterizationModal } from './characterization-modal';
 import { format } from 'date-fns';
 import { SampleCommentsSection } from './sample-comments-section';
 import { SpectrumGraph } from './spectrum-graph';
+import { isDesktop } from '@/lib/desktop';
+import { FolderOpen } from 'lucide-react';
 
 interface SampleDetailSheetProps {
     sample: Sample | null;
@@ -145,7 +147,7 @@ export function SampleDetailSheet({
 
     const getSummaryString = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -170,7 +172,7 @@ export function SampleDetailSheet({
 
     const getParameterRows = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -227,6 +229,28 @@ export function SampleDetailSheet({
             toast.success('Notes saved');
             setExpandedChar({ ...expandedChar, data: updatedData });
             setCharacterizations(prev => prev.map(c => c.id === expandedChar.id ? { ...c, data: updatedData } : c));
+        }
+    };
+
+    const handleOpenFolder = async (path?: string) => {
+        if (!isDesktop) return;
+        try {
+            const { open: openShell } = await import('@tauri-apps/plugin-shell');
+            const vaultRoot = localStorage.getItem('phdnexus_vault_root');
+            let target = path || expandedChar?.data?.file_origin || vaultRoot;
+            
+            if (target) {
+                // If it's a file path, get the directory
+                if (target.includes('.') && (target.includes('/') || target.includes('\\'))) {
+                    const parts = target.split(/[\\/]/);
+                    parts.pop();
+                    target = parts.join('/');
+                }
+                await openShell(target);
+            }
+        } catch (e) {
+            console.error("Failed to open folder", e);
+            toast.error("Could not open folder.");
         }
     };
 
@@ -385,20 +409,65 @@ export function SampleDetailSheet({
                                     {/* Data Vault Files */}
                                     {(expandedChar!.data.local_h5_path || (expandedChar!.data.local_h5_paths && expandedChar!.data.local_h5_paths.length > 0)) && (
                                         <div>
-                                            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
-                                                <Database size={12} className="text-emerald-500" /> Data Vault
-                                            </h4>
-                                            <div className="bg-emerald-50 rounded-lg p-2.5 border border-emerald-100 flex flex-col gap-1.5 max-h-40 overflow-y-auto scrollbar-thin">
-                                                {expandedChar!.data.local_h5_path && (
-                                                    <div className="text-[10px] text-emerald-700 font-mono break-all" title={expandedChar!.data.local_h5_path}>
-                                                        {expandedChar!.data.local_h5_path.split('/').pop()}
-                                                    </div>
+                                            <div className="flex items-center justify-between mb-1.5">
+                                                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                                                    <Database size={12} className="text-emerald-500" /> Data Vault
+                                                </h4>
+                                                {isDesktop && (
+                                                    <button 
+                                                        onClick={() => handleOpenFolder()}
+                                                        className="p-1 hover:bg-emerald-100 text-emerald-600 rounded-md transition-colors flex items-center gap-1 text-[10px] font-bold uppercase"
+                                                        title="Open in Explorer"
+                                                    >
+                                                        <FolderOpen size={12} /> Folder
+                                                    </button>
                                                 )}
-                                                {expandedChar!.data.local_h5_paths?.map((path: string, i: number) => (
-                                                    <div key={i} className="text-[10px] text-emerald-700 font-mono break-all" title={path}>
-                                                        {path.split('/').pop()}
-                                                    </div>
-                                                ))}
+                                            </div>
+                                            <div className="bg-emerald-50/50 rounded-lg border border-emerald-100 flex flex-col divide-y divide-emerald-100 max-h-60 overflow-y-auto scrollbar-thin">
+                                                {(() => {
+                                                    const paths = expandedChar!.data.local_h5_paths || (expandedChar!.data.local_h5_path ? [expandedChar!.data.local_h5_path] : []);
+                                                    const metadata = expandedChar!.data.file_metadata || {};
+                                                    
+                                                    return paths.map((path: string, i: number) => {
+                                                        const meta = metadata[path];
+                                                        const filename = path.split(/[\\/]/).pop();
+                                                        return (
+                                                            <div key={i} className="p-2 flex flex-col gap-1 hover:bg-emerald-100/30 transition-colors">
+                                                                <div className="flex justify-between items-start gap-2">
+                                                                    <span className="text-[10px] text-emerald-800 font-mono break-all leading-tight flex-1" title={path}>
+                                                                        {filename}
+                                                                    </span>
+                                                                </div>
+                                                                {meta && (
+                                                                    <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                                                        {meta.range && (
+                                                                            <div className="flex items-center gap-1">
+                                                                                <span className="text-[8px] font-bold text-emerald-600/60 uppercase">Range</span>
+                                                                                <span className="text-[9px] font-medium text-emerald-700">{meta.range[0].toFixed(0)}-{meta.range[1].toFixed(0)} cm⁻¹</span>
+                                                                            </div>
+                                                                        )}
+                                                                        {meta.points && (
+                                                                            <div className="flex items-center gap-1">
+                                                                                <span className="text-[8px] font-bold text-emerald-600/60 uppercase">Pts</span>
+                                                                                <span className="text-[9px] font-medium text-emerald-700">{meta.points}</span>
+                                                                            </div>
+                                                                        )}
+                                                                        {meta.spectra && (
+                                                                            <div className="flex items-center gap-1">
+                                                                                <span className="text-[8px] font-bold text-emerald-600/60 uppercase">Matrix</span>
+                                                                                <span className="text-[9px] font-medium text-emerald-700">
+                                                                                    {meta.spectra === 1 ? '1x1' : 
+                                                                                     Number.isInteger(Math.sqrt(meta.spectra)) ? `${Math.sqrt(meta.spectra)}x${Math.sqrt(meta.spectra)}` : 
+                                                                                     `${meta.spectra} spec`}
+                                                                                </span>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    });
+                                                })()}
                                             </div>
                                         </div>
                                     )}
