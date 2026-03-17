@@ -58,6 +58,7 @@ export function CharacterizationModal({
     const [localFilePaths, setLocalFilePaths] = useState<string[]>([]);
     const [ingestStatus, setIngestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [h5RelativePaths, setH5RelativePaths] = useState<string[]>([]);
+    const [fileMetadata, setFileMetadata] = useState<Record<string, { range?: [number, number], points?: number, spectra?: number }>>({});
     const [spectrumPreviewB64, setSpectrumPreviewB64] = useState('');
     const [engineOnline, setEngineOnline] = useState(false);
 
@@ -70,12 +71,23 @@ export function CharacterizationModal({
 
     // Initialize Google Scripts
     useEffect(() => {
-        if (isOpen && driveSettings?.apiKey && driveSettings?.clientId && !scriptsLoaded) {
-            import('@/lib/google/auth').then(({ initGoogleClient }) => {
-                initGoogleClient(driveSettings.apiKey!, driveSettings.clientId!)
-                    .then(() => setScriptsLoaded(true))
-                    .catch((e) => console.warn('Google init failed:', e));
-            });
+        if (isOpen && driveSettings?.apiKey && driveSettings?.clientId) {
+            if (!scriptsLoaded) {
+                import('@/lib/google/auth').then(({ initGoogleClient, ensureAuth }) => {
+                    initGoogleClient(driveSettings.apiKey!, driveSettings.clientId!)
+                        .then(() => {
+                            setScriptsLoaded(true);
+                            // Try a silent auth check on load if possible
+                            ensureAuth().catch(() => console.log("Silent auth failed, normal popup will occur on action."));
+                        })
+                        .catch((e) => console.warn('Google init failed:', e));
+                });
+            } else {
+                // If scripts already loaded, just try a silent re-auth
+                import('@/lib/google/auth').then(({ ensureAuth }) => {
+                    ensureAuth().catch(() => {});
+                });
+            }
         }
         // Check Python engine health when on desktop
         if (isOpen && isDesktop) {
@@ -132,12 +144,15 @@ export function CharacterizationModal({
             });
 
             const newH5Paths: string[] = [...h5RelativePaths];
+            const newMeta = { ...fileMetadata };
             let lastPreview = '';
 
             for (const filePath of localFilePaths) {
                 // Skip if already in list (basic check)
                 if (initialData?.data?.original_files?.includes(filePath)) continue;
-
+                // Avoid re-ingesting if we already have it in newH5Paths (from a previous partial ingest)
+                // Actually, let's just re-ingest to be safe if it's in localFilePaths but not yet committed
+                
                 const result = await ingestFile({
                     file_path: filePath.trim(),
                     vault_root: currentVaultRoot.trim(),
@@ -151,11 +166,19 @@ export function CharacterizationModal({
                     technique: type.toLowerCase(),
                     parameters,
                 });
+                
                 newH5Paths.push(result.h5_relative_path);
                 if (result.preview_base64) lastPreview = result.preview_base64;
+                
+                newMeta[result.h5_relative_path] = {
+                    range: result.wavenumber_range,
+                    points: result.n_points,
+                    spectra: result.n_spectra
+                };
             }
 
-            setH5RelativePaths(newH5Paths);
+            setH5RelativePaths(Array.from(new Set(newH5Paths)));
+            setFileMetadata(newMeta);
             // Append rather than replace original file paths
             if (initialData) {
                  const ogFiles = initialData?.data?.original_files || [];
@@ -177,6 +200,41 @@ export function CharacterizationModal({
         setLocalFilePaths(prev => prev.filter((_, i) => i !== index));
     };
 
+    // Open file origin or vault folder in native explorer
+    const handleOpenFolder = async () => {
+        if (!isDesktop) return;
+        try {
+            const currentVaultRoot = typeof window !== 'undefined' ? localStorage.getItem('phdnexus_vault_root') : null;
+            const { open: openShell } = await import('@tauri-apps/plugin-shell');
+            let targetPath = '';
+            
+            // Try h5 vault path first
+            if (h5RelativePaths.length > 0 && currentVaultRoot) {
+                const firstPath = h5RelativePaths[0];
+                const parts = firstPath.split(/[/\\]/);
+                parts.pop(); // remove filename
+                targetPath = `${currentVaultRoot}/${parts.join('/')}`;
+            } 
+            // Fallback to file_origin
+            else if (fileOrigin) {
+                targetPath = fileOrigin;
+            }
+            // Fallback to vault root
+            else if (currentVaultRoot) {
+                targetPath = currentVaultRoot;
+            }
+            
+            if (targetPath) {
+                await openShell(targetPath);
+            } else {
+                toast.error("No folder path available to open.");
+            }
+        } catch (e) {
+            console.error("Failed to open folder", e);
+            toast.error("Could not open folder. Make sure the path exists.");
+        }
+    };
+
     // Load Initial Data
     useEffect(() => {
         if (isOpen) {
@@ -196,6 +254,8 @@ export function CharacterizationModal({
                 setH5RelativePaths(h5Paths);
                 const ogFiles = initialData.data.original_files || (initialData.data.original_file ? [initialData.data.original_file] : []);
                 setLocalFilePaths(ogFiles);
+                const meta = initialData.data.file_metadata || {};
+                setFileMetadata(meta);
 
                 const fields: { key: string; value: string; unit: string }[] = [];
                 const data = initialData.data;
@@ -222,7 +282,7 @@ export function CharacterizationModal({
 
                 // 2. Process Remaining Keys
                 Object.entries(data).forEach(([k, v]) => {
-                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', '__bulk_id__'];
+                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', '__bulk_id__', 'file_metadata'];
                     if (!processedKeys.has(k) && !systemKeys.includes(k)) {
                         const { v: val, u: unit } = separateUnit(String(v));
                         fields.push({ key: k, value: val, unit: unit });
@@ -246,6 +306,7 @@ export function CharacterizationModal({
                 setLocalFilePaths([]);
                 setSpectrumPreviewB64('');
                 setIngestStatus('idle');
+                setFileMetadata({});
 
                 // Set type (default Raman or keep last? typically default to first)
                 // Actually if we just opened, we can default to Raman.
@@ -393,6 +454,7 @@ export function CharacterizationModal({
         // Desktop: store the local HDF5 paths
         if (h5RelativePaths.length > 0) cleanData['local_h5_paths'] = h5RelativePaths;
         if (localFilePaths.length > 0) cleanData['original_files'] = localFilePaths;
+        if (Object.keys(fileMetadata).length > 0) cleanData['file_metadata'] = fileMetadata;
 
         // Raman Spectrum Logic
         if (type === 'Raman') {
@@ -634,8 +696,18 @@ export function CharacterizationModal({
                             {/* External Links */}
                             <div className="space-y-4">
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                        <FolderOpen size={13} /> Raw Data
+                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 justify-between">
+                                        <div className="flex items-center gap-1.5"><FolderOpen size={13} /> Raw Data</div>
+                                        {isDesktop && (
+                                            <button 
+                                                type="button" 
+                                                onClick={handleOpenFolder} 
+                                                className="text-purple-600 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 transition-all"
+                                                title="Open in File Explorer"
+                                            >
+                                                Open Local Folder
+                                            </button>
+                                        )}
                                     </label>
                                     <input
                                         value={fileOrigin}
@@ -884,18 +956,50 @@ export function CharacterizationModal({
                                                                 const isIngested = !!h5RelativePaths[i];
                                                                 const filename = fp.split(/[\\/]/).pop();
                                                                 return (
-                                                                    <div key={i} className="flex justify-between items-center bg-white border border-slate-100 px-2 py-1.5 rounded-md shadow-sm group">
-                                                                        <div className="flex items-center gap-2 overflow-hidden">
-                                                                            {isIngested ? (
-                                                                                <CheckCircle2 size={12} className="text-emerald-500 flex-shrink-0" />
-                                                                            ) : (
-                                                                                <div className="w-3 h-3 rounded-full border-2 border-slate-200 border-t-purple-400 animate-spin flex-shrink-0" />
-                                                                            )}
-                                                                            <span className="text-xs font-mono text-slate-600 truncate" title={fp}>{filename}</span>
+                                                                    <div key={i} className="flex flex-col bg-white border border-slate-100 rounded-md shadow-sm group overflow-hidden">
+                                                                        <div className="flex justify-between items-center px-2 py-1.5 ">
+                                                                            <div className="flex items-center gap-2 overflow-hidden">
+                                                                                {isIngested ? (
+                                                                                    <CheckCircle2 size={12} className="text-emerald-500 flex-shrink-0" />
+                                                                                ) : (
+                                                                                    <div className="w-3 h-3 rounded-full border-2 border-slate-200 border-t-purple-400 animate-spin flex-shrink-0" />
+                                                                                )}
+                                                                                <span className="text-xs font-mono text-slate-600 truncate" title={fp}>{filename}</span>
+                                                                            </div>
+                                                                            <button type="button" onClick={() => handleRemoveIngestedFile(i)} className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-all ml-2 flex-shrink-0">
+                                                                                <X size={12} />
+                                                                            </button>
                                                                         </div>
-                                                                        <button type="button" onClick={() => handleRemoveIngestedFile(i)} className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-all ml-2 flex-shrink-0">
-                                                                            <X size={12} />
-                                                                        </button>
+                                                                        
+                                                                        {isIngested && fileMetadata[h5RelativePaths[i]] && (
+                                                                            <div className="px-2 pb-1.5 flex gap-3 border-t border-slate-50 pt-1 bg-slate-50/30">
+                                                                                {fileMetadata[h5RelativePaths[i]].range && (
+                                                                                    <div className="flex flex-col">
+                                                                                        <span className="text-[8px] uppercase font-bold text-slate-400">Range</span>
+                                                                                        <span className="text-[9px] font-medium text-slate-500">
+                                                                                            {fileMetadata[h5RelativePaths[i]].range![0].toFixed(1)}-{fileMetadata[h5RelativePaths[i]].range![1].toFixed(1)} cm⁻¹
+                                                                                        </span>
+                                                                                    </div>
+                                                                                )}
+                                                                                {fileMetadata[h5RelativePaths[i]].points && (
+                                                                                    <div className="flex flex-col">
+                                                                                        <span className="text-[8px] uppercase font-bold text-slate-400">Pts</span>
+                                                                                        <span className="text-[9px] font-medium text-slate-500">{fileMetadata[h5RelativePaths[i]].points}</span>
+                                                                                    </div>
+                                                                                )}
+                                                                                {fileMetadata[h5RelativePaths[i]].spectra && (
+                                                                                    <div className="flex flex-col">
+                                                                                        <span className="text-[8px] uppercase font-bold text-slate-400">Matrix</span>
+                                                                                        <span className="text-[9px] font-medium text-slate-500">
+                                                                                            {fileMetadata[h5RelativePaths[i]].spectra! === 1 ? '1x1' : 
+                                                                                             Number.isInteger(Math.sqrt(fileMetadata[h5RelativePaths[i]].spectra!)) ? 
+                                                                                             `${Math.sqrt(fileMetadata[h5RelativePaths[i]].spectra!)}x${Math.sqrt(fileMetadata[h5RelativePaths[i]].spectra!)}` : 
+                                                                                             `${fileMetadata[h5RelativePaths[i]].spectra} spec`}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 )
                                                             })}

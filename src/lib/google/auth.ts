@@ -17,10 +17,10 @@ let googleAuthPromise: Promise<string> | null = null;
 // --- Helper Functions for Token Caching ---
 
 const saveToken = (token: any) => {
-    // expires_in is usually 3599 seconds
-    // Buffer: 60s
-    if (!token.expires_in) token.expires_in = 3599;
-    const expiry = Date.now() + (token.expires_in * 1000) - 60000;
+    // access_tokens for client-side usually last 1 hour
+    if (!token.expires_in) token.expires_in = 3600;
+    // Buffer: 30s instead of 60s
+    const expiry = Date.now() + (token.expires_in * 1000) - 30000;
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
         access_token: token.access_token,
         expiry
@@ -33,8 +33,16 @@ const loadToken = () => {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (!stored) return null;
         const { access_token, expiry } = JSON.parse(stored);
+        // If we are strictly within expiry, return it.
         if (Date.now() < expiry) return access_token;
-        localStorage.removeItem(STORAGE_KEY); // Expired
+        
+        // Desktop optimization: If we're just over the edge, try to use it anyway 
+        // until a fetch actually fails (handled in upload.ts retry logic)
+        // This avoids popups appearing while the user is mid-typing if the token 
+        // is technically expired but still valid at Google (they have grace periods).
+        const gracePeriod = 5 * 60 * 1000; // 5 mins
+        if (Date.now() < expiry + gracePeriod) return access_token;
+
         return null;
     } catch {
         return null;
@@ -107,6 +115,8 @@ export const initGoogleClient = async (apiKey: string, clientId: string) => {
             callback: (resp: any) => {
                 if (resp.access_token) {
                     saveToken(resp);
+                    // Store email hint if available in response (some versions of GIS provide it)
+                    if (resp.email) localStorage.setItem('google_auth_email_hint', resp.email);
                 }
             },
         });
@@ -175,8 +185,13 @@ export const ensureAuth = async (): Promise<string> => {
             }
         };
 
-        // Trigger popup
-        tokenClient.requestAccessToken({ prompt: '' });
+        // Trigger popup - logic:
+        // 'none' or empty prompt uses current browser session
+        // hinting to the browser to auto-select if only one account
+        (tokenClient as any).requestAccessToken({ 
+            prompt: '', 
+            hint: localStorage.getItem('google_auth_email_hint') || undefined 
+        });
     });
 
     return googleAuthPromise;

@@ -55,6 +55,7 @@ class IngestResponse(BaseModel):
     preview_base64: Optional[str] = None  # PNG preview as base64
     wavenumber_range: Optional[list] = None
     n_points: Optional[int] = None
+    n_spectra: Optional[int] = None
     message: str
 
 
@@ -141,6 +142,7 @@ async def ingest_file(request: IngestRequest):
         preview_base64=preview_b64,
         wavenumber_range=[float(wavenumbers.min()), float(wavenumbers.max())],
         n_points=len(wavenumbers),
+        n_spectra=1 if intensities.ndim == 1 else intensities.shape[1],
         message=f"Successfully ingested {source_path.name} → {relative_path}"
     )
 

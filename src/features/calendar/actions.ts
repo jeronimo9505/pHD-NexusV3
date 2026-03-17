@@ -92,8 +92,8 @@ export async function getCalendarEventsAction(groupId: string, from: string, to:
         .from('calendar_events')
         .select('*, creator:profiles!created_by(full_name)')
         .eq('group_id', groupId)
-        .gte('start_at', from)
         .lte('start_at', to)
+        .gte('end_at', from)
         .order('start_at', { ascending: true });
 
     if (error) return { error: error.message, data: [] };

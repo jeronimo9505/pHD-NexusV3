@@ -46,6 +46,7 @@ export type IngestResponse = {
     preview_base64?: string;
     wavenumber_range?: [number, number];
     n_points?: number;
+    n_spectra?: number;
     message: string;
 };
 
