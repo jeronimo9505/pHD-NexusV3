@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { Database } from "@/types/supabase";
+import { SupabaseClient } from "@supabase/supabase-js";
 
 export type GroupRole = Database['public']['Tables']['group_members']['Row']['role'];
 export type SystemRole = 'admin' | 'user';
@@ -11,18 +12,22 @@ interface PermissionCheck {
 
 /**
  * Fetches the current user's role in a specific group.
+ * Accepts optional supabase client and userId to avoid redundant auth calls.
  */
-export async function getGroupRole(groupId: string): Promise<GroupRole | null> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+export async function getGroupRole(groupId: string, supabase?: SupabaseClient, userId?: string): Promise<GroupRole | null> {
+    const sb = supabase || await createClient();
+    let uid = userId;
+    if (!uid) {
+        const { data: { user } } = await sb.auth.getUser();
+        if (!user) return null;
+        uid = user.id;
+    }
 
-    if (!user) return null;
-
-    const { data: member } = await supabase
+    const { data: member } = await sb
         .from('group_members')
         .select('role')
         .eq('group_id', groupId)
-        .eq('user_id', user.id)
+        .eq('user_id', uid)
         .single();
 
     return member?.role || null;
@@ -30,17 +35,21 @@ export async function getGroupRole(groupId: string): Promise<GroupRole | null> {
 
 /**
  * Fetches the current user's system-level role (admin | user).
+ * Accepts optional supabase client and userId to avoid redundant auth calls.
  */
-export async function getSystemRole(): Promise<SystemRole | null> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+export async function getSystemRole(supabase?: SupabaseClient, userId?: string): Promise<SystemRole | null> {
+    const sb = supabase || await createClient();
+    let uid = userId;
+    if (!uid) {
+        const { data: { user } } = await sb.auth.getUser();
+        if (!user) return null;
+        uid = user.id;
+    }
 
-    if (!user) return null;
-
-    const { data: profile } = await supabase
+    const { data: profile } = await sb
         .from('profiles')
         .select('system_role')
-        .eq('id', user.id)
+        .eq('id', uid)
         .single();
 
     return (profile?.system_role as SystemRole) || null;
