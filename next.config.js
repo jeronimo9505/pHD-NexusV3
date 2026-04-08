@@ -1,6 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
     reactStrictMode: true,
+    // Client-side Router Cache: pages visited within these windows
+    // are served instantly from memory without hitting the server again.
+    experimental: {
+        staleTimes: {
+            dynamic: 60,   // Cache dynamic pages for 60 seconds
+            static: 300,   // Cache static pages for 5 minutes
+        },
+    },
     images: {
         remotePatterns: [
             {
@@ -20,7 +28,7 @@ const nextConfig = {
                     },
                     {
                         key: 'Cross-Origin-Embedder-Policy',
-                        value: 'unsafe-none', // or 'require-corp' if needed, but 'unsafe-none' allows external resources like Google Scripts
+                        value: 'unsafe-none',
                     },
                 ],
             },
