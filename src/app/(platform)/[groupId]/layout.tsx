@@ -15,20 +15,26 @@ export default async function GroupLayout(props: GroupLayoutProps) {
     const { groupId } = await props.params;
     const supabase = await createClient();
 
-    // Fetch all needed data in parallel
-    const userData = await supabase.auth.getUser();
-    const user = userData.data.user;
+    // Single auth call for entire layout
+    const { data: { user } } = await supabase.auth.getUser();
     const userId = user?.id;
 
-    const [role, systemRole, membershipsData] = await Promise.all([
-        getGroupRole(groupId),
-        getSystemRole(),
+    // Fetch all needed data in parallel, reusing supabase client + userId
+    const [role, systemRole, membershipsData, profileData] = await Promise.all([
+        getGroupRole(groupId, supabase, userId),
+        getSystemRole(supabase, userId),
         userId
             ? supabase.from('group_members')
                 .select('group_id, groups(id, name, code)')
                 .eq('user_id', userId)
                 .order('created_at', { ascending: false })
             : Promise.resolve({ data: [] }),
+        userId
+            ? supabase.from('profiles')
+                .select('full_name')
+                .eq('id', userId)
+                .single()
+            : Promise.resolve({ data: null }),
     ]);
 
     if (!role) {
@@ -46,17 +52,8 @@ export default async function GroupLayout(props: GroupLayoutProps) {
     }
     const userGroups = Array.from(groupsMap.values());
 
-    // Get user profile
-    let userName: string | null = null;
-    let userEmail = user?.email || null;
-    if (userId) {
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('full_name')
-            .eq('id', userId)
-            .single();
-        userName = profile?.full_name || null;
-    }
+    const userName = profileData.data?.full_name || null;
+    const userEmail = user?.email || null;
 
     return (
         <Shell sidebar={
