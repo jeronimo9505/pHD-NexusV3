@@ -47,11 +47,42 @@ def read_matlab_mat(path: Path) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]
         raise ValueError("Could not find intensity array. Expected variable named: intensity, spectrum, or y.")
 
     wavenumbers = wavenumbers.flatten()
-    intensities = intensities.flatten()
+
+    # Determine if it's a map (2D or 3D). Common Raman .mat are either:
+    # 1D: (W,) -> single spectrum
+    # 2D: (N, W) or (W, N) -> N spectra
+    # 3D: (Y, X, W) or (W, Y, X) -> Map
+    
+    n_w = len(wavenumbers)
+    
+    # Heuristic to orient intensities: the dimension matching n_w is the wavenumber axis.
+    if intensities.shape == wavenumbers.shape:
+        # single 1D spectrum
+        pass
+    else:
+        # Find which axis matches the number of wavenumbers
+        try:
+            w_axis = intensities.shape.index(n_w)
+            
+            # Move the wavenumber axis to the last dimension
+            if w_axis != len(intensities.shape) - 1:
+                intensities = np.moveaxis(intensities, w_axis, -1)
+                
+            # If it's a map (3D), store dimensions in metadata
+            if intensities.ndim == 3:
+                metadata['map_height'] = intensities.shape[0]
+                metadata['map_width'] = intensities.shape[1]
+                
+            # Flatten spatial dimensions into a single list of spectra: (n_spectra, n_wavenumbers)
+            n_spectra = np.prod(intensities.shape[:-1])
+            intensities = intensities.reshape((n_spectra, n_w))
+        except ValueError:
+            # If no dimension matches n_w, this might be malformed, flatten as fallback
+            intensities = intensities.flatten()
 
     metadata["wavenumber_min"] = float(np.min(wavenumbers))
     metadata["wavenumber_max"] = float(np.max(wavenumbers))
-    metadata["total_points"] = len(wavenumbers)
+    metadata["total_points"] = n_w
 
     return wavenumbers, intensities, metadata
 

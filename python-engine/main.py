@@ -142,7 +142,7 @@ async def ingest_file(request: IngestRequest):
         preview_base64=preview_b64,
         wavenumber_range=[float(wavenumbers.min()), float(wavenumbers.max())],
         n_points=len(wavenumbers),
-        n_spectra=1 if intensities.ndim == 1 else intensities.shape[1],
+        n_spectra=1 if intensities.ndim == 1 else intensities.shape[0],
         message=f"Successfully ingested {source_path.name} → {relative_path}"
     )
 
@@ -232,6 +232,266 @@ def get_representative_spectrum(request: RepresentativeSpectrumRequest):
     out_data = [{"x": float(x_val), "y": float(y_val)} for x_val, y_val in zip(common_x, median_y)]
     return RepresentativeSpectrumResponse(success=True, message="Calculated median spectrum", data=out_data)
 
+
+@app.get("/api/vault-files")
+def list_vault_files(vault_root: str, group_id: str = None):
+    """
+    Recursively scans the vault_root for .h5 files, returning a list of paths and metadata.
+    Optionally filters by group_id in the path.
+    """
+    import h5py
+    root_path = Path(vault_root)
+    if not root_path.exists() or not root_path.is_dir():
+        return {"success": False, "files": []}
+
+    files = []
+    # If a very large vault, this might be slow, but typically fine for local use.
+    for p in root_path.rglob("*.h5"):
+        # If group_id is provided, try to pre-filter by path segment
+        # format is typically VaultRoot/Logbook_ID/Sample/Raman/Year/file.h5
+        if group_id and group_id not in str(p):
+            # Still need to check if group_id matches inside the h5 metadata if path doesn't strictly have it?
+            # Actually, let's just parse it and check inside to be safe
+            pass
+            
+        try:
+            with h5py.File(p, "r") as f:
+                meta = dict(f.attrs)
+                # Filter by group_id
+                if group_id and meta.get("group_id") != group_id:
+                    continue
+                    
+                rel_path = p.relative_to(root_path).as_posix()
+                
+                # Check dimensions
+                n_spectra = 1
+                try:
+                    intensities = f["/spectrum/intensities"]
+                    if len(intensities.shape) >= 2:
+                        n_spectra = intensities.shape[0] if len(intensities.shape) == 2 else np.prod(intensities.shape[:-1])
+                except:
+                    pass
+                
+                files.append({
+                    "id": rel_path,
+                    "h5_relative_path": rel_path,
+                    "name": p.name,
+                    "sample_name": meta.get("sample_name") or meta.get("sample_code", "Unknown"),
+                    "technique": meta.get("technique", "Unknown"),
+                    "measured_at": meta.get("measured_at", ""),
+                    "created_at": meta.get("created_at", ""),
+                    "n_spectra": n_spectra,
+                    "map_width": int(meta.get("map_width", 0)),
+                    "map_height": int(meta.get("map_height", 0)),
+                })
+        except Exception:
+            pass
+
+    # Sort files by created_at descending
+    files.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return {"success": True, "files": files}
+
+class HeatmapRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    start_wavenumber: Optional[float] = None
+    end_wavenumber: Optional[float] = None
+
+@app.post("/api/map/heatmap")
+def get_map_heatmap(request: HeatmapRequest):
+    """
+    Returns the aggregated intensity (or peak intensity) for each spectrum to construct a heatmap.
+    If a wavenumber range is provided, it integrates strictly within that range.
+    """
+    import h5py
+    import numpy as np
+    
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+
+    try:
+        with h5py.File(path, "r") as f:
+            wavenumbers = f["/spectrum/wavenumbers"][:]
+            intensities = f["/spectrum/intensities"][:]
+            
+            # If 1D, return single value
+            if intensities.ndim == 1:
+                intensities = intensities.reshape(1, -1)
+                
+            n_spectra = intensities.shape[0]
+            
+            # Find bounds
+            if request.start_wavenumber is not None and request.end_wavenumber is not None:
+                mask = (wavenumbers >= request.start_wavenumber) & (wavenumbers <= request.end_wavenumber)
+            else:
+                mask = np.ones(len(wavenumbers), dtype=bool)
+                
+            if not np.any(mask):
+                return {"success": False, "message": "No wavenumbers in selected range."}
+                
+            # Slice and aggregate (integral/sum)
+            sliced = intensities[:, mask]
+            
+            # Use sum or max? Sum is equivalent to area under curve
+            heatmap_data = np.sum(sliced, axis=1)
+            
+            return {
+                "success": True,
+                "n_spectra": n_spectra,
+                "heatmap": heatmap_data.tolist(),
+                "min": float(np.min(heatmap_data)),
+                "max": float(np.max(heatmap_data))
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Heatmap calc failed: {str(e)}")
+
+
+class SpectrumRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    spectrum_index: int
+
+@app.post("/api/map/spectrum")
+def get_map_spectrum(request: SpectrumRequest):
+    """
+    Returns a single 1D spectrum from a 2D map given a flattened index.
+    """
+    import h5py
+    
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+
+    try:
+        with h5py.File(path, "r") as f:
+            wavenumbers = f["/spectrum/wavenumbers"][:]
+            intensities = f["/spectrum/intensities"]
+            
+            if intensities.ndim == 1:
+                y = intensities[:]
+            else:
+                if request.spectrum_index < 0 or request.spectrum_index >= intensities.shape[0]:
+                    raise HTTPException(status_code=400, detail="Index out of bounds")
+                y = intensities[request.spectrum_index, :]
+                
+            return {
+                "success": True,
+                "data": [{"x": float(x), "y": float(y_val)} for x, y_val in zip(wavenumbers, y)]
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Spectrum calc failed: {str(e)}")
+
+class GrapheneScriptRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+
+@app.post("/api/map/graphene-bands")
+def get_graphene_bands(request: GrapheneScriptRequest):
+    """
+    Computes Graphene Bands natively and returns the raw flattened maps.
+    This replaces the slow Matplotlib window with an instantly computed JSON response.
+    """
+    import h5py
+    import numpy as np
+    from scipy.signal import savgol_filter
+    
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+        
+    try:
+        with h5py.File(path, "r") as f:
+            wavenumbers = f["/spectrum/wavenumbers"][:]
+            intensities_raw = f["/spectrum/intensities"][:]
+            
+            if intensities_raw.ndim == 1:
+                intensities_raw = intensities_raw.reshape(1, -1)
+                
+            n_spectra = intensities_raw.shape[0]
+            
+            # 1. Vectorized Smoothing
+            # savgol_filter on axis=1 applies to each spectrum efficiently
+            processed = savgol_filter(intensities_raw, window_length=7, polyorder=3, axis=1)
+            
+            # --- Config ---
+            bands = {
+                'D': (1300, 1350),
+                'G': (1580, 1600),
+                '2D': (2600, 2700)
+            }
+            noises = {
+                'D': [(1200, 1250), (1360, 1400)],
+                'G': [(1500, 1550), (1620, 1650)],
+                '2D': [(2550, 2580), (2720, 2750)]
+            }
+            snr_threshold = 3.0
+            epsilon = 1e-5
+            
+            # Helper to get mask array for a range
+            def get_mask(r):
+                return (wavenumbers >= r[0]) & (wavenumbers <= r[1])
+            
+            # Output arrays
+            maps = {'D': np.zeros(n_spectra), 'G': np.zeros(n_spectra), '2D': np.zeros(n_spectra)}
+            
+            for key in ['D', 'G', '2D']:
+                b_range = bands[key]
+                n_ranges = noises[key]
+                
+                band_mask = get_mask(b_range)
+                noise_mask = get_mask(n_ranges[0]) | get_mask(n_ranges[1])
+                
+                # If these features don't exist in the scan, skip
+                if not np.any(band_mask) or not np.any(noise_mask):
+                    continue
+                    
+                # Vectorized peaks (Max intensity in band)
+                peaks = np.max(processed[:, band_mask], axis=1)
+                
+                # Vectorized background noise mean & std
+                noise_data = processed[:, noise_mask]
+                noise_mean = np.mean(noise_data, axis=1)
+                noise_std = np.std(noise_data, axis=1)
+                
+                # Vectorized SNR calculation
+                # Avoid division by zero
+                valid_std = noise_std > 0
+                snr = np.zeros(n_spectra)
+                snr[valid_std] = (peaks[valid_std] - noise_mean[valid_std]) / noise_std[valid_std]
+                
+                # Filter by SNR threshold
+                valid_snr = snr >= snr_threshold
+                maps[key][valid_snr] = peaks[valid_snr]
+                
+            # Correlaciones (Ratios)
+            map_G = maps['G']
+            map_D = maps['D']
+            map_2D = maps['2D']
+            
+            ratio_2D_G = np.zeros(n_spectra)
+            valid_2D_G = (map_2D > 0) & (map_G > 0)
+            ratio_2D_G[valid_2D_G] = map_2D[valid_2D_G] / (map_G[valid_2D_G] + epsilon)
+            
+            ratio_D_G = np.zeros(n_spectra)
+            valid_D_G = (map_D > 0) & (map_G > 0)
+            ratio_D_G[valid_D_G] = map_D[valid_D_G] / (map_G[valid_D_G] + epsilon)
+            
+            # Pack all data back
+            return {
+                "success": True,
+                "n_spectra": n_spectra,
+                "map_D": maps['D'].tolist(),
+                "map_G": maps['G'].tolist(),
+                "map_2D": maps['2D'].tolist(),
+                "ratio_2D_G": ratio_2D_G.tolist(),
+                "ratio_D_G": ratio_D_G.tolist()
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Graphene calc failed: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8765, reload=False)

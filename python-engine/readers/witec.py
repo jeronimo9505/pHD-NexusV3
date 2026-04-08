@@ -67,7 +67,8 @@ def read_witec_txt(path: Path) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
         raise ValueError("No numeric data found in file. Make sure it has two columns (wavenumber, intensity).")
 
     try:
-        array = np.array([[float(p.replace(",", ".")) for p in row[:2]] for row in data_lines if len(row) >= 2])
+        # Read ALL columns, not just [:2]
+        array = np.array([[float(p.replace(",", ".")) for p in row] for row in data_lines if len(row) >= 2])
     except ValueError as e:
         raise ValueError(f"Could not parse data rows: {e}")
 
@@ -75,7 +76,13 @@ def read_witec_txt(path: Path) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
         raise ValueError("Expected at least 2 columns (wavenumber, intensity).")
 
     wavenumbers = array[:, 0]
-    intensities = array[:, 1]
+    # The rest are intensities: shape (n_wavenumbers, n_spectra)
+    # We transpose it to (n_spectra, n_wavenumbers)
+    intensities = array[:, 1:].T
+
+    # If it's just one spectrum, ensure it's a 1D array to match conventions
+    if intensities.shape[0] == 1:
+        intensities = intensities[0]
 
     metadata["wavenumber_min"] = float(np.min(wavenumbers))
     metadata["wavenumber_max"] = float(np.max(wavenumbers))
