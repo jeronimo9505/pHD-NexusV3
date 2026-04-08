@@ -109,3 +109,99 @@ export async function fetchRepresentativeSpectrum(
     
     return res.json();
 }
+
+/**
+ * Fetch list of all .h5 files from the local Vault.
+ */
+export async function fetchVaultFiles(vaultRoot: string, groupId?: string): Promise<{
+    success: boolean;
+    files: Array<{
+        id: string;
+        h5_relative_path: string;
+        name: string;
+        sample_name: string;
+        technique: string;
+        measured_at: string;
+        created_at: string;
+        n_spectra: number;
+        map_width: number;
+        map_height: number;
+    }>;
+}> {
+    const url = new URL(`${SCIENCE_ENGINE_URL}/api/vault-files`);
+    url.searchParams.set("vault_root", vaultRoot);
+    if (groupId) url.searchParams.set("group_id", groupId);
+
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error("Could not fetch vault files");
+    return res.json();
+}
+
+/**
+ * Fetch heatmap data from an .h5 file.
+ */
+export async function fetchMapHeatmap(request: {
+    vault_root: string;
+    h5_relative_path: string;
+    start_wavenumber?: number;
+    end_wavenumber?: number;
+}): Promise<{ success: boolean; n_spectra: number; heatmap: number[]; min: number; max: number; message?: string }> {
+    const res = await fetch(`${SCIENCE_ENGINE_URL}/api/map/heatmap`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Could not fetch heatmap");
+    }
+    return res.json();
+}
+
+/**
+ * Fetch a specific 1D spectrum from an .h5 map.
+ */
+export async function fetchMapSpectrum(request: {
+    vault_root: string;
+    h5_relative_path: string;
+    spectrum_index: number;
+}): Promise<{ success: boolean; data: { x: number; y: number }[] }> {
+    const res = await fetch(`${SCIENCE_ENGINE_URL}/api/map/spectrum`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Could not fetch spectrum slice");
+    }
+    return res.json();
+}
+
+/**
+ * Compute Graphene Bands matrix natively via Python vectorization.
+ */
+export async function fetchGrapheneBands(request: {
+    vault_root: string;
+    h5_relative_path: string;
+}): Promise<{ 
+    success: boolean; 
+    n_spectra: number;
+    map_D: number[];
+    map_G: number[];
+    map_2D: number[];
+    ratio_2D_G: number[];
+    ratio_D_G: number[];
+}> {
+    const res = await fetch(`${SCIENCE_ENGINE_URL}/api/map/graphene-bands`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Could not fetch graphene bands");
+    }
+    return res.json();
+}
+

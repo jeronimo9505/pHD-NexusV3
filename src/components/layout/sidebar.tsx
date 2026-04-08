@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useSidebar } from './shell';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Home,
     FileText,
@@ -21,9 +21,11 @@ import {
     User,
     TestTube,
     CalendarDays,
+    Map
 } from 'lucide-react';
 import { GroupRole, SystemRole } from '@/lib/auth/roles';
 import { createBrowserClient } from '@supabase/ssr';
+import { isDesktop } from '@/lib/desktop';
 
 interface GroupInfo {
     id: string;
@@ -45,6 +47,11 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
     const router = useRouter();
     const { collapsed, toggle } = useSidebar();
     const [showGroups, setShowGroups] = useState(false);
+    const [isDesktopClient, setIsDesktopClient] = useState(false);
+
+    useEffect(() => {
+        setIsDesktopClient(isDesktop);
+    }, []);
 
     const isSysAdmin = systemRole === 'admin';
     const currentGroup = groups.find(g => g.id === groupId);
@@ -59,6 +66,10 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
         { href: `/${groupId}/knowledge`, label: 'Knowledge Base', icon: BookOpen },
         { href: `/${groupId}/settings`, label: 'Settings', icon: Settings },
     ];
+
+    if (isDesktopClient) {
+        links.splice(3, 0, { href: `/${groupId}/map-analyzer`, label: 'Map Analyzer', icon: Map });
+    }
 
     const handleSignOut = async () => {
         const supabase = createBrowserClient(
