@@ -68,16 +68,43 @@ export const initGoogleClient = async (apiKey: string, clientId: string) => {
 
     if (!(window as any).gapi) throw new Error('GAPI not loaded');
 
+    const gapi = (window as any).gapi;
+
+    // If the preloader already initialized everything, just ensure token client exists
+    if (gapi.client?.drive) {
+        // Restore token if available
+        const savedToken = loadToken();
+        if (savedToken) {
+            gapi.client.setToken({ access_token: savedToken });
+        }
+
+        // Ensure token client is set up
+        if (!tokenClient && (window as any).google?.accounts?.oauth2) {
+            tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
+                client_id: clientId.trim(),
+                scope: SCOPES,
+                callback: (resp: any) => {
+                    if (resp.access_token) {
+                        saveToken(resp);
+                        if (resp.email) localStorage.setItem('google_auth_email_hint', resp.email);
+                    }
+                },
+            });
+        }
+
+        console.log("Google Client already pre-loaded — skipping init");
+        return;
+    }
+
     // Load GAPI client
     await new Promise<void>((resolve, reject) => {
-        (window as any).gapi.load('client', { callback: resolve, onerror: reject });
+        gapi.load('client', { callback: resolve, onerror: reject });
     });
 
     // Init GAPI client with API Key
     try {
-        await (window as any).gapi.client.init({
+        await gapi.client.init({
             apiKey: apiKey.trim(),
-            // discoveryDocs: DISCOVERY_DOCS, // Don't load all at once to prevent 403 failures blocking everything
         });
     } catch (e: any) {
         console.warn("GAPI Init warning:", e);
@@ -86,10 +113,9 @@ export const initGoogleClient = async (apiKey: string, clientId: string) => {
     // Load APIs individually to handle permissions/errors gracefully
     const loadApi = async (name: string, version: string, discoveryUrl: string) => {
         try {
-            await (window as any).gapi.client.load(discoveryUrl);
+            await gapi.client.load(discoveryUrl);
             console.log(`Loaded ${name} API`);
         } catch (e) {
-            // Expected if the API key doesn't support this service (e.g. Slides)
             console.info(`[Info] Could not load ${name} API (checking others...)`);
         }
     };
@@ -104,7 +130,7 @@ export const initGoogleClient = async (apiKey: string, clientId: string) => {
     const savedToken = loadToken();
     if (savedToken) {
         console.log("Restoring cached Google token");
-        (window as any).gapi.client.setToken({ access_token: savedToken });
+        gapi.client.setToken({ access_token: savedToken });
     }
 
     // Init Token Client (GIS)
@@ -115,7 +141,6 @@ export const initGoogleClient = async (apiKey: string, clientId: string) => {
             callback: (resp: any) => {
                 if (resp.access_token) {
                     saveToken(resp);
-                    // Store email hint if available in response (some versions of GIS provide it)
                     if (resp.email) localStorage.setItem('google_auth_email_hint', resp.email);
                 }
             },

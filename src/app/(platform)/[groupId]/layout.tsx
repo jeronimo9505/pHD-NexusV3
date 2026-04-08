@@ -4,6 +4,7 @@ import { Shell } from "@/components/layout/shell";
 import { Sidebar } from "@/components/layout/sidebar";
 import { getGroupRole, getSystemRole } from "@/lib/auth/roles";
 import { GoogleTokenSync } from "@/components/layout/GoogleTokenSync";
+import { GoogleScriptPreloader } from "@/components/layout/GoogleScriptPreloader";
 import { SessionTracker } from "@/components/layout/SessionTracker";
 
 interface GroupLayoutProps {
@@ -20,7 +21,7 @@ export default async function GroupLayout(props: GroupLayoutProps) {
     const userId = user?.id;
 
     // Fetch all needed data in parallel, reusing supabase client + userId
-    const [role, systemRole, membershipsData, profileData] = await Promise.all([
+    const [role, systemRole, membershipsData, profileData, groupData] = await Promise.all([
         getGroupRole(groupId, supabase, userId),
         getSystemRole(supabase, userId),
         userId
@@ -35,6 +36,10 @@ export default async function GroupLayout(props: GroupLayoutProps) {
                 .eq('id', userId)
                 .single()
             : Promise.resolve({ data: null }),
+        supabase.from('groups')
+            .select('drive_settings')
+            .eq('id', groupId)
+            .single(),
     ]);
 
     if (!role) {
@@ -54,6 +59,7 @@ export default async function GroupLayout(props: GroupLayoutProps) {
 
     const userName = profileData.data?.full_name || null;
     const userEmail = user?.email || null;
+    const driveSettings = groupData.data?.drive_settings as { clientId?: string; apiKey?: string } | undefined;
 
     return (
         <Shell sidebar={
@@ -67,6 +73,7 @@ export default async function GroupLayout(props: GroupLayoutProps) {
             />
         }>
             <GoogleTokenSync />
+            <GoogleScriptPreloader apiKey={driveSettings?.apiKey} clientId={driveSettings?.clientId} />
             <SessionTracker groupId={groupId} />
             {props.children}
         </Shell>
