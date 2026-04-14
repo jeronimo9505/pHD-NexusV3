@@ -58,7 +58,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                 if (lbs) setDbLogbooks(lbs);
 
                 // Fetch samples for the group to resolve names
-                const { data: samples } = await getSamplesAction(groupId);
+                const { data: samples } = await getSamplesAction(groupId, '');
                 if (samples) setDbSamples(samples);
             } catch (err) {
                 console.error("Failed to fetch metadata", err);
