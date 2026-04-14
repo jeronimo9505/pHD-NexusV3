@@ -2,28 +2,32 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { fetchMapHeatmap } from '@/lib/desktop';
-import { Settings, Maximize, ZoomIn, ZoomOut, Save } from 'lucide-react';
+import { Settings, Maximize, ZoomIn, ZoomOut, Save, RefreshCw, AlertCircle, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 interface HeatmapProps {
     vaultRoot: string;
     h5Path: string;
     mapWidth: number;
     mapHeight: number;
+    stepSize?: number;
     nSpectra: number;
     wavenumberRange?: [number, number];
     selectedPixelIndex: number;
     onPixelSelect: (idx: number) => void;
     onToggleGraphene?: () => void;
+    onUpdateDimensions?: (w: number, h: number, step?: number) => void;
+    isDismissed?: boolean;
+    onDismiss?: () => void;
 }
 
 export function HeatmapCanvas({
-    vaultRoot, h5Path, mapWidth, mapHeight, nSpectra, wavenumberRange, selectedPixelIndex, onPixelSelect, onToggleGraphene
+    vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1.0, nSpectra, wavenumberRange, selectedPixelIndex, onPixelSelect, onToggleGraphene, onUpdateDimensions, isDismissed, onDismiss
 }: HeatmapProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     
-    // ... rest of state
     const [heatmapData, setHeatmapData] = useState<number[]>([]);
     const [minMax, setMinMax] = useState({ min: 0, max: 1 });
     const [userMin, setUserMin] = useState<number | null>(null);
@@ -33,10 +37,28 @@ export function HeatmapCanvas({
     // Dimension Overrides
     const [wOverride, setWOverride] = useState(mapWidth);
     const [hOverride, setHOverride] = useState(mapHeight);
+    const [stepOverride, setStepOverride] = useState(stepSize);
+    const [actualN, setActualN] = useState(nSpectra);
     const [showSettings, setShowSettings] = useState(false);
+    const [bannerDismissed, setBannerDismissed] = useState(false);
 
-    const w = wOverride > 0 ? wOverride : Math.ceil(Math.sqrt(nSpectra));
-    const h = hOverride > 0 ? hOverride : Math.ceil(nSpectra / w);
+    // Sync local state when props change
+    useEffect(() => {
+        setWOverride(mapWidth);
+        setHOverride(mapHeight);
+        setStepOverride(stepSize);
+    }, [mapWidth, mapHeight, stepSize]);
+
+    // Auto-Correct logic
+    const isMismatch = mapWidth !== 0 && (wOverride * hOverride) !== actualN && actualN > 0;
+    const isMissingMetadata = mapWidth === 0 && mapHeight === 0;
+    
+    const safeN = actualN > 0 ? actualN : 1;
+    const w = Math.max(1, wOverride > 0 && (!isMismatch || isMissingMetadata) ? wOverride : Math.ceil(Math.sqrt(safeN)));
+    const h = Math.max(1, hOverride > 0 && (!isMismatch || isMissingMetadata) ? hOverride : Math.ceil(safeN / w));
+
+    const isAutoDetectedPerfect = isMissingMetadata && (w * h === actualN);
+    const showBanner = (isMismatch || (isMissingMetadata && !isAutoDetectedPerfect)) && !loading && actualN > 0 && !bannerDismissed && !isDismissed;
 
     const loadHeatmap = useCallback(async () => {
         if (!vaultRoot || !h5Path) return;
@@ -50,6 +72,9 @@ export function HeatmapCanvas({
             });
             if (res.success) {
                 setHeatmapData(res.heatmap);
+                if (res.n_spectra) {
+                    setActualN(res.n_spectra);
+                }
                 
                 // Calculate robust visual range (2nd to 98th percentile) 
                 // to ignore cosmic rays / dead pixels automatically on load
@@ -99,7 +124,7 @@ export function HeatmapCanvas({
         
         const range = cMax - cMin;
 
-        for (let i = 0; i < nSpectra; i++) {
+        for (let i = 0; i < actualN; i++) {
             const val = heatmapData[i];
             if (val === undefined) continue;
 
@@ -122,7 +147,7 @@ export function HeatmapCanvas({
         ctx.putImageData(imgData, 0, 0);
 
         // Draw selection highlight if valid
-        if (selectedPixelIndex >= 0 && selectedPixelIndex < nSpectra) {
+        if (selectedPixelIndex >= 0 && selectedPixelIndex < actualN) {
             const px = selectedPixelIndex % w;
             const py = Math.floor(selectedPixelIndex / w);
             ctx.strokeStyle = '#00FFFF';
@@ -130,7 +155,7 @@ export function HeatmapCanvas({
             ctx.strokeRect(px, py, 1, 1);
         }
 
-    }, [heatmapData, minMax, userMin, userMax, w, h, nSpectra, selectedPixelIndex]);
+    }, [heatmapData, minMax, userMin, userMax, w, h, actualN, selectedPixelIndex]);
 
     // Handle canvas click to select pixel
     const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -146,16 +171,19 @@ export function HeatmapCanvas({
 
         if (x >= 0 && x < w && y >= 0 && y < h) {
             const index = y * w + x;
-            if (index < nSpectra) {
+            if (index < actualN) {
                 onPixelSelect(index);
             }
         }
     };
 
     const handleSaveDimensions = () => {
-        // Ideally save to DB/H5 here, for now it just updates state
+        if (onUpdateDimensions) {
+            onUpdateDimensions(wOverride, hOverride, stepOverride);
+        }
         setShowSettings(false);
-        toast.success('Dimensions updated. (A DB/H5 save needs to be linked here based on global App state)');
+        setBannerDismissed(true); // Hide banner once synced
+        toast.success(`Grid updated: ${wOverride}x${hOverride} @ ${stepOverride}µm/px`);
     };
 
     const handleGrapheneLaunch = () => {
@@ -165,95 +193,185 @@ export function HeatmapCanvas({
     };
 
     return (
-        <div className="flex-1 w-full h-full flex flex-col relative" ref={containerRef}>
-            {/* Toolbar */}
-            <div className="absolute top-0 left-0 right-0 p-3 flex items-center justify-between pointer-events-none z-20">
-                <div className="flex items-center gap-2 pointer-events-auto bg-black/60 backdrop-blur pb-1 px-2 rounded-lg border border-slate-800">
-                    <span className="text-sm font-semibold text-slate-300">
+        <div className="flex-1 w-full h-full flex flex-col relative bg-slate-100/30" ref={containerRef}>
+            {/* Toolbar (Light) */}
+            <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between pointer-events-none z-20">
+                <div className="flex items-center gap-2 pointer-events-auto bg-white/90 backdrop-blur-md pb-1.5 px-3 rounded-2xl border border-slate-100 shadow-xl shadow-slate-200/20">
+                    <span className="text-sm font-bold text-slate-900 tracking-tight">
                         Map Viewer
                     </span>
-                    <span className="text-xs text-slate-500">({w} x {h})</span>
+                    <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase",
+                        isMismatch ? "bg-amber-100 text-amber-700 animate-pulse" : "text-slate-400"
+                    )}>
+                        ({w}×{h} @ {stepSize}µm)
+                    </span>
                     {wavenumberRange && (
-                        <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30">
-                            Range: {wavenumberRange[0].toFixed(1)} - {wavenumberRange[1].toFixed(1)} cm⁻¹
-                        </span>
+                        <div className="flex items-center gap-1.5 ml-2">
+                             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
+                             <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg border border-indigo-100 font-bold">
+                                {wavenumberRange[0].toFixed(0)} - {wavenumberRange[1].toFixed(0)} cm⁻¹
+                            </span>
+                        </div>
                     )}
                 </div>
 
                 <div className="flex gap-2 pointer-events-auto">
                     <button 
                         onClick={handleGrapheneLaunch}
-                        className="px-3 py-1.5 bg-sky-600/20 text-sky-400 border border-sky-600/40 rounded flex items-center gap-2 hover:bg-sky-600 hover:text-white transition-colors text-xs font-semibold"
+                        className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-900 border border-slate-200 rounded-2xl flex items-center gap-2 transition-all text-xs font-bold shadow-sm"
                         title="Popup Matplotlib graphene bands script"
                     >
+                         <div className="w-2 h-2 rounded-full bg-sky-500" />
                         Graphene Bands
                     </button>
-                    <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-slate-900 border border-slate-700 rounded text-slate-400 hover:text-white transition-colors">
-                        <Settings size={16} />
+                    <button onClick={() => setShowSettings(!showSettings)} className="p-2.5 bg-white border border-slate-200 rounded-2xl text-slate-500 hover:text-indigo-600 transition-all shadow-sm hover:border-indigo-100">
+                        <Settings size={18} />
                     </button>
                 </div>
             </div>
 
-            {/* Config Overlay */}
-            {showSettings && (
-                <div className="absolute top-14 right-3 bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-2xl z-30 w-64 text-sm pointer-events-auto">
-                    <h4 className="font-semibold text-slate-200 mb-3">Map Dimensions</h4>
-                    <div className="space-y-3">
+            {/* Mismatch/Missing Metadata Warning */}
+            {showBanner && (
+                <div className={cn(
+                    "absolute top-16 left-4 right-4 flex items-center justify-between border p-3 rounded-2xl z-20 shadow-lg animate-in slide-in-from-top-2 pointer-events-auto",
+                    isMissingMetadata ? "bg-indigo-50 border-indigo-200" : "bg-amber-50 border-amber-200"
+                )}>
+                    <div className="flex items-center gap-3">
+                        <div className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center",
+                            isMissingMetadata ? "bg-indigo-100 text-indigo-600" : "bg-amber-100 text-amber-600"
+                        )}>
+                            <AlertCircle size={18} />
+                        </div>
                         <div>
-                            <label className="text-xs text-slate-400">Width (pixels / µm)</label>
+                            <div className={cn(
+                                "text-xs font-bold leading-none mb-1",
+                                isMissingMetadata ? "text-indigo-900" : "text-amber-900"
+                            )}>
+                                {isMissingMetadata ? "Auto-Detecting Grid Layout" : "Dimension Mismatch Detected"}
+                            </div>
+                            <p className={cn(
+                                "text-[10px] font-medium",
+                                isMissingMetadata ? "text-indigo-700" : "text-amber-700"
+                            )}>
+                                {isMissingMetadata 
+                                    ? `Found ${actualN} spectra. Using ${w}×${h} square grid.` 
+                                    : `File contains ${actualN} spectra, but metadata says ${mapWidth}×${mapHeight}. Switched to ${w}×${h} square grid.`
+                                }
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={() => setShowSettings(true)}
+                            className={cn(
+                                "px-3 py-1.5 bg-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border pointer-events-auto",
+                                isMissingMetadata ? "hover:bg-indigo-100 text-indigo-700 border-indigo-200" : "hover:bg-amber-100 text-amber-700 border-amber-200"
+                            )}
+                        >
+                            Adjust Manually
+                        </button>
+                        <button 
+                            onClick={() => {
+                                setBannerDismissed(true);
+                                if (onDismiss) onDismiss();
+                            }}
+                            className={cn(
+                                "p-1.5 rounded-lg transition-all pointer-events-auto",
+                                isMissingMetadata ? "text-indigo-400 hover:bg-indigo-100" : "text-amber-400 hover:bg-amber-100"
+                            )}
+                            title="Dismiss Warning"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Config Overlay (Light) */}
+            {showSettings && (
+                <div className="absolute top-16 right-4 bg-white border border-slate-200 p-6 rounded-[24px] shadow-2xl z-30 w-72 pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-200">
+                    <div className="flex items-center justify-between mb-4">
+                        <h4 className="font-bold text-slate-900 flex items-center gap-2">
+                            <Maximize size={16} className="text-indigo-500" />
+                            Grid Parameters
+                        </h4>
+                        <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
+                            <X size={16} />
+                        </button>
+                    </div>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Grid Width (spectra)</label>
                             <input 
                                 type="number" 
                                 value={wOverride} 
                                 onChange={(e) => setWOverride(parseInt(e.target.value) || 0)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 mt-1 outline-none focus:border-purple-500 text-slate-300"
+                                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-bold text-slate-900 transition-all font-mono"
+                                placeholder="Auto-detect"
                             />
                         </div>
                         <div>
-                            <label className="text-xs text-slate-400">Height (pixels / µm)</label>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Grid Height (spectra)</label>
                             <input 
                                 type="number" 
                                 value={hOverride} 
                                 onChange={(e) => setHOverride(parseInt(e.target.value) || 0)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 mt-1 outline-none focus:border-purple-500 text-slate-300"
+                                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-bold text-slate-900 transition-all font-mono"
+                                placeholder="Auto-detect"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Step Size (µm / spectrum)</label>
+                            <input 
+                                type="number" 
+                                step="0.1"
+                                value={stepOverride} 
+                                onChange={(e) => setStepOverride(parseFloat(e.target.value) || 1.0)}
+                                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-bold text-slate-900 transition-all font-mono"
                             />
                         </div>
                         <div className="pt-2 flex justify-end">
-                            <button onClick={handleSaveDimensions} className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded flex items-center gap-1.5 text-xs font-medium">
-                                <Save size={14} /> Update
+                            <button onClick={handleSaveDimensions} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold transition-all shadow-lg shadow-indigo-100">
+                                <Save size={16} /> Sync Layout
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Canvas Area */}
-            <div className="flex-1 w-full h-full flex items-center justify-center p-8 relative overflow-hidden bg-dot-grid">
+            {/* Canvas Area (Keeping dark for data contrast, but with light container) */}
+            <div className="flex-1 w-full h-full flex items-center justify-center p-12 relative overflow-hidden">
                 {loading && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
-                        <div className="animate-spin text-purple-500">⟳</div>
+                    <div className="absolute inset-0 flex items-center justify-center bg-white/40 backdrop-blur-sm z-30">
+                        <div className="flex flex-col items-center gap-3">
+                            <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Rendering Heatmap</span>
+                        </div>
                     </div>
                 )}
                 
-                {/* CSS scaling approach for crisp pixels */}
                 <div 
-                    className="relative shadow-2xl shadow-purple-900/20"
+                    className="relative shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] bg-black"
                     style={{
-                        width: w * 5, // Magnification multiplier to make it visible
-                        height: h * 5,
-                        maxWidth: '80%',
-                        maxHeight: '80%',
+                        width: w * 6,
+                        height: h * 6,
+                        maxWidth: '90%',
+                        maxHeight: '90%',
                         aspectRatio: `${w} / ${h}`
                     }}
                 >
                     <canvas 
                         ref={canvasRef} 
                         onClick={handleCanvasClick}
-                        className="w-full h-full cursor-crosshair border border-slate-700/50 rounded-sm rendering-pixelated"
+                        className="w-full h-full cursor-crosshair border border-slate-800 rounded-sm rendering-pixelated"
                     />
                 </div>
             </div>
-            {/* Interactive Dual-Thumb Range Slider (Bottom) */}
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-slate-900/80 backdrop-blur-md px-6 py-3 rounded-full border border-slate-700 shadow-2xl z-30">
+
+            {/* Range Slider (Premium Light) */}
+            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-6 bg-white/90 backdrop-blur-md px-8 py-4 rounded-3xl border border-slate-100 shadow-2xl z-30">
                 {(() => {
                     const absoluteMin = minMax.min;
                     const absoluteMax = minMax.max;
@@ -267,17 +385,20 @@ export function HeatmapCanvas({
 
                     return (
                         <>
-                            <span className="text-xs font-mono text-slate-300 w-12 text-right">
-                                {cMin.toFixed(step === 1 ? 0 : 2)}
-                            </span>
+                            <div className="flex flex-col items-center">
+                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">Min</span>
+                                <span className="text-xs font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                                    {cMin.toFixed(step === 1 ? 0 : 1)}
+                                </span>
+                            </div>
 
-                            <div className="relative w-64 h-4 flex items-center">
+                            <div className="relative w-72 h-4 flex items-center">
                                 {/* Gradient Base */}
-                                <div className="absolute w-full h-1.5 rounded-full bg-gradient-to-r from-blue-900 via-green-500 to-red-500" />
+                                <div className="absolute w-full h-2 rounded-full bg-gradient-to-r from-blue-900 via-green-500 to-red-500 opacity-80" />
                                 
-                                {/* Overlay dimmers for out-of-range limits */}
-                                <div className="absolute h-1.5 bg-black/70 rounded-l-full" style={{ width: `${leftPct}%` }} />
-                                <div className="absolute h-1.5 bg-black/70 right-0 rounded-r-full" style={{ width: `${rightPct}%` }} />
+                                {/* Overlay dimmers */}
+                                <div className="absolute h-2 bg-slate-200/90 rounded-l-full ring-1 ring-slate-300" style={{ width: `${leftPct}%` }} />
+                                <div className="absolute h-2 bg-slate-200/90 right-0 rounded-r-full ring-1 ring-slate-300" style={{ width: `${rightPct}%` }} />
 
                                 {/* Thumbs */}
                                 <input 
@@ -289,9 +410,9 @@ export function HeatmapCanvas({
                                     }}
                                     className="absolute w-full appearance-none bg-transparent pointer-events-none 
                                     [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none 
-                                    [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white 
-                                    [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md cursor-ew-resize 
-                                    [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-slate-300"
+                                    [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-white 
+                                    [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-xl cursor-ew-resize 
+                                    [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-indigo-600 transition-all active:[&::-webkit-slider-thumb]:scale-125"
                                 />
                                 <input 
                                     type="range"
@@ -302,23 +423,26 @@ export function HeatmapCanvas({
                                     }}
                                     className="absolute w-full appearance-none bg-transparent pointer-events-none 
                                     [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none 
-                                    [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white 
-                                    [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md cursor-ew-resize
-                                    [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-slate-300"
+                                    [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-white 
+                                    [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-xl cursor-ew-resize
+                                    [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-indigo-600 transition-all active:[&::-webkit-slider-thumb]:scale-125"
                                 />
                             </div>
 
-                            <span className="text-xs font-mono text-slate-300 w-12">
-                                {cMax.toFixed(step === 1 ? 0 : 2)}
-                            </span>
+                            <div className="flex flex-col items-center">
+                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">Max</span>
+                                <span className="text-xs font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                                    {cMax.toFixed(step === 1 ? 0 : 1)}
+                                </span>
+                            </div>
 
                             {(userMin !== null || userMax !== null) && (
                                 <button 
                                     onClick={() => { setUserMin(null); setUserMax(null); }}
-                                    className="absolute -top-2 -right-2 w-6 h-6 flex items-center justify-center bg-slate-700 text-white rounded-full border border-slate-500 shadow cursor-pointer text-xs hover:bg-slate-600 transition-colors"
+                                    className="absolute -top-3 -right-3 w-7 h-7 flex items-center justify-center bg-white text-rose-500 rounded-full border border-rose-100 shadow-xl cursor-pointer text-xs hover:bg-rose-50 transition-all font-bold"
                                     title="Reset To Default"
                                 >
-                                    ✕
+                                    <X size={14} />
                                 </button>
                             )}
                         </>

@@ -61,23 +61,56 @@ def _build_h5_filename(metadata: Dict[str, Any], target_dir: Path) -> str:
     return filename
 
 
+def _clean_name(s: str) -> str:
+    """Safely cleans a string for use as a folder name."""
+    import re
+    if not s: return ""
+    # Replace forbidden Windows characters with a dash
+    s = re.sub(r'[\\/:*?"<>|]', '-', s)
+    # Filter to only allowed characters (alphanumeric, spaces, underscores, dashes, dots, micro symbols)
+    s = re.sub(r'[^a-zA-Z0-9_\-\.μµ ]', '', s)
+    # Remove extra spaces
+    s = " ".join(s.split())
+    return s.strip()
+
+
 def _build_vault_subpath(metadata: Dict[str, Any]) -> str:
     """
-    Global Architecture Data Vault: /{Logbook}/{SampleCode}/{Technique}/{Year}/
+    Global Architecture Data Vault: /{LogbookName}/{SampleCode - SampleName}/{Technique}/{Year}/
     """
-    # 1. Logbook Level (group_id)
-    logbook = metadata.get("group_id", "Default_Logbook")
-    if len(str(logbook)) == 36 and "-" in str(logbook):
-        logbook_folder = f"Logbook_{str(logbook)[:8]}"
+    # 1. Logbook Level
+    logbook_name = metadata.get("logbook_name")
+    if logbook_name:
+        logbook_folder = _clean_name(logbook_name)
     else:
-        logbook_folder = str(logbook)[:30].replace(" ", "_").replace("/", "-")
+        # Fallback to group_id segment if no name provided
+        group_id = metadata.get("group_id", "Default_Logbook")
+        if len(str(group_id)) == 36 and "-" in str(group_id):
+            logbook_folder = f"Logbook_{str(group_id)[:8]}"
+        else:
+            logbook_folder = _clean_name(str(group_id))[:30]
 
-    # 2. Sample Level
-    sample = metadata.get("sample_code") or metadata.get("sample_name") or metadata.get("analyte") or metadata.get("sample_id") or "unknown"
-    if len(str(sample)) == 36 and "-" in str(sample):
-        sample_folder = f"Sample_{str(sample)[:8]}"
+    # 2. Sample Level: [Code] - [Name]
+    code = metadata.get("sample_code") or ""
+    name = metadata.get("sample_name") or metadata.get("analyte") or ""
+    
+    if code and name:
+        sample_folder = _clean_name(f"{code} - {name}")
+    elif code:
+        sample_folder = _clean_name(code)
+    elif name:
+        sample_folder = _clean_name(name)
     else:
-        sample_folder = str(sample)[:30].replace(" ", "_").replace("/", "-")
+        # Emergency Fallback to ID
+        sample_id = metadata.get("sample_id", "unknown")
+        if len(str(sample_id)) == 36 and "-" in str(sample_id):
+            sample_folder = f"Sample_{str(sample_id)[:8]}"
+        else:
+            sample_folder = _clean_name(str(sample_id))[:30]
+
+    # Limit folder name length for safety
+    logbook_folder = logbook_folder[:100] or "Unknown_Logbook"
+    sample_folder = sample_folder[:100] or "Unknown_Sample"
     
     # 3. Technique Level
     technique = metadata.get("technique", "raman").upper()

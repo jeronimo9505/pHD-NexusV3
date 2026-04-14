@@ -13,6 +13,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 
 interface CharacterizationModalProps {
     groupId: string;
+    logbookName: string;
     isOpen: boolean;
     onClose: () => void;
     sample: Sample;
@@ -33,6 +34,7 @@ const CHAR_TYPES = ['Raman', 'AFM', 'SEM', 'UV-Vis', 'X-Ray', 'Other'];
 
 export function CharacterizationModal({
     groupId,
+    logbookName,
     isOpen,
     onClose,
     sample,
@@ -160,6 +162,7 @@ export function CharacterizationModal({
                     sample_id: sample.id,
                     sample_code: sample.sample_code,
                     sample_name: sample.name,
+                    logbook_name: logbookName,
                     analyte,
                     laser_wavelength_nm: laserNm,
                     laser_power_uw: powerUw,

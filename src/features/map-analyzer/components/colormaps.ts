@@ -17,36 +17,24 @@ export function valToRgb(val: number, min: number, max: number, cmap: string): [
     }
     
     // Custom I(2D)/I(G)
+    // Monolayer (Green) vs Multilayer (Red)
     if (cmap === 'custom2DG') {
-        // 0 -> white is handled by the caller or by having 0 min.
-        // We evaluate strictly based on the requested stops:
-        // 0-0.01: white to red
-        // 0.01-0.3: red to orange-red
-        // 0.3-0.5: to orange
-        // 0.5-1.0: orange
-        // 1.0-1.6: yellow
-        // 1.6-2.5: light green
-        // 2.5-3.0: green
-        // 3.0-3.5: dark green
-        if (val <= 0) return [255, 255, 255];
-        if (val <= 0.01) return [255, 0, 0];
-        if (val <= 0.3) return _interpolate([255,0,0], [255,51,0], (val-0.01)/0.29);
-        if (val <= 0.5) return _interpolate([255,51,0], [255,102,0], (val-0.3)/0.2);
-        if (val <= 1.0) return _interpolate([255,102,0], [255,165,0], (val-0.5)/0.5);
-        if (val <= 1.6) return _interpolate([255,165,0], [255,255,0], (val-1.0)/0.6);
-        if (val <= 2.5) return _interpolate([255,255,0], [144,238,144], (val-1.6)/0.9);
-        if (val <= 3.0) return _interpolate([144,238,144], [0,128,0], (val-2.5)/0.5);
-        if (val <= 3.5) return _interpolate([0,128,0], [0,100,0], (val-3.0)/0.5);
-        return [0, 100, 0];
+        if (val <= 0) return [255, 255, 255]; // Null pixels
+        if (norm <= 0.2) return _interpolate([255, 0, 0], [255, 140, 0], norm / 0.2); // Red to Orange
+        if (norm <= 0.35) return _interpolate([255, 140, 0], [255, 255, 0], (norm - 0.2) / 0.15); // Orange to Yellow
+        if (norm <= 0.6) return _interpolate([255, 255, 0], [144, 238, 144], (norm - 0.35) / 0.25); // Yellow to Light Green
+        if (norm <= 0.85) return _interpolate([144, 238, 144], [0, 128, 0], (norm - 0.6) / 0.25); // Light Green to Green
+        if (norm <= 1.0) return _interpolate([0, 128, 0], [0, 80, 0], (norm - 0.85) / 0.15); // Green to Dark Green
+        return [0, 80, 0];
     }
     
     // Custom I(D)/I(G)
     // 0: white, 0.33: light pink, 0.66: red, 1.0: dark red
     if (cmap === 'customDGdefects') {
         if (val <= 0) return [255, 255, 255];
-        if (val <= 0.33) return _interpolate([255,255,255], [255,178,178], val/0.33);
-        if (val <= 0.66) return _interpolate([255,178,178], [255,0,0], (val-0.33)/0.33);
-        if (val <= 1.0) return _interpolate([255,0,0], [51,0,0], (val-0.66)/0.34);
+        if (norm <= 0.33) return _interpolate([255,255,255], [255,178,178], norm/0.33);
+        if (norm <= 0.66) return _interpolate([255,178,178], [255,0,0], (norm-0.33)/0.33);
+        if (norm <= 1.0) return _interpolate([255,0,0], [51,0,0], (norm-0.66)/0.34);
         return [51, 0, 0];
     }
     

@@ -38,6 +38,7 @@ import { RamanWorkspace } from './raman-workspace';
 interface SampleGridProps {
     groupId: string;
     logbookId: string;
+    logbookName: string;
     logbookPrefix: string;
     samples: Sample[];
     fields: SampleFieldConfig[];
@@ -59,6 +60,7 @@ const STATUS_OPTIONS: { value: SampleStatus; label: string; color: string }[] = 
 export function SampleGrid({
     groupId,
     logbookId,
+    logbookName,
     logbookPrefix,
     samples,
     fields,
@@ -713,6 +715,7 @@ export function SampleGrid({
                         sample={editingSample!}
                         initialData={initialCharData}
                         groupId={groupId}
+                        logbookName={logbookName}
                         parameterUnits={parameterUnits}
                         setParameterUnits={setParameterUnits}
                         lastUnits={lastUnits}
@@ -731,6 +734,7 @@ export function SampleGrid({
                         allSamples={tree}
                         onSelectSample={setDetailSample}
                         groupId={groupId}
+                        logbookName={logbookName}
                         fields={fields}
                         onClose={() => { setDetailSample(null); setInitialCharId(null); }}
                         initialCharId={initialCharId || undefined}

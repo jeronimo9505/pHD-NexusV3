@@ -31,6 +31,7 @@ export type IngestRequest = {
     sample_id?: string;
     sample_code?: string;
     sample_name?: string;
+    logbook_name?: string;
     analyte?: string;
     laser_wavelength_nm?: number;
     laser_power_uw?: number;
@@ -107,6 +108,25 @@ export async function fetchRepresentativeSpectrum(
         throw new Error(err.detail || "Could not fetch representative spectrum");
     }
     
+    return res.json();
+}
+
+/**
+ * Fetch list of all folders (logbooks) in the Vault root.
+ */
+export async function fetchVaultLogbooks(vaultRoot: string): Promise<{
+    success: boolean;
+    logbooks: Array<{
+        id: string;
+        name: string;
+        path: string;
+    }>;
+}> {
+    const url = new URL(`${SCIENCE_ENGINE_URL}/api/vault-logbooks`);
+    url.searchParams.set("vault_root", vaultRoot);
+
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error("Could not fetch logbooks");
     return res.json();
 }
 
