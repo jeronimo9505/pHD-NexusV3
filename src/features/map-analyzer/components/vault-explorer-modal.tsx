@@ -45,6 +45,89 @@ interface VaultFile {
     };
 }
 
+// --- Sample Overview Popover ---
+function SampleOverviewPopover({ sample, onClose }: { sample: any; onClose: () => void }) {
+    return (
+        <div
+            className="absolute left-full top-0 ml-3 z-50 w-72 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden animate-in slide-in-from-left-2 duration-200"
+            onClick={e => e.stopPropagation()}
+        >
+            <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-white">
+                <div className="flex items-center justify-between mb-1">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Sample Overview</span>
+                    <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-lg transition-colors">
+                        <X size={12} className="text-slate-400" />
+                    </button>
+                </div>
+                <div className="font-black text-slate-900 text-sm leading-tight">{sample.name || sample.sample_code}</div>
+                {sample.sample_code && (
+                    <span className="mt-1 inline-block text-[10px] font-black text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-lg">
+                        {sample.sample_code}
+                    </span>
+                )}
+            </div>
+            <div className="p-4 space-y-4">
+                {sample.composition?.length > 0 && (
+                    <div>
+                        <div className="flex items-center gap-1.5 mb-2">
+                            <Beaker size={11} className="text-indigo-400" />
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Composition</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                            {sample.composition.map((layer: any, i: number) => (
+                                <div key={i} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1" title={layer.category}>
+                                    <span className="text-[9px] font-black text-indigo-500 uppercase">{layer.code}</span>
+                                    <span className="text-[10px] text-slate-600 font-medium">{layer.value}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                {sample.description && (
+                    <div>
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                            <Tag size={11} className="text-slate-400" />
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Notes</span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 px-3 py-2 rounded-xl border border-slate-100">
+                            {sample.description}
+                        </p>
+                    </div>
+                )}
+                {sample.attributes && Object.keys(sample.attributes).some((k: string) => sample.attributes[k] !== null && sample.attributes[k] !== '') && (
+                    <div>
+                        <div className="flex items-center gap-1.5 mb-2">
+                            <SlidersHorizontal size={11} className="text-slate-400" />
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Attributes</span>
+                        </div>
+                        <div className="space-y-1">
+                            {(Object.entries(sample.attributes) as [string, unknown][])
+                                .filter(([, v]) => v !== null && v !== undefined && v !== '')
+                                .slice(0, 6)
+                                .map(([key, val]) => (
+                                    <div key={key} className="flex items-center justify-between gap-2 text-[10px]">
+                                        <span className="text-slate-400 font-medium capitalize truncate">{key.replace(/_/g, ' ')}</span>
+                                        <span className="font-bold text-slate-700 truncate max-w-[120px]">{String(val)}</span>
+                                    </div>
+                                ))
+                            }
+                        </div>
+                    </div>
+                )}
+                {!sample.composition?.length && !sample.description && !Object.keys(sample.attributes || {}).length && (
+                    <p className="text-[11px] text-slate-400 italic text-center py-4">No additional metadata available.</p>
+                )}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Raman Maps</span>
+                    <span className="text-xs font-black text-indigo-600">
+                        {sample.characterizations?.filter((c: any) => c.type === 'Raman').length || 0}
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 interface VaultExplorerModalProps {
     groupId: string;
     isOpen: boolean;
@@ -88,10 +171,8 @@ export function VaultExplorerModal({
     const [saveName, setSaveName] = useState('');
 
     // Legacy Mode
-    const [isLegacyMode, setIsLegacyMode] = useState(false);
+    const [isLegacyMode, setIsLegacyMode] = useState<boolean>(false);
     const [techniqueFilter, setTechniqueFilter] = useState<string>('all');
-
-    // Sample overview popover
     const [openSampleOverview, setOpenSampleOverview] = useState<string | null>(null);
     const overviewRef = useRef<HTMLDivElement>(null);
 
@@ -413,150 +494,53 @@ export function VaultExplorerModal({
                                                                         <button
                                                                             onClick={() => handleSelectSample(sample)}
                                                                             className={cn(
-                                                                                "w-full text-left px-3 py-2.5 rounded-xl transition-all border",
-                                                                                isSelectedSample 
-                                                                                    ? "bg-white border-indigo-300 shadow-md shadow-indigo-100" 
+                                                                                "w-full text-left px-3 py-2.5 rounded-xl transition-all border pr-8",
+                                                                                isSelectedSample
+                                                                                    ? "bg-white border-indigo-300 shadow-md shadow-indigo-100"
                                                                                     : "hover:bg-indigo-50/50 border-transparent text-slate-500"
                                                                             )}
                                                                         >
                                                                             <div className="flex items-start gap-2.5">
                                                                                 <FlaskConical size={13} className={cn("mt-0.5 shrink-0", isSelectedSample ? "text-indigo-600" : "text-slate-300 group-hover/sample:text-indigo-400")} />
                                                                                 <div className="flex-1 min-w-0">
-                                                                                    {/* Primary: Composition name */}
                                                                                     <div className={cn("text-xs font-bold leading-tight truncate", isSelectedSample ? "text-indigo-900" : "text-slate-700")}>
                                                                                         {sample.name || sample.sample_code}
                                                                                     </div>
-                                                                                    {/* Secondary: code badge + raman indicator */}
                                                                                     <div className="flex items-center gap-1.5 mt-0.5">
                                                                                         {sample.sample_code && (
                                                                                             <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-md">
                                                                                                 {sample.sample_code}
                                                                                             </span>
                                                                                         )}
-                                                                                        {sample.characterizations?.filter((c:any)=>c.type==='Raman').length > 0 && (
+                                                                                        {(sample.characterizations?.filter((c: any) => c.type === 'Raman').length ?? 0) > 0 && (
                                                                                             <span className="text-[9px] font-bold text-slate-400">
-                                                                                                {sample.characterizations.filter((c:any)=>c.type==='Raman').length} Raman
+                                                                                                {sample.characterizations.filter((c: any) => c.type === 'Raman').length} Raman
                                                                                             </span>
                                                                                         )}
                                                                                     </div>
                                                                                 </div>
                                                                             </div>
                                                                         </button>
-
-                                                                        {/* Info / Overview Button */}
-                                                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
+                                                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10" ref={isOverviewOpen ? overviewRef : null}>
                                                                             <button
-                                                                                onClick={(e) => {
-                                                                                    e.stopPropagation();
-                                                                                    setOpenSampleOverview(prev => prev === sample.id ? null : sample.id);
-                                                                                }}
+                                                                                onClick={(e) => { e.stopPropagation(); setOpenSampleOverview(prev => prev === sample.id ? null : sample.id); }}
                                                                                 className={cn(
                                                                                     "p-1.5 rounded-lg transition-all",
-                                                                                    isOverviewOpen
-                                                                                        ? "bg-indigo-100 text-indigo-600"
-                                                                                        : "text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 opacity-0 group-hover/sample:opacity-100"
+                                                                                    isOverviewOpen ? "bg-indigo-100 text-indigo-600" : "text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 opacity-0 group-hover/sample:opacity-100"
                                                                                 )}
                                                                                 title="Sample Overview"
                                                                             >
                                                                                 <Info size={12} />
                                                                             </button>
-
-                                                                            {/* Overview Popover */}
                                                                             {isOverviewOpen && (
-                                                                                <div
-                                                                                    ref={overviewRef}
-                                                                                    className="absolute left-full top-0 ml-3 z-50 w-72 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden animate-in slide-in-from-left-2 duration-200"
-                                                                                    onClick={e => e.stopPropagation()}
-                                                                                >
-                                                                                    {/* Header */}
-                                                                                    <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-white">
-                                                                                        <div className="flex items-center justify-between mb-1">
-                                                                                            <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Sample Overview</span>
-                                                                                            <button onClick={() => setOpenSampleOverview(null)} className="p-1 hover:bg-slate-100 rounded-lg transition-colors">
-                                                                                                <X size={12} className="text-slate-400" />
-                                                                                            </button>
-                                                                                        </div>
-                                                                                        <div className="font-black text-slate-900 text-sm leading-tight">{sample.name || sample.sample_code}</div>
-                                                                                        {sample.sample_code && (
-                                                                                            <span className="mt-1 inline-block text-[10px] font-black text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-lg">
-                                                                                                {sample.sample_code}
-                                                                                            </span>
-                                                                                        )}
-                                                                                    </div>
-
-                                                                                    <div className="p-4 space-y-4">
-                                                                                        {/* Composition Stack */}
-                                                                                        {sample.composition?.length > 0 && (
-                                                                                            <div>
-                                                                                                <div className="flex items-center gap-1.5 mb-2">
-                                                                                                    <Beaker size={11} className="text-indigo-400" />
-                                                                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Composition</span>
-                                                                                                </div>
-                                                                                                <div className="flex flex-wrap gap-1.5">
-                                                                                                    {sample.composition.map((layer: any, i: number) => (
-                                                                                                        <div key={i} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1" title={layer.category}>
-                                                                                                            <span className="text-[9px] font-black text-indigo-500 uppercase">{layer.code}</span>
-                                                                                                            <span className="text-[10px] text-slate-600 font-medium">{layer.value}</span>
-                                                                                                        </div>
-                                                                                                    ))}
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        )}
-
-                                                                                        {/* Description */}
-                                                                                        {sample.description && (
-                                                                                            <div>
-                                                                                                <div className="flex items-center gap-1.5 mb-1.5">
-                                                                                                    <Tag size={11} className="text-slate-400" />
-                                                                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Notes</span>
-                                                                                                </div>
-                                                                                                <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 px-3 py-2 rounded-xl border border-slate-100">
-                                                                                                    {sample.description}
-                                                                                                </p>
-                                                                                            </div>
-                                                                                        )}
-
-                                                                                        {/* Key Attributes */}
-                                                                                        {sample.attributes && Object.keys(sample.attributes).length > 0 && (
-                                                                                            <div>
-                                                                                                <div className="flex items-center gap-1.5 mb-2">
-                                                                                                    <SlidersHorizontal size={11} className="text-slate-400" />
-                                                                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Attributes</span>
-                                                                                                </div>
-                                                                                                <div className="space-y-1">
-                                                                                                    {Object.entries(sample.attributes)
-                                                                                                        .filter(([, v]) => v !== null && v !== undefined && v !== '')
-                                                                                                        .slice(0, 6)
-                                                                                                        .map(([key, val]) => (
-                                                                                                            <div key={key} className="flex items-center justify-between gap-2 text-[10px]">
-                                                                                                                <span className="text-slate-400 font-medium capitalize truncate">{key.replace(/_/g, ' ')}</span>
-                                                                                                                <span className="font-bold text-slate-700 truncate max-w-[120px]">{String(val)}</span>
-                                                                                                            </div>
-                                                                                                        ))
-                                                                                                    }
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        )}
-
-                                                                                        {/* No data fallback */}
-                                                                                        {!sample.composition?.length && !sample.description && !Object.keys(sample.attributes || {}).length && (
-                                                                                            <p className="text-[11px] text-slate-400 italic text-center py-4">No additional metadata available.</p>
-                                                                                        )}
-
-                                                                                        {/* Raman measurements count */}
-                                                                                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                                                                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Raman Maps</span>
-                                                                                            <span className="text-xs font-black text-indigo-600">
-                                                                                                {sample.characterizations?.filter((c:any) => c.type === 'Raman').length || 0}
-                                                                                            </span>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                </div>
+                                                                                <SampleOverviewPopover
+                                                                                    sample={sample}
+                                                                                    onClose={() => setOpenSampleOverview(null)}
+                                                                                />
                                                                             )}
                                                                         </div>
                                                                     </div>
-                                                                </div>
-                                                            );
+                                                                );
                                                             })}
                                                             {dbSamples.length === 0 && !loading && (
                                                                 <div className="text-[10px] font-bold text-slate-300 italic py-4">No linked samples</div>
@@ -719,7 +703,7 @@ export function VaultExplorerModal({
                                             </div>
                                             <h4 className="text-lg font-black text-slate-900 tracking-tight mb-2 uppercase">{ws.name}</h4>
                                             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">
-                                                {ws.files?.length || 0} Maps • {format(new Date(ws.updated_at), 'MMM d, yyyy')}
+                                                {ws.files?.length || 0} Maps ÔÇó {format(new Date(ws.updated_at), 'MMM d, yyyy')}
                                             </p>
                                             
                                             <div className="flex-1 space-y-2 mb-8">
