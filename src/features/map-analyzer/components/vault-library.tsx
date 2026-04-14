@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { 
     RefreshCw, FileText, Database, Map, Search, 
     ChevronDown, ChevronRight, FlaskConical, 
-    Calendar, Layers, X, Trash2, Zap
+    Calendar, Layers, X, Trash2, Zap, Info, 
+    Tag, Beaker, SlidersHorizontal
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -27,8 +28,130 @@ interface SampleGroup {
     name: string;
     displayName: string;
     sampleCode?: string;
+    composition?: { category: string; value: string; code: string }[];
+    description?: string;
+    status?: string;
+    attributes?: Record<string, any>;
     latestDate: string;
     files: VaultFile[];
+}
+
+// --- Condensed Sample Overview Popover ---
+function SampleOverviewPopover({ group, onClose }: { group: SampleGroup, onClose: () => void }) {
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClick = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) {
+                onClose();
+            }
+        };
+        document.addEventListener('mousedown', handleClick);
+        return () => document.removeEventListener('mousedown', handleClick);
+    }, [onClose]);
+
+    const compositionLayers = group.composition?.length
+        ? group.composition
+        : [];
+
+    const attributeEntries = group.attributes
+        ? Object.entries(group.attributes).filter(([, v]) => v !== null && v !== undefined && v !== '')
+        : [];
+
+    return (
+        <div
+            ref={ref}
+            className="absolute left-full top-0 ml-3 z-50 w-72 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden animate-in slide-in-from-left-2 duration-200"
+            onClick={e => e.stopPropagation()}
+        >
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-white">
+                <div className="flex items-center justify-between mb-1">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Sample Overview</span>
+                    <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-lg transition-colors">
+                        <X size={12} className="text-slate-400" />
+                    </button>
+                </div>
+                <div className="font-black text-slate-900 text-sm leading-tight">{group.displayName}</div>
+                {group.sampleCode && (
+                    <span className="mt-1 inline-block text-[10px] font-black text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-lg">
+                        {group.sampleCode}
+                    </span>
+                )}
+            </div>
+
+            <div className="p-4 space-y-4">
+                {/* Composition Stack */}
+                {compositionLayers.length > 0 && (
+                    <div>
+                        <div className="flex items-center gap-1.5 mb-2">
+                            <Beaker size={11} className="text-indigo-400" />
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Composition</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                            {compositionLayers.map((layer, i) => (
+                                <div
+                                    key={i}
+                                    className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1"
+                                    title={layer.category}
+                                >
+                                    <span className="text-[9px] font-black text-indigo-500 uppercase">{layer.code}</span>
+                                    <span className="text-[10px] text-slate-600 font-medium">{layer.value}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Description */}
+                {group.description && (
+                    <div>
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                            <Tag size={11} className="text-slate-400" />
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Notes</span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 px-3 py-2 rounded-xl border border-slate-100">
+                            {group.description}
+                        </p>
+                    </div>
+                )}
+
+                {/* Key Attributes */}
+                {attributeEntries.length > 0 && (
+                    <div>
+                        <div className="flex items-center gap-1.5 mb-2">
+                            <SlidersHorizontal size={11} className="text-slate-400" />
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Attributes</span>
+                        </div>
+                        <div className="space-y-1">
+                            {attributeEntries.slice(0, 6).map(([key, val]) => (
+                                <div key={key} className="flex items-center justify-between gap-2 text-[10px]">
+                                    <span className="text-slate-400 font-medium capitalize truncate">{key.replace(/_/g, ' ')}</span>
+                                    <span className="font-bold text-slate-700 truncate max-w-[120px]">{String(val)}</span>
+                                </div>
+                            ))}
+                            {attributeEntries.length > 6 && (
+                                <div className="text-[9px] text-indigo-400 font-bold pt-1">
+                                    +{attributeEntries.length - 6} more attributes
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* No data fallback */}
+                {compositionLayers.length === 0 && !group.description && attributeEntries.length === 0 && (
+                    <p className="text-[11px] text-slate-400 italic text-center py-4">No additional metadata available.</p>
+                )}
+
+                {/* Measurement count */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Loaded Maps</span>
+                    <span className="text-xs font-black text-indigo-600">{group.files.length}</span>
+                </div>
+            </div>
+        </div>
+    );
 }
 
 export function VaultLibrary({ 
@@ -52,6 +175,7 @@ export function VaultLibrary({
 }) {
     const [search, setSearch] = useState('');
     const [expandedSamples, setExpandedSamples] = useState<Record<string, boolean>>({});
+    const [openOverview, setOpenOverview] = useState<string | null>(null);
 
     const toggleSample = (name: string) => {
         setExpandedSamples(prev => ({ ...prev, [name]: !prev[name] }));
@@ -76,8 +200,12 @@ export function VaultLibrary({
 
                 acc[sName] = { 
                     name: sName, 
-                    displayName: dbMatch ? dbMatch.name : sName,
+                    displayName: dbMatch?.name || sName,
                     sampleCode: dbMatch?.sample_code,
+                    composition: dbMatch?.composition || [],
+                    description: dbMatch?.description || '',
+                    status: dbMatch?.status,
+                    attributes: dbMatch?.attributes || {},
                     files: [], 
                     latestDate: file.measured_at || file.created_at || '' 
                 };
@@ -155,31 +283,68 @@ export function VaultLibrary({
                     <div className="space-y-1">
                         {groupedData.map(group => (
                             <div key={group.name} className="flex flex-col">
-                                <button 
+                                {/* Sample Header Row */}
+                                <div 
+                                    className="w-full flex items-center gap-2 p-3 hover:bg-slate-50 rounded-2xl transition-all group border border-transparent hover:border-slate-100 cursor-pointer"
                                     onClick={() => toggleSample(group.name)}
-                                    className="w-full flex items-center gap-3 p-3 hover:bg-slate-50 rounded-2xl transition-all group border border-transparent hover:border-slate-100"
                                 >
                                     <div className={cn(
-                                        "p-1.5 rounded-lg transition-colors",
+                                        "p-1.5 rounded-lg transition-colors shrink-0",
                                         expandedSamples[group.name] ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-400 group-hover:bg-slate-200"
                                     )}>
                                         <FlaskConical size={14} />
                                     </div>
                                     <div className="flex-1 text-left min-w-0">
-                                        <div className="text-xs font-bold text-slate-900 truncate">
+                                        {/* Primary: Composition Name */}
+                                        <div className="text-xs font-bold text-slate-900 truncate leading-tight">
                                             {group.displayName}
                                         </div>
-                                        {group.sampleCode && (
-                                            <div className="text-[9px] font-bold text-indigo-500 uppercase tracking-tighter">
-                                                {group.sampleCode}
-                                            </div>
+                                        {/* Secondary: Code badge + file count */}
+                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                            {group.sampleCode && (
+                                                <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-md">
+                                                    {group.sampleCode}
+                                                </span>
+                                            )}
+                                            <span className="text-[9px] font-bold text-slate-400">
+                                                {group.files.length} map{group.files.length !== 1 ? 's' : ''}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Info button (Quick Overview) */}
+                                    <div className="relative shrink-0">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setOpenOverview(prev => prev === group.name ? null : group.name);
+                                            }}
+                                            className={cn(
+                                                "p-1.5 rounded-lg transition-all",
+                                                openOverview === group.name
+                                                    ? "bg-indigo-100 text-indigo-600"
+                                                    : "text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 opacity-0 group-hover:opacity-100"
+                                            )}
+                                            title="Quick Sample Overview"
+                                        >
+                                            <Info size={13} />
+                                        </button>
+
+                                        {/* Overview Popover */}
+                                        {openOverview === group.name && (
+                                            <SampleOverviewPopover
+                                                group={group}
+                                                onClose={() => setOpenOverview(null)}
+                                            />
                                         )}
                                     </div>
+
+                                    {/* Expand arrow */}
                                     {expandedSamples[group.name] ? 
-                                        <ChevronDown size={14} className="text-slate-400" /> : 
-                                        <ChevronRight size={14} className="text-slate-400" />
+                                        <ChevronDown size={14} className="text-slate-400 shrink-0" /> : 
+                                        <ChevronRight size={14} className="text-slate-400 shrink-0" />
                                     }
-                                </button>
+                                </div>
 
                                 {expandedSamples[group.name] && (
                                     <div className="mt-1 mb-2 space-y-0.5 pl-4 ml-4 border-l-2 border-slate-100">

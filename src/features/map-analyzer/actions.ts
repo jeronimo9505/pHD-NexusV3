@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 
 export async function getRamanWorkspacesAction(groupId: string) {
     const supabase = await createClient();
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
         .from('raman_workspaces')
         .select('*')
         .eq('group_id', groupId)
@@ -43,14 +43,14 @@ export async function saveRamanWorkspaceAction(input: {
 
     let res;
     if (input.id) {
-        res = await supabase
+        res = await (supabase as any)
             .from('raman_workspaces')
             .update(payload)
             .eq('id', input.id)
             .select()
             .single();
     } else {
-        res = await supabase
+        res = await (supabase as any)
             .from('raman_workspaces')
             .insert(payload)
             .select()
@@ -68,7 +68,7 @@ export async function saveRamanWorkspaceAction(input: {
 
 export async function deleteRamanWorkspaceAction(id: string, groupId: string) {
     const supabase = await createClient();
-    const { error } = await supabase
+    const { error } = await (supabase as any)
         .from('raman_workspaces')
         .delete()
         .eq('id', id);
