@@ -89,6 +89,7 @@ export default async function SamplesPage(props: SamplesPageProps) {
                     <SampleGrid
                         groupId={groupId}
                         logbookId={activeLogbookId}
+                        logbookName={activeLogbook?.name || ''}
                         logbookPrefix={activeLogbook?.prefix || 'S'}
                         samples={samples}
                         fields={fields}

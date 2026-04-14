@@ -39,6 +39,7 @@ class IngestRequest(BaseModel):
     sample_id: Optional[str] = None
     sample_code: Optional[str] = None
     sample_name: Optional[str] = None
+    logbook_name: Optional[str] = None
     analyte: Optional[str] = None
     laser_wavelength_nm: Optional[int] = None
     laser_power_uw: Optional[float] = None
@@ -104,6 +105,7 @@ async def ingest_file(request: IngestRequest):
     # Build metadata dict
     full_metadata = {
         "group_id": request.group_id,
+        "logbook_name": request.logbook_name or "",
         "sample_id": request.sample_id or "",
         "sample_code": request.sample_code or "",
         "sample_name": request.sample_name or "",
@@ -233,33 +235,58 @@ def get_representative_spectrum(request: RepresentativeSpectrumRequest):
     return RepresentativeSpectrumResponse(success=True, message="Calculated median spectrum", data=out_data)
 
 
+@app.get("/api/vault-logbooks")
+def list_vault_logbooks(vault_root: str):
+    """
+    Returns a list of folders at the root of the vault. 
+    Each folder usually represents a Logbook_ID or group.
+    """
+    root_path = Path(vault_root)
+    if not root_path.exists() or not root_path.is_dir():
+        return {"success": False, "logbooks": []}
+    
+    logbooks = []
+    for item in root_path.iterdir():
+        if item.is_dir() and not item.name.startswith("."):
+            logbooks.append({
+                "id": item.name,
+                "name": item.name.replace("Logbook_", "").replace("_", " "),
+                "path": item.name
+            })
+    
+    # Sort alphabetically
+    logbooks.sort(key=lambda x: x["name"])
+    return {"success": True, "logbooks": logbooks}
+
+
 @app.get("/api/vault-files")
 def list_vault_files(vault_root: str, group_id: str = None):
     """
     Recursively scans the vault_root for .h5 files, returning a list of paths and metadata.
-    Optionally filters by group_id in the path.
+    If group_id is provided, it only searches inside that specific logbook folder.
     """
     import h5py
     root_path = Path(vault_root)
-    if not root_path.exists() or not root_path.is_dir():
+    
+    # Optimization: if group_id is provided, we only scan that subdirectory
+    search_path = root_path
+    if group_id:
+        target = root_path / group_id
+        if target.exists() and target.is_dir():
+            search_path = target
+
+    if not search_path.exists() or not search_path.is_dir():
         return {"success": False, "files": []}
 
     files = []
-    # If a very large vault, this might be slow, but typically fine for local use.
-    for p in root_path.rglob("*.h5"):
-        # If group_id is provided, try to pre-filter by path segment
-        # format is typically VaultRoot/Logbook_ID/Sample/Raman/Year/file.h5
-        if group_id and group_id not in str(p):
-            # Still need to check if group_id matches inside the h5 metadata if path doesn't strictly have it?
-            # Actually, let's just parse it and check inside to be safe
-            pass
-            
+    # Use rglob for recursive finding
+    for p in search_path.rglob("*.h5"):
         try:
             with h5py.File(p, "r") as f:
                 meta = dict(f.attrs)
-                # Filter by group_id
-                if group_id and meta.get("group_id") != group_id:
-                    continue
+                # We trust the folder structure for "Logbook filtering"
+                # If a group_id is provided, it means we already filtered the search_path to that folder.
+                # So any file found here belongs to this group/logbook.
                     
                 rel_path = p.relative_to(root_path).as_posix()
                 

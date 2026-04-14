@@ -17,6 +17,7 @@ import { FolderOpen } from 'lucide-react';
 interface SampleDetailSheetProps {
     sample: Sample | null;
     groupId: string;
+    logbookName: string;
     fields: SampleFieldConfig[];
     onClose: () => void;
     parameterUnits: Record<string, string[]>;
@@ -32,7 +33,7 @@ interface SampleDetailSheetProps {
 }
 
 export function SampleDetailSheet({
-    sample, groupId, fields, onClose,
+    sample, groupId, logbookName, fields, onClose,
     parameterUnits, setParameterUnits, lastUnits, setLastUnits,
     parameterOrder, setParameterOrder, driveSettings, initialCharId,
     allSamples = [], onSelectSample
@@ -823,6 +824,7 @@ export function SampleDetailSheet({
 
             <CharacterizationModal
                 groupId={groupId}
+                logbookName={logbookName}
                 isOpen={isCharModalOpen}
                 onClose={handleCloseModal}
                 sample={sample}

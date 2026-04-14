@@ -69,26 +69,37 @@ export function SpectrumInspector({ vaultRoot, h5Path, pixelIndex, onRangeSelect
     if (!h5Path) return null;
 
     return (
-        <div className="w-full h-full flex flex-col p-2 relative">
-            <div className="flex items-center justify-between mb-2 px-2">
-                <div className="text-xs font-semibold text-slate-400">
-                    Spectrum at Index {pixelIndex}
+        <div className="w-full h-full flex flex-col p-4 relative bg-white">
+            <div className="flex items-center justify-between mb-4 px-2">
+                <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                    <div className="text-xs font-bold text-slate-900">
+                        Spectrum Area — <span className="text-slate-400">Index {pixelIndex}</span>
+                    </div>
                 </div>
                 <div className="flex gap-2">
                     <button 
                         onClick={resetZoom}
-                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded"
+                        className="text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg transition-all border border-slate-200"
                     >
-                        Reset Region
+                        Reset Range
+                    </button>
+                    <button 
+                        className="text-[10px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-3 py-1.5 rounded-lg transition-all border border-indigo-100"
+                    >
+                        Save Data
                     </button>
                 </div>
             </div>
             
             <div className="flex-1 relative pb-2 min-h-0" style={{ userSelect: 'none' }}>
                 {loading && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/50">
-                        <div className="w-24 h-1 bg-slate-800 overflow-hidden rounded-full">
-                            <div className="h-full bg-purple-500 w-1/2 animate-pulse" />
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/50 backdrop-blur-sm">
+                        <div className="flex flex-col items-center gap-2">
+                            <div className="w-24 h-1 bg-slate-100 overflow-hidden rounded-full">
+                                <div className="h-full bg-indigo-500 w-1/2 animate-pulse" />
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Loading Spectra</span>
                         </div>
                     </div>
                 )}
@@ -102,25 +113,34 @@ export function SpectrumInspector({ vaultRoot, h5Path, pixelIndex, onRangeSelect
                             onMouseMove={(e: any) => { if (refAreaLeft && e && e.activeLabel) setRefAreaRight(Number(e.activeLabel)) }}
                             onMouseUp={zoom}
                         >
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                             <XAxis 
                                 dataKey="x" 
                                 type="number"
                                 domain={['dataMin', 'dataMax']}
                                 tickFormatter={(val) => val.toFixed(0)}
-                                tick={{ fontSize: 10, fill: '#64748b' }}
-                                axisLine={{ stroke: '#334155' }}
+                                tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }}
+                                axisLine={{ stroke: '#e2e8f0' }}
+                                tickLine={{ stroke: '#e2e8f0' }}
                             />
                             <YAxis 
                                 type="number"
                                 domain={['auto', 'auto']}
                                 tickFormatter={(val) => (val > 1000 ? `${(val/1000).toFixed(1)}k` : val.toFixed(0))}
-                                tick={{ fontSize: 10, fill: '#64748b' }}
+                                tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }}
                                 axisLine={false}
                                 tickLine={false}
                             />
                             <Tooltip 
-                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', fontSize: '11px', color: '#f8fafc' }}
+                                contentStyle={{ 
+                                    backgroundColor: '#ffffff', 
+                                    borderColor: '#e2e8f0', 
+                                    borderRadius: '12px',
+                                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                                    fontSize: '11px', 
+                                    color: '#0f172a',
+                                    fontWeight: 'bold'
+                                }}
                                 labelFormatter={(val: number) => `${val.toFixed(1)} cm⁻¹`}
                                 formatter={(val: number) => [val.toFixed(2), 'Intensity']}
                             />
@@ -128,13 +148,13 @@ export function SpectrumInspector({ vaultRoot, h5Path, pixelIndex, onRangeSelect
                                 type="linear" 
                                 dataKey="y" 
                                 stroke="#f43f5e" 
-                                strokeWidth={1.5}
+                                strokeWidth={2}
                                 dot={false} 
                                 isAnimationActive={false}
                             />
                             
                             {refAreaLeft && refAreaRight ? (
-                                <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#a855f7" fillOpacity={0.2} />
+                                <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#6366f1" fillOpacity={0.1} />
                             ) : null}
                         </LineChart>
                     </ResponsiveContainer>

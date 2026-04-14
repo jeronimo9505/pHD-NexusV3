@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { fetchGrapheneBands } from '@/lib/desktop';
-import { Settings, Save, AlertCircle } from 'lucide-react';
+import { Settings, Save, AlertCircle, RefreshCw, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { valToRgb, getCssGradient } from './colormaps';
 
@@ -11,14 +12,17 @@ interface GrapheneProps {
     h5Path: string;
     mapWidth: number;
     mapHeight: number;
+    stepSize?: number;
     nSpectra: number;
     selectedPixelIndex: number;
-    onPixelSelect: (idx: number) => void;
     onToggleStandard?: () => void;
+    onUpdateDimensions?: (w: number, h: number, step?: number) => void;
+    isDismissed?: boolean;
+    onDismiss?: () => void;
 }
 
 export function GrapheneCanvasGrid({
-    vaultRoot, h5Path, mapWidth, mapHeight, nSpectra, selectedPixelIndex, onPixelSelect, onToggleStandard
+    vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1.0, nSpectra, selectedPixelIndex, onPixelSelect, onToggleStandard, onUpdateDimensions, isDismissed, onDismiss
 }: GrapheneProps) {
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(false);
@@ -26,10 +30,28 @@ export function GrapheneCanvasGrid({
     // Dimension Overrides
     const [wOverride, setWOverride] = useState(mapWidth);
     const [hOverride, setHOverride] = useState(mapHeight);
+    const [stepOverride, setStepOverride] = useState(stepSize);
+    const [actualN, setActualN] = useState(nSpectra);
     const [showSettings, setShowSettings] = useState(false);
+    const [bannerDismissed, setBannerDismissed] = useState(false);
 
-    const w = wOverride > 0 ? wOverride : Math.ceil(Math.sqrt(nSpectra));
-    const h = hOverride > 0 ? hOverride : Math.ceil(nSpectra / w);
+    // Sync local state when props change
+    useEffect(() => {
+        setWOverride(mapWidth);
+        setHOverride(mapHeight);
+        setStepOverride(stepSize);
+    }, [mapWidth, mapHeight, stepSize]);
+
+    // Auto-Correct logic
+    const isMismatch = mapWidth !== 0 && (wOverride * hOverride) !== actualN && actualN > 0;
+    const isMissingMetadata = mapWidth === 0 && mapHeight === 0;
+    
+    const safeN = actualN > 0 ? actualN : 1;
+    const w = Math.max(1, wOverride > 0 && (!isMismatch || isMissingMetadata) ? wOverride : Math.ceil(Math.sqrt(safeN)));
+    const h = Math.max(1, hOverride > 0 && (!isMismatch || isMissingMetadata) ? hOverride : Math.ceil(safeN / w));
+
+    const isAutoDetectedPerfect = isMissingMetadata && (w * h === actualN);
+    const showBanner = (isMismatch || (isMissingMetadata && !isAutoDetectedPerfect)) && !loading && actualN > 0 && !bannerDismissed && !isDismissed;
 
     const loadData = useCallback(async () => {
         if (!vaultRoot || !h5Path) return;
@@ -41,6 +63,9 @@ export function GrapheneCanvasGrid({
             });
             if (res.success) {
                 setData(res);
+                if (res.n_spectra) {
+                    setActualN(res.n_spectra);
+                }
             }
         } catch (err: any) {
             toast.error(err.message || 'Failed to analyze graphene bands');
@@ -48,6 +73,15 @@ export function GrapheneCanvasGrid({
             setLoading(false);
         }
     }, [vaultRoot, h5Path]);
+
+    const handleSaveDimensions = () => {
+        if (onUpdateDimensions) {
+            onUpdateDimensions(wOverride, hOverride, stepOverride);
+        }
+        setShowSettings(false);
+        setBannerDismissed(true);
+        toast.success(`Grid updated: ${wOverride}x${hOverride} @ ${stepOverride}µm/px`);
+    };
 
     useEffect(() => {
         loadData();
@@ -64,7 +98,7 @@ export function GrapheneCanvasGrid({
 
         if (x >= 0 && x < w && y >= 0 && y < h) {
             const index = y * w + x;
-            if (index < nSpectra) {
+            if (index < actualN) {
                 onPixelSelect(index);
             }
         }
@@ -72,16 +106,19 @@ export function GrapheneCanvasGrid({
 
     if (loading) {
         return (
-            <div className="flex-1 w-full h-full flex items-center justify-center bg-black/40 relative z-10 flex-col gap-4">
-                <div className="animate-spin text-sky-500 text-3xl">⟳</div>
-                <div className="text-sky-400 font-semibold text-sm">Computing Graphene Tensors...</div>
+            <div className="flex-1 w-full h-full flex flex-col items-center justify-center bg-slate-50/50 backdrop-blur-sm z-30 gap-4">
+                <div className="flex flex-col items-center gap-3">
+                    <RefreshCw className="w-10 h-10 text-indigo-500 animate-spin" />
+                    <div className="text-slate-900 font-extrabold text-sm tracking-tight">Computing Graphene Tensors...</div>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Scientific Analysis in progress</p>
+                </div>
             </div>
         );
     }
 
     if (!data) {
         return (
-            <div className="flex-1 w-full h-full flex items-center justify-center bg-white text-slate-500 text-sm">
+            <div className="flex-1 w-full h-full flex items-center justify-center bg-white text-slate-400 text-xs font-bold uppercase tracking-widest">
                 No Graphene data computed yet
             </div>
         );
@@ -95,7 +132,12 @@ export function GrapheneCanvasGrid({
                     <span className="text-sm font-semibold text-sky-600">
                         Graphene Bands Mode
                     </span>
-                    <span className="text-xs text-slate-500">({w} x {h})</span>
+                    <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase",
+                        isMismatch ? "bg-amber-100 text-amber-700 animate-pulse" : "text-slate-500"
+                    )}>
+                        ({w} x {h} @ {stepSize}µm)
+                    </span>
                 </div>
 
                 <div className="flex gap-2 pointer-events-auto">
@@ -113,6 +155,115 @@ export function GrapheneCanvasGrid({
                 </div>
             </div>
 
+            {/* Config Overlay (Graphene Mode) */}
+            {showSettings && (
+                <div className="absolute top-16 right-4 bg-white border border-slate-200 p-6 rounded-[24px] shadow-2xl z-30 w-72 pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-200">
+                    <div className="flex items-center justify-between mb-4">
+                        <h4 className="font-bold text-slate-900 flex items-center gap-2">
+                            <Settings size={16} className="text-indigo-500" />
+                            Grid Parameters
+                        </h4>
+                        <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
+                            <X size={16} />
+                        </button>
+                    </div>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Grid Width (spectra)</label>
+                            <input 
+                                type="number" 
+                                value={wOverride} 
+                                onChange={(e) => setWOverride(parseInt(e.target.value) || 0)}
+                                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-bold text-slate-900 transition-all font-mono"
+                                placeholder="Auto-detect"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Grid Height (spectra)</label>
+                            <input 
+                                type="number" 
+                                value={hOverride} 
+                                onChange={(e) => setHOverride(parseInt(e.target.value) || 0)}
+                                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-bold text-slate-900 transition-all font-mono"
+                                placeholder="Auto-detect"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Step Size (µm / spectrum)</label>
+                            <input 
+                                type="number" 
+                                step="0.1"
+                                value={stepOverride} 
+                                onChange={(e) => setStepOverride(parseFloat(e.target.value) || 1.0)}
+                                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-bold text-slate-900 transition-all font-mono"
+                            />
+                        </div>
+                        <div className="pt-2 flex justify-end">
+                            <button onClick={handleSaveDimensions} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold transition-all shadow-lg shadow-indigo-100">
+                                <Save size={16} /> Sync Layout
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Mismatch/Missing Metadata Warning */}
+            {showBanner && (
+                <div className={cn(
+                    "absolute top-16 left-4 right-4 flex items-center justify-between border p-3 rounded-2xl z-20 shadow-lg animate-in slide-in-from-top-2 pointer-events-auto",
+                    isMissingMetadata ? "bg-indigo-50 border-indigo-200" : "bg-amber-50 border-amber-200"
+                )}>
+                    <div className="flex items-center gap-3">
+                        <div className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center",
+                            isMissingMetadata ? "bg-indigo-100 text-indigo-600" : "bg-amber-100 text-amber-600"
+                        )}>
+                            <AlertCircle size={18} />
+                        </div>
+                        <div>
+                            <div className={cn(
+                                "text-xs font-bold leading-none mb-1",
+                                isMissingMetadata ? "text-indigo-900" : "text-amber-900"
+                            )}>
+                                {isMissingMetadata ? "Auto-Detecting Grid Layout" : "Dimension Mismatch Detected"}
+                            </div>
+                            <p className={cn(
+                                "text-[10px] font-medium",
+                                isMissingMetadata ? "text-indigo-700" : "text-amber-700"
+                            )}>
+                                {isMissingMetadata 
+                                    ? `Found ${actualN} spectra. Using ${w}×${h} square grid.` 
+                                    : `File contains ${actualN} spectra, but metadata says ${mapWidth}×${mapHeight}. Switched to ${w}×${h} square grid.`
+                                }
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={() => setShowSettings(true)}
+                            className={cn(
+                                "px-3 py-1.5 bg-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border pointer-events-auto",
+                                isMissingMetadata ? "hover:bg-indigo-100 text-indigo-700 border-indigo-200" : "hover:bg-amber-100 text-amber-700 border-amber-200"
+                            )}
+                        >
+                            Adjust Manually
+                        </button>
+                        <button 
+                            onClick={() => {
+                                setBannerDismissed(true);
+                                if (onDismiss) onDismiss();
+                            }}
+                            className={cn(
+                                "p-1.5 rounded-lg transition-all",
+                                isMissingMetadata ? "text-indigo-400 hover:bg-indigo-100" : "text-amber-400 hover:bg-amber-100"
+                            )}
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Canvas Grid Area */}
             <div className="flex-1 w-full h-full p-2 pt-14 overflow-auto custom-scrollbar">
                <div className="grid grid-cols-3 grid-rows-2 gap-4 w-full h-full min-h-[600px] place-items-stretch">
@@ -120,7 +271,7 @@ export function GrapheneCanvasGrid({
                     <RenderCanvas 
                         title="D Band Intensity" 
                         dataArr={data.map_D} 
-                        w={w} h={h} nSpectra={nSpectra} cmap="Reds" 
+                        w={w} h={h} nSpectra={actualN} stepSize={stepSize} cmap="Reds" 
                         selectedPixelIndex={selectedPixelIndex} 
                         onClick={handleCanvasClick} 
                         vmin={0} vmax={null}
@@ -130,7 +281,7 @@ export function GrapheneCanvasGrid({
                     <RenderCanvas 
                         title="G Band Intensity" 
                         dataArr={data.map_G} 
-                        w={w} h={h} nSpectra={nSpectra} cmap="Greens" 
+                        w={w} h={h} nSpectra={actualN} stepSize={stepSize} cmap="Greens" 
                         selectedPixelIndex={selectedPixelIndex} 
                         onClick={handleCanvasClick}
                         vmin={0} vmax={null} 
@@ -140,7 +291,7 @@ export function GrapheneCanvasGrid({
                     <RenderCanvas 
                         title="2D Band Intensity" 
                         dataArr={data.map_2D} 
-                        w={w} h={h} nSpectra={nSpectra} cmap="Blues" 
+                        w={w} h={h} nSpectra={actualN} stepSize={stepSize} cmap="Blues" 
                         selectedPixelIndex={selectedPixelIndex} 
                         onClick={handleCanvasClick} 
                         vmin={0} vmax={null}
@@ -152,7 +303,7 @@ export function GrapheneCanvasGrid({
                             title="I(2D)/I(G)" 
                             subtitle="multilayer→monolayer"
                             dataArr={data.ratio_2D_G} 
-                            w={w} h={h} nSpectra={nSpectra} cmap="custom2DG" 
+                            w={w} h={h} nSpectra={actualN} stepSize={stepSize} cmap="custom2DG" 
                             selectedPixelIndex={selectedPixelIndex} 
                             onClick={handleCanvasClick} 
                             vmin={0} vmax={3.5}
@@ -170,7 +321,7 @@ export function GrapheneCanvasGrid({
                             title="I(D)/I(G)" 
                             subtitle=""
                             dataArr={data.ratio_D_G} 
-                            w={w} h={h} nSpectra={nSpectra} cmap="customDGdefects" 
+                            w={w} h={h} nSpectra={actualN} stepSize={stepSize} cmap="customDGdefects" 
                             selectedPixelIndex={selectedPixelIndex} 
                             onClick={handleCanvasClick} 
                             vmin={0} vmax={1.0}
@@ -185,7 +336,7 @@ export function GrapheneCanvasGrid({
 }
 
 // Subcomponent to render isolated canvass efficiently
-function RenderCanvas({ title, subtitle, dataArr, w, h, nSpectra, cmap, selectedPixelIndex, onClick, vmin, vmax, colorbarLabel }: any) {
+function RenderCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize = 1.0, cmap, selectedPixelIndex, onClick, vmin, vmax, colorbarLabel }: any) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     
     useEffect(() => {
@@ -290,13 +441,13 @@ function RenderCanvas({ title, subtitle, dataArr, w, h, nSpectra, cmap, selected
                     </div>
                     {/* Y Ticks */}
                     <span className="absolute right-[100%] bottom-0 translate-y-1/2 pr-2 text-sm xl:text-base font-bold text-black">{0}</span>
-                    <span className="absolute right-[100%] top-1/2 -translate-y-1/2 pr-2 text-sm xl:text-base font-bold text-black">{Math.round(h/2)}</span>
-                    <span className="absolute right-[100%] top-0 -translate-y-1/2 pr-2 text-sm xl:text-base font-bold text-black">{h}</span>
+                    <span className="absolute right-[100%] top-1/2 -translate-y-1/2 pr-2 text-sm xl:text-base font-bold text-black">{Math.round((h/2) * stepSize)}</span>
+                    <span className="absolute right-[100%] top-0 -translate-y-1/2 pr-2 text-sm xl:text-base font-bold text-black">{Math.round(h * stepSize)}</span>
                     
                     {/* -- X-AXIS TICKS -- */}
                     <span className="absolute top-[100%] left-0 -translate-x-1/2 pt-2 text-sm xl:text-base font-bold text-black">{0}</span>
-                    <span className="absolute top-[100%] left-1/2 -translate-x-1/2 pt-2 text-sm xl:text-base font-bold text-black">{Math.round(w/2)}</span>
-                    <span className="absolute top-[100%] right-0 translate-x-1/2 pt-2 text-sm xl:text-base font-bold text-black">{w}</span>
+                    <span className="absolute top-[100%] left-1/2 -translate-x-1/2 pt-2 text-sm xl:text-base font-bold text-black">{Math.round((w/2) * stepSize)}</span>
+                    <span className="absolute top-[100%] right-0 translate-x-1/2 pt-2 text-sm xl:text-base font-bold text-black">{Math.round(w * stepSize)}</span>
                     
                     {/* -- COLORBAR -- (Absolute - Perfectly hugs right border) */}
                     <div className="absolute left-[100%] top-0 bottom-0 pl-3 flex flex-row h-full pb-0">
@@ -306,9 +457,19 @@ function RenderCanvas({ title, subtitle, dataArr, w, h, nSpectra, cmap, selected
                         />
                         {/* Spacing increased significantly (w-10 xl:w-12) to ensure numbers don't touch the text */}
                         <div className="flex flex-col justify-between text-sm xl:text-base font-bold text-black ml-2 relative w-10 xl:w-12">
-                            <span className="absolute top-0 -translate-y-1/2 whitespace-nowrap">{displayMax.toFixed(1)}</span>
-                            <span className="absolute top-1/2 -translate-y-1/2 whitespace-nowrap">{(displayMax/2).toFixed(1)}</span>
-                            <span className="absolute bottom-0 translate-y-1/2 whitespace-nowrap">{displayMin.toFixed(1)}</span>
+                            {[0, 1, 2, 3, 4, 5, 6].map((i) => {
+                                const val = displayMax - (i * (displayMax - displayMin) / 6);
+                                const topPercent = (i * 100) / 6;
+                                return (
+                                    <span 
+                                        key={i} 
+                                        className="absolute -translate-y-1/2 whitespace-nowrap" 
+                                        style={{ top: `${topPercent}%` }}
+                                    >
+                                        {val.toFixed(1)}
+                                    </span>
+                                );
+                            })}
                         </div>
                         
                         {/* Label pushed further right (ml-4) */}
