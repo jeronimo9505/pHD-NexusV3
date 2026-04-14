@@ -15,6 +15,7 @@ interface GrapheneProps {
     stepSize?: number;
     nSpectra: number;
     selectedPixelIndex: number;
+    onPixelSelect?: (idx: number) => void;
     onToggleStandard?: () => void;
     onUpdateDimensions?: (w: number, h: number, step?: number) => void;
     isDismissed?: boolean;
