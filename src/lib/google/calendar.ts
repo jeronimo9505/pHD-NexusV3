@@ -1,5 +1,24 @@
 import { ensureAuth } from "./auth";
 
+const CALENDAR_DISCOVERY_URL = "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest";
+
+/**
+ * Ensures the Calendar API is loaded. This handles the case where
+ * initGoogleClient skipped it because Drive was already available.
+ */
+async function ensureCalendarApi(): Promise<void> {
+    const gapi = (window as any).gapi;
+    if (!gapi?.client) throw new Error("Google client not initialized");
+
+    if (!gapi.client.calendar) {
+        try {
+            await gapi.client.load(CALENDAR_DISCOVERY_URL);
+        } catch (e) {
+            throw new Error("No se pudo cargar la API de Google Calendar. Verifica que esté habilitada en tu proyecto de Google Cloud.");
+        }
+    }
+}
+
 /**
  * Creates an event in the specified Google Calendar with a Meet link.
  * Returns the hangoutLink and the eventId.
@@ -11,11 +30,8 @@ export async function createMeetConference(calendarId: string, eventData: {
     endAt: string;   // ISO
 }) {
     await ensureAuth();
+    await ensureCalendarApi();
     const gapi = (window as any).gapi;
-
-    if (!gapi.client.calendar) {
-        throw new Error("Google Calendar API not loaded");
-    }
 
     const event: any = {
         summary: eventData.title,
