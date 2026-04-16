@@ -28,6 +28,7 @@ export async function createMeetConference(calendarId: string, eventData: {
     description?: string;
     startAt: string; // ISO
     endAt: string;   // ISO
+    attendees?: string[];
 }) {
     await ensureAuth();
     await ensureCalendarApi();
@@ -52,10 +53,16 @@ export async function createMeetConference(calendarId: string, eventData: {
         },
     };
 
+    // Add attendees if provided
+    if (eventData.attendees && eventData.attendees.length > 0) {
+        event.attendees = eventData.attendees.map(email => ({ email: email.trim() }));
+    }
+
     const response = await gapi.client.calendar.events.insert({
         calendarId: calendarId,
         resource: event,
         conferenceDataVersion: 1,
+        sendUpdates: eventData.attendees && eventData.attendees.length > 0 ? 'all' : 'none',
     });
 
     return {
