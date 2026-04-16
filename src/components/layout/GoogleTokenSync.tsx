@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 const STORAGE_KEY = 'google_drive_access_token';
+const HINT_KEY = 'google_auth_email_hint';
 
 function getCookie(name: string): string | null {
     if (typeof document === 'undefined') return null;
@@ -15,53 +16,54 @@ function deleteCookie(name: string) {
     document.cookie = `${name}=; path=/; max-age=0; samesite=lax`;
 }
 
-function saveTokenToStorage(access_token: string, expiryMs: number) {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ access_token, expiry: expiryMs }));
-        // Also inject into GAPI client immediately if it's loaded
-        const gapi = (window as any).gapi;
-        if (gapi?.client?.setToken) {
-            gapi.client.setToken({ access_token });
-        }
-        console.log('[GoogleTokenSync] Google access token synced.');
-    } catch (e) {
-        console.warn('[GoogleTokenSync] Could not save token:', e);
-    }
-}
-
 /**
- * Syncs the Google provider_token from the Supabase session into localStorage
- * and directly into the GAPI client. Handles:
- *   1. Initial login: reads the cookie set by /auth/callback
- *   2. Session refresh: listens to onAuthStateChange to keep the token alive
- *      without requiring popups or re-authentication
+ * GoogleTokenSync handles two separate concerns:
+ *
+ * 1. INITIAL LOGIN TOKEN: At login, /auth/callback saves the Google provider_token
+ *    as a cookie. We read it here and save it to localStorage so GAPI can use it.
+ *    This token has the Drive/Docs/Calendar scopes (if Supabase is configured for them).
+ *    NOTE: We only use this for the FIRST session. Subsequent refreshes use the GIS flow.
+ *
+ * 2. EMAIL HINT: Whenever the Supabase session refreshes, we extract the user's email
+ *    and save it as the GIS hint. This ensures the silent GIS re-auth knows which
+ *    Google account to use, avoiding the account picker popup.
+ *
+ * IMPORTANT: We do NOT save the Supabase provider_token from onAuthStateChange to
+ * replace the GIS token — the refreshed provider_token only has basic Google scopes
+ * (openid, email, profile), not the Drive/Calendar scopes we need.
  */
 export function GoogleTokenSync() {
     useEffect(() => {
-        // --- 1. Initial login: consume the cookie from /auth/callback ---
+        // --- 1. Initial login: consume the one-time cookie from /auth/callback ---
         const cookieToken = getCookie('google_provider_token');
         const cookieExpiry = getCookie('google_provider_token_expiry');
 
         if (cookieToken) {
             const expiry = cookieExpiry ? Number(cookieExpiry) : Date.now() + 3_540_000;
-            saveTokenToStorage(cookieToken, expiry);
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({ access_token: cookieToken, expiry }));
+                // Inject immediately into GAPI if loaded
+                const gapi = (window as any).gapi;
+                if (gapi?.client?.setToken) gapi.client.setToken({ access_token: cookieToken });
+                console.log('[GoogleTokenSync] Login token synced from auth callback.');
+            } catch (e) {
+                console.warn('[GoogleTokenSync] Could not save login token:', e);
+            }
             deleteCookie('google_provider_token');
             deleteCookie('google_provider_token_expiry');
         }
 
-        // --- 2. Ongoing: subscribe to Supabase session changes ---
-        // Supabase automatically refreshes the session (and provider_token)
-        // before it expires. We hook into that to keep Google auth alive.
+        // --- 2. Subscribe to session changes to keep the email hint fresh ---
+        // When the Supabase session refreshes (every ~hour), we update the hint email
+        // so the GIS silent re-auth knows which account to use without a popup.
+        // We do NOT replace the Drive/Calendar GIS token — that has wider scopes.
         const supabase = createClient();
-
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (!session?.provider_token) return;
-
-            const expiryMs = session.expires_at
-                ? session.expires_at * 1000 - 60_000
-                : Date.now() + 3_540_000;
-
-            saveTokenToStorage(session.provider_token, expiryMs);
+            const email = session?.user?.email;
+            if (email) {
+                localStorage.setItem(HINT_KEY, email);
+                console.log('[GoogleTokenSync] Email hint updated:', email);
+            }
         });
 
         return () => {

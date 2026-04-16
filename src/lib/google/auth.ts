@@ -186,24 +186,7 @@ export const ensureAuth = async (): Promise<string> => {
         return savedToken;
     }
 
-    // 3. Try to get token from active Supabase session (no popup needed)
-    try {
-        const supabase = createSupabaseClient();
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.provider_token) {
-            const expiryMs = session.expires_at
-                ? session.expires_at * 1000 - 60_000
-                : Date.now() + 3_540_000;
-            saveToken({ access_token: session.provider_token, expires_in: Math.floor((expiryMs - Date.now()) / 1000) });
-            if (gapi.client?.setToken) gapi.client.setToken({ access_token: session.provider_token });
-            console.log('[ensureAuth] Token recovered from Supabase session.');
-            return session.provider_token;
-        }
-    } catch (e) {
-        console.warn('[ensureAuth] Could not read Supabase session:', e);
-    }
-
-    // 4. Request new token (Prompt User)
+    // 3. Request new token via GIS (silent if user already consented)
     // Avoid multiple simultaneous prompts
     if (googleAuthPromise) return googleAuthPromise;
 
@@ -230,13 +213,11 @@ export const ensureAuth = async (): Promise<string> => {
             }
         };
 
-        // Trigger popup - logic:
-        // 'none' or empty prompt uses current browser session
-        // hinting to the browser to auto-select if only one account
-        (tokenClient as any).requestAccessToken({ 
-            prompt: '', 
-            hint: localStorage.getItem('google_auth_email_hint') || undefined 
-        });
+        // Trigger GIS token request:
+        // prompt: '' = no consent screen if already granted (silent re-auth)
+        // hint: user email = avoids account picker popup
+        const emailHint = localStorage.getItem('google_auth_email_hint') || undefined;
+        (tokenClient as any).requestAccessToken({ prompt: '', hint: emailHint });
     });
 
     return googleAuthPromise;
