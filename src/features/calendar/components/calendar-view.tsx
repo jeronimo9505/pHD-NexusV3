@@ -442,6 +442,12 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
 
         setIsGeneratingMeet(true);
         try {
+            // Step 1: Proactively ensure auth BEFORE the API call.
+            // This is critical — GIS popups (for consent) are only allowed
+            // from a direct user gesture context, which we have here.
+            const { ensureAuth } = await import('@/lib/google/auth');
+            await ensureAuth();
+
             let startAtStr = '';
             let endAtStr = '';
             if (formAllDay) {
@@ -466,8 +472,20 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
                 toast.success('Videoconferencia generada ✓');
             }
         } catch (error: any) {
-            console.error(error);
-            toast.error('Error al generar Meet: ' + (error.message || 'Verifica la conexión con Google'));
+            console.error('[Meet Error]', error);
+            // Extract most useful error message
+            const apiMsg = error?.result?.error?.message || error?.message;
+            const status = error?.status ?? error?.result?.error?.code;
+
+            if (status === 403 || status === 401) {
+                toast.error('Sin permiso de Google Calendar. Recarga la página y autoriza cuando aparezca el popup de Google.');
+            } else if (status === 404) {
+                toast.error('Calendar ID no encontrado. Verifica el ID en los ajustes del grupo.');
+            } else if (apiMsg) {
+                toast.error('Error Meet: ' + apiMsg);
+            } else {
+                toast.error('Error al conectar con Google Meet. Recarga e inténtalo de nuevo.');
+            }
         } finally {
             setIsGeneratingMeet(false);
         }
