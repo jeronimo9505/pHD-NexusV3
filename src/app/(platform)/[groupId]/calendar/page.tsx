@@ -26,7 +26,8 @@ export default async function CalendarPage({
         .eq('group_id', groupId)
         .order('due_date', { ascending: true, nullsFirst: false });
 
-    const calendarId = (group?.drive_settings as any)?.calendarId ?? null;
+    const driveSettings = group?.drive_settings as any;
+    const calendarId = driveSettings?.calendarId ?? null;
 
     return (
         <div className="h-full overflow-hidden">
@@ -34,6 +35,7 @@ export default async function CalendarPage({
                 groupId={groupId}
                 groupName={group?.name || 'Group'}
                 calendarId={calendarId}
+                driveSettings={driveSettings}
                 tasks={allTasks || tasks || []}
             />
         </div>
