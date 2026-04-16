@@ -119,6 +119,8 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
     const [gcalEventId, setGcalEventId] = useState<string | null>(null);
     const [creating, setCreating] = useState(false);
     const [isGeneratingMeet, setIsGeneratingMeet] = useState(false);
+    const [formAttendees, setFormAttendees] = useState<string[]>([]);
+    const [attendeeInput, setAttendeeInput] = useState('');
 
     // Draft event shown on calendar while form is open
     const [draftEvent, setDraftEvent] = useState<{ start: string; end: string; allDay: boolean } | null>(null);
@@ -243,6 +245,7 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
             endAt: endAtStr,
             color: formColor,
             gcalEventId: gcalEventId || undefined,
+            attendees: formAttendees.length > 0 ? formAttendees : undefined,
         };
 
         let res;
@@ -258,6 +261,7 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
             setShowForm(false);
             setFormTitle(''); setFormLocation(''); setFormDesc(''); setFormUrl(''); setFormAllDay(false);
             setIsEditing(false); setEditEventId(null); setGcalEventId(null); setDraftEvent(null);
+            setFormAttendees([]); setAttendeeInput('');
             
             // Refresh with current range
             if (rangeRef.current) {
@@ -407,6 +411,7 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
                 description: formDesc || undefined,
                 startAt: startAtStr,
                 endAt: endAtStr,
+                attendees: formAttendees.length > 0 ? formAttendees : undefined,
             });
 
             if (res.hangoutLink) {
@@ -611,6 +616,45 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
                                             <LinkIcon size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
                                             <input value={formUrl} onChange={e => setFormUrl(e.target.value)} placeholder="Añadir enlace (URL)" type="url"
                                                 className="w-full border border-slate-300 rounded-lg pl-8 pr-3 py-2 text-xs focus:outline-none focus:border-indigo-500" />
+                                        </div>
+
+                                        {/* Attendees / guests */}
+                                        <div className="space-y-1.5">
+                                            <div className="flex items-center gap-1.5">
+                                                <input
+                                                    value={attendeeInput}
+                                                    onChange={e => setAttendeeInput(e.target.value)}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter' || e.key === ',' || e.key === 'Tab') {
+                                                            e.preventDefault();
+                                                            const email = attendeeInput.trim().replace(/,$/, '');
+                                                            if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !formAttendees.includes(email)) {
+                                                                setFormAttendees(prev => [...prev, email]);
+                                                            }
+                                                            setAttendeeInput('');
+                                                        }
+                                                    }}
+                                                    placeholder="Invitar por correo (Enter para añadir)"
+                                                    type="email"
+                                                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-500"
+                                                />
+                                            </div>
+                                            {formAttendees.length > 0 && (
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {formAttendees.map(email => (
+                                                        <span key={email} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs px-2 py-1 rounded-full">
+                                                            {email}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setFormAttendees(prev => prev.filter(e => e !== email))}
+                                                                className="hover:text-red-500 transition-colors ml-0.5"
+                                                            >
+                                                                <X size={10} />
+                                                            </button>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Google Meet Button */}
