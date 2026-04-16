@@ -36,7 +36,9 @@ interface LocalEvent {
 }
 interface CalendarViewProps {
     groupId: string; groupName: string;
-    calendarId: string | null; tasks: Task[];
+    calendarId: string | null;
+    driveSettings?: { apiKey?: string; clientId?: string };
+    tasks: Task[];
 }
 
 const COLOR_MAP: Record<string, string> = {
@@ -67,7 +69,7 @@ function isoToLocal(iso: string) {
 function toYMD(d: Date) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 
 /* ═══════════════════ Component ══════════════════════════ */
-export function CalendarView({ groupId, groupName, calendarId, tasks }: CalendarViewProps) {
+export function CalendarView({ groupId, groupName, calendarId, driveSettings, tasks }: CalendarViewProps) {
     const calendarRef = useRef<FullCalendar>(null);
     const today = new Date();
 
@@ -93,12 +95,11 @@ export function CalendarView({ groupId, groupName, calendarId, tasks }: Calendar
         }
     }, []);
     
-    // Initialize Google API Client for this group
     useEffect(() => {
-        if (groupId) {
-            initGoogleClient(groupId).catch(console.error);
+        if (groupId && driveSettings?.apiKey && driveSettings?.clientId) {
+            initGoogleClient(driveSettings.apiKey, driveSettings.clientId).catch(console.error);
         }
-    }, [groupId]);
+    }, [groupId, driveSettings]);
 
     // Form state
     const [showForm, setShowForm] = useState(false);
