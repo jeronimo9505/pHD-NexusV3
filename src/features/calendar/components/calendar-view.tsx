@@ -10,6 +10,8 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { createCalendarEventAction, updateCalendarEventAction, deleteCalendarEventAction, getCalendarEventsAction } from '../actions';
+import { createMeetConference } from '@/lib/google/calendar';
+import { Video } from 'lucide-react';
 
 // FullCalendar imports
 import FullCalendar from '@fullcalendar/react';
@@ -64,7 +66,7 @@ function isoToLocal(iso: string) {
 function toYMD(d: Date) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 
 /* ═══════════════════ Component ══════════════════════════ */
-export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
+export function CalendarView({ groupId, groupName, calendarId, tasks }: CalendarViewProps) {
     const calendarRef = useRef<FullCalendar>(null);
     const today = new Date();
 
@@ -105,7 +107,9 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
     const [formDesc, setFormDesc] = useState('');
     const [formUrl, setFormUrl] = useState('');
     const [formColor, setFormColor] = useState('indigo');
+    const [gcalEventId, setGcalEventId] = useState<string | null>(null);
     const [creating, setCreating] = useState(false);
+    const [isGeneratingMeet, setIsGeneratingMeet] = useState(false);
 
     // Detail state
     const [selectedItem, setSelectedItem] = useState<any>(null); // custom event wrapper
@@ -211,6 +215,7 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
             startAt: startAtStr,
             endAt: endAtStr,
             color: formColor,
+            gcalEventId: gcalEventId || undefined,
         };
 
         let res;
@@ -225,7 +230,7 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
             toast.success(isEditing ? 'Evento actualizado ✓' : 'Evento creado ✓');
             setShowForm(false);
             setFormTitle(''); setFormLocation(''); setFormDesc(''); setFormUrl(''); setFormAllDay(false);
-            setIsEditing(false); setEditEventId(null);
+            setIsEditing(false); setEditEventId(null); setGcalEventId(null);
             
             // Refresh with current range
             if (rangeRef.current) {
@@ -254,6 +259,7 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
         setFormDesc(selectedItem.description || '');
         setFormUrl(selectedItem.url || '');
         setFormColor(selectedItem.color || 'indigo');
+        setGcalEventId(selectedItem.gcalEventId || null);
         setIsEditing(true);
         setEditEventId(selectedItem.eventId);
         setSelectedItem(null);
@@ -297,6 +303,7 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
         // Reset form for create
         setIsEditing(false);
         setEditEventId(null);
+        setGcalEventId(null);
         setFormTitle(''); setFormLocation(''); setFormDesc(''); setFormUrl('');
         setShowForm(true);
 
@@ -309,6 +316,7 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
         setFormEndDate(toYMD(today));
         setIsEditing(false);
         setEditEventId(null);
+        setGcalEventId(null);
         setFormTitle(''); setFormLocation(''); setFormDesc(''); setFormUrl(''); setFormAllDay(false);
         setShowForm(true);
         setSelectedItem(null);
@@ -331,10 +339,54 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
                 location: extended.original.location,
                 description: extended.original.description,
                 url: extended.original.url,
-                color: extended.original.color, eventId: extended.original.id
+                color: extended.original.color, 
+                eventId: extended.original.id,
+                gcalEventId: extended.original.gcal_event_id
             });
         }
         setShowForm(false);
+    };
+
+    const handleGenerateMeet = async () => {
+        if (!calendarId) {
+            toast.error('No hay un Google Calendar ID configurado en los ajustes.');
+            return;
+        }
+        if (!formTitle) {
+            toast.error('Añade un título al evento primero.');
+            return;
+        }
+
+        setIsGeneratingMeet(true);
+        try {
+            let startAtStr = '';
+            let endAtStr = '';
+            if (formAllDay) {
+                startAtStr = `${formDate}T09:00:00Z`;
+                endAtStr = `${formDate}T10:00:00Z`;
+            } else {
+                startAtStr = new Date(`${formDate}T${formStart}:00`).toISOString();
+                endAtStr = new Date(`${formEndDate || formDate}T${formEnd}:00`).toISOString();
+            }
+
+            const res = await createMeetConference(calendarId, {
+                title: formTitle,
+                description: formDesc || undefined,
+                startAt: startAtStr,
+                endAt: endAtStr,
+            });
+
+            if (res.hangoutLink) {
+                setFormUrl(res.hangoutLink);
+                setGcalEventId(res.id);
+                toast.success('Videoconferencia generada ✓');
+            }
+        } catch (error: any) {
+            console.error(error);
+            toast.error('Error al generar Meet: ' + (error.message || 'Verifica la conexión con Google'));
+        } finally {
+            setIsGeneratingMeet(false);
+        }
     };
 
     /* ── UI Navigation ── */
@@ -526,6 +578,39 @@ export function CalendarView({ groupId, groupName, tasks }: CalendarViewProps) {
                                             <LinkIcon size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
                                             <input value={formUrl} onChange={e => setFormUrl(e.target.value)} placeholder="Añadir enlace (URL)" type="url"
                                                 className="w-full border border-slate-300 rounded-lg pl-8 pr-3 py-2 text-xs focus:outline-none focus:border-indigo-500" />
+                                        </div>
+
+                                        {/* Google Meet Button */}
+                                        <div className="py-1">
+                                            <button
+                                                type="button"
+                                                onClick={handleGenerateMeet}
+                                                disabled={isGeneratingMeet || !calendarId}
+                                                className="w-full flex items-center gap-3 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors group disabled:opacity-50"
+                                            >
+                                                <div className="flex items-center justify-center w-6 h-6 shrink-0">
+                                                    {isGeneratingMeet ? (
+                                                        <Loader2 size={16} className="animate-spin text-indigo-600" />
+                                                    ) : (
+                                                        <svg viewBox="0 0 24 24" className="w-5 h-5">
+                                                            <path fill="#00832d" d="M0 11v8a2 2 0 002 2h8V9H0v2z" />
+                                                            <path fill="#0066da" d="M24 11V3a2 2 0 00-2-2h-8v12h10l-2-2z" />
+                                                            <path fill="#e94235" d="M0 3v8h12V1H2a2 2 0 00-2 2z" />
+                                                            <path fill="#26a69a" d="M24 11l-4-4v8l4-4z" />
+                                                            <path fill="#00ac47" d="M12 11H0v8a2 2 0 002 2h10V11z" />
+                                                            <path fill="#ffba00" d="M22 1H12v10h12V3a2 2 0 00-2-2z" />
+                                                        </svg>
+                                                    )}
+                                                </div>
+                                                <span className="text-[12px] font-medium text-slate-700 group-hover:text-slate-900 transition-colors">
+                                                    {isGeneratingMeet ? 'Generando enlace...' : 'Añadir videoconferencia de Google Meet'}
+                                                </span>
+                                            </button>
+                                            {!calendarId && (
+                                                <p className="text-[10px] text-amber-600 mt-1 pl-1">
+                                                    Configura un Calendar ID en ajustes para habilitar esta opción.
+                                                </p>
+                                            )}
                                         </div>
 
                                         <textarea value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="Descripción o notas..." rows={3}

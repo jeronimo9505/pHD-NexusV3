@@ -1,12 +1,13 @@
 import { loadGoogleScripts } from "./loader";
 import { toast } from "sonner";
 
-// Scopes required for creating and editing files
-const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/presentations https://www.googleapis.com/auth/drive.readonly';
+// Scopes required for creating and editing files and calendar events
+const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/presentations https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/calendar';
 const DISCOVERY_DOCS = [
     "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
     "https://docs.googleapis.com/$discovery/rest?version=v1",
-    "https://slides.googleapis.com/$discovery/rest?version=v1"
+    "https://slides.googleapis.com/$discovery/rest?version=v1",
+    "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"
 ];
 
 const STORAGE_KEY = 'google_drive_access_token';
@@ -123,7 +124,8 @@ export const initGoogleClient = async (apiKey: string, clientId: string) => {
     await Promise.all([
         loadApi('drive', 'v3', "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"),
         loadApi('docs', 'v1', "https://docs.googleapis.com/$discovery/rest?version=v1"),
-        loadApi('slides', 'v1', "https://slides.googleapis.com/$discovery/rest?version=v1")
+        loadApi('slides', 'v1', "https://slides.googleapis.com/$discovery/rest?version=v1"),
+        loadApi('calendar', 'v3', "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest")
     ]);
 
     // Restore token if available

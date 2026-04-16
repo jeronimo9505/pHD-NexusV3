@@ -13,6 +13,7 @@ export async function createCalendarEventAction(data: {
     startAt: string; // ISO
     endAt: string;   // ISO
     color?: string;
+    gcalEventId?: string;
 }) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -31,6 +32,7 @@ export async function createCalendarEventAction(data: {
             start_at: data.startAt,
             end_at: data.endAt,
             color: data.color || 'indigo',
+            gcal_event_id: data.gcalEventId || null,
         })
         .select()
         .single();
@@ -60,6 +62,7 @@ export async function updateCalendarEventAction(
         startAt: string;
         endAt: string;
         color?: string;
+        gcalEventId?: string;
     }
 ) {
     const supabase = await createClient();
@@ -77,6 +80,7 @@ export async function updateCalendarEventAction(
             start_at: data.startAt,
             end_at: data.endAt,
             color: data.color || 'indigo',
+            gcal_event_id: data.gcalEventId || null,
             updated_at: new Date().toISOString()
         })
         .eq('id', eventId);
