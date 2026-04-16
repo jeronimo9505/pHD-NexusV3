@@ -129,3 +129,19 @@ export async function updateMeetConference(calendarId: string, gcalEventId: stri
 
     return response.result;
 }
+
+/**
+ * Deletes an event from Google Calendar.
+ */
+export async function deleteMeetConference(calendarId: string, gcalEventId: string) {
+    await ensureAuth();
+    await ensureCalendarApi();
+    const gapi = (window as any).gapi;
+
+    return await withAuthRetry(() =>
+        gapi.client.calendar.events.delete({
+            calendarId: calendarId,
+            eventId: gcalEventId,
+        })
+    );
+}

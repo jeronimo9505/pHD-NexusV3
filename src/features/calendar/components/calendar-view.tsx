@@ -382,8 +382,21 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
         setShowForm(true);
     };
 
-    const handleDelete = async (eventId: string) => {
+    const handleDelete = async (eventId: string, gcalEventId?: string | null) => {
         if (!confirm('¿Eliminar este evento?')) return;
+
+        // If it's a Google Calendar event, delete it there too
+        if (calendarId && gcalEventId) {
+            try {
+                const { deleteMeetConference } = await import('@/lib/google/calendar');
+                await deleteMeetConference(calendarId, gcalEventId);
+            } catch (e) {
+                console.error('[Calendar] Error deleting from Google:', e);
+                // We continue with local deletion even if Google fails (or maybe we shouldn't? 
+                // Usually user wants it gone from the app at least)
+            }
+        }
+
         const res = await deleteCalendarEventAction(eventId, groupId);
         if (res.error) toast.error(res.error);
         else { 
@@ -848,7 +861,7 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
                                             {selectedItem.type === 'event' && selectedItem.eventId && (
                                                 <>
                                                     <button onClick={handleEditClick} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors" title="Editar"><Pencil size={14} /></button>
-                                                    <button onClick={() => handleDelete(selectedItem.eventId!)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors" title="Eliminar"><Trash2 size={14} /></button>
+                                                    <button onClick={() => handleDelete(selectedItem.eventId!, selectedItem.gcalEventId)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors" title="Eliminar"><Trash2 size={14} /></button>
                                                 </>
                                             )}
                                             <button onClick={() => setSelectedItem(null)} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"><X size={14} /></button>
