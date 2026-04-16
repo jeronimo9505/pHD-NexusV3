@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
     Plus, X, Loader2, Clock, MapPin, CalendarDays, CheckSquare,
     PanelRightClose, PanelRightOpen, Trash2, ChevronLeft, ChevronRight, ChevronDown,
-    Pencil, Link as LinkIcon, FileText
+    Pencil, Link as LinkIcon, FileText, Users
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -121,6 +121,52 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
     const [isGeneratingMeet, setIsGeneratingMeet] = useState(false);
     const [formAttendees, setFormAttendees] = useState<string[]>([]);
     const [attendeeInput, setAttendeeInput] = useState('');
+    const [attendeeSuggestions, setAttendeeSuggestions] = useState<string[]>([]);
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const [knownEmails, setKnownEmails] = useState<string[]>([]);
+    const attendeeInputRef = useRef<HTMLInputElement>(null);
+
+    // Load known emails from localStorage on mount
+    useEffect(() => {
+        try {
+            const stored = localStorage.getItem('phd_nexus_known_emails');
+            if (stored) setKnownEmails(JSON.parse(stored));
+        } catch { }
+    }, []);
+
+    // Save email to localStorage known list
+    const rememberEmails = useCallback((emails: string[]) => {
+        setKnownEmails(prev => {
+            const merged = Array.from(new Set([...prev, ...emails]));
+            localStorage.setItem('phd_nexus_known_emails', JSON.stringify(merged));
+            return merged;
+        });
+    }, []);
+
+    // Filter suggestions as user types
+    useEffect(() => {
+        if (!attendeeInput.trim()) {
+            setAttendeeSuggestions([]);
+            setShowSuggestions(false);
+            return;
+        }
+        const q = attendeeInput.toLowerCase();
+        const filtered = knownEmails.filter(e =>
+            e.toLowerCase().includes(q) && !formAttendees.includes(e)
+        ).slice(0, 6);
+        setAttendeeSuggestions(filtered);
+        setShowSuggestions(filtered.length > 0);
+    }, [attendeeInput, knownEmails, formAttendees]);
+
+    const addAttendee = useCallback((email: string) => {
+        const cleaned = email.trim().replace(/,$/, '');
+        if (cleaned && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned) && !formAttendees.includes(cleaned)) {
+            setFormAttendees(prev => [...prev, cleaned]);
+            rememberEmails([cleaned]);
+        }
+        setAttendeeInput('');
+        setShowSuggestions(false);
+    }, [formAttendees, rememberEmails]);
 
     // Draft event shown on calendar while form is open
     const [draftEvent, setDraftEvent] = useState<{ start: string; end: string; allDay: boolean } | null>(null);
@@ -261,7 +307,7 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
             setShowForm(false);
             setFormTitle(''); setFormLocation(''); setFormDesc(''); setFormUrl(''); setFormAllDay(false);
             setIsEditing(false); setEditEventId(null); setGcalEventId(null); setDraftEvent(null);
-            setFormAttendees([]); setAttendeeInput('');
+            setFormAttendees([]); setAttendeeInput(''); setShowSuggestions(false);
             
             // Refresh with current range
             if (rangeRef.current) {
@@ -620,24 +666,46 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
 
                                         {/* Attendees / guests */}
                                         <div className="space-y-1.5">
-                                            <div className="flex items-center gap-1.5">
+                                            <div className="relative">
+                                                <Users size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
                                                 <input
+                                                    ref={attendeeInputRef}
                                                     value={attendeeInput}
                                                     onChange={e => setAttendeeInput(e.target.value)}
+                                                    onFocus={() => {
+                                                        if (attendeeSuggestions.length > 0) setShowSuggestions(true);
+                                                    }}
+                                                    onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                                                     onKeyDown={e => {
                                                         if (e.key === 'Enter' || e.key === ',' || e.key === 'Tab') {
                                                             e.preventDefault();
-                                                            const email = attendeeInput.trim().replace(/,$/, '');
-                                                            if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !formAttendees.includes(email)) {
-                                                                setFormAttendees(prev => [...prev, email]);
-                                                            }
-                                                            setAttendeeInput('');
+                                                            addAttendee(attendeeInput);
                                                         }
+                                                        if (e.key === 'Escape') setShowSuggestions(false);
                                                     }}
                                                     placeholder="Invitar por correo (Enter para añadir)"
                                                     type="email"
-                                                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-500"
+                                                    autoComplete="off"
+                                                    className="w-full border border-slate-300 rounded-lg pl-8 pr-3 py-2 text-xs focus:outline-none focus:border-indigo-500"
                                                 />
+                                                {/* Dropdown suggestions */}
+                                                {showSuggestions && (
+                                                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                                                        {attendeeSuggestions.map(email => (
+                                                            <button
+                                                                key={email}
+                                                                type="button"
+                                                                onMouseDown={() => addAttendee(email)}
+                                                                className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2 transition-colors"
+                                                            >
+                                                                <div className="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-medium text-xs shrink-0">
+                                                                    {email[0].toUpperCase()}
+                                                                </div>
+                                                                {email}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                             {formAttendees.length > 0 && (
                                                 <div className="flex flex-wrap gap-1.5">
