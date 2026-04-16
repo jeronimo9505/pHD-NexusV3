@@ -120,6 +120,9 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
     const [creating, setCreating] = useState(false);
     const [isGeneratingMeet, setIsGeneratingMeet] = useState(false);
 
+    // Draft event shown on calendar while form is open
+    const [draftEvent, setDraftEvent] = useState<{ start: string; end: string; allDay: boolean } | null>(null);
+
     // Detail state
     const [selectedItem, setSelectedItem] = useState<any>(null); // custom event wrapper
 
@@ -174,8 +177,23 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
                 extendedProps: { type: 'event', original: e }
             });
         });
+        // Draft event: shown while form is open (ghost preview)
+        if (draftEvent) {
+            data.push({
+                id: 'draft-new-event',
+                title: '\u2022 Nuevo evento',
+                start: draftEvent.start,
+                end: draftEvent.end,
+                allDay: draftEvent.allDay,
+                backgroundColor: 'rgba(99,102,241,0.25)',
+                borderColor: '#6366f1',
+                textColor: '#4338ca',
+                classNames: ['fc-event-draft'],
+                extendedProps: { type: 'draft' }
+            });
+        }
         return data;
-    }, [tasks, localEvents]);
+    }, [tasks, localEvents, draftEvent]);
 
     /* ── Side panel upcoming list ── */
     const upcomingPanel = useMemo(() => {
@@ -239,7 +257,7 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
             toast.success(isEditing ? 'Evento actualizado ✓' : 'Evento creado ✓');
             setShowForm(false);
             setFormTitle(''); setFormLocation(''); setFormDesc(''); setFormUrl(''); setFormAllDay(false);
-            setIsEditing(false); setEditEventId(null); setGcalEventId(null);
+            setIsEditing(false); setEditEventId(null); setGcalEventId(null); setDraftEvent(null);
             
             // Refresh with current range
             if (rangeRef.current) {
@@ -314,9 +332,14 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
         setEditEventId(null);
         setGcalEventId(null);
         setFormTitle(''); setFormLocation(''); setFormDesc(''); setFormUrl('');
+        // Set draft event to show preview on calendar
+        const draftStart = info.startStr;
+        const draftEnd = info.endStr;
+        setDraftEvent({ start: draftStart, end: draftEnd, allDay: info.allDay });
+
         setShowForm(true);
 
-        // Clear selection to avoid persistent visual highlight
+        // Clear FullCalendar's native selection highlight (we use our own draft event)
         calendarRef.current?.getApi().unselect();
     };
 
@@ -326,6 +349,7 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
         setIsEditing(false);
         setEditEventId(null);
         setGcalEventId(null);
+        setDraftEvent(null);
         setFormTitle(''); setFormLocation(''); setFormDesc(''); setFormUrl(''); setFormAllDay(false);
         setShowForm(true);
         setSelectedItem(null);
@@ -543,7 +567,7 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
                                 <div className="border-b border-slate-200 p-5 bg-white shrink-0 shadow-sm overflow-y-auto max-h-[75vh]">
                                     <div className="flex items-center justify-between mb-4">
                                         <h3 className="text-sm font-bold text-slate-800">{isEditing ? 'Editar evento' : 'Crear evento'}</h3>
-                                        <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-700 p-1 hover:bg-slate-100 rounded-md"><X size={14} /></button>
+                                        <button onClick={() => { setShowForm(false); setDraftEvent(null); }} className="text-slate-400 hover:text-slate-700 p-1 hover:bg-slate-100 rounded-md"><X size={14} /></button>
                                     </div>
                                     <div className="space-y-3">
                                         <input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder="Título del evento *" autoFocus
