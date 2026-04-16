@@ -34,7 +34,7 @@ export async function createCalendarEventAction(data: {
             end_at: data.endAt,
             color: data.color || 'indigo',
             gcal_event_id: data.gcalEventId || null,
-            attendees: data.attendees || [],
+            // attendees stored in Google Calendar, not locally until migration 019 is applied
         })
         .select()
         .single();
@@ -84,7 +84,7 @@ export async function updateCalendarEventAction(
             end_at: data.endAt,
             color: data.color || 'indigo',
             gcal_event_id: data.gcalEventId || null,
-            attendees: data.attendees || [],
+            // attendees stored in Google Calendar, not locally until migration 019 is applied
             updated_at: new Date().toISOString()
         })
         .eq('id', eventId);
