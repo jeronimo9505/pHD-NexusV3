@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { createCalendarEventAction, updateCalendarEventAction, deleteCalendarEventAction, getCalendarEventsAction } from '../actions';
 import { createMeetConference } from '@/lib/google/calendar';
+import { initGoogleClient } from '@/lib/google/auth';
 import { Video } from 'lucide-react';
 
 // FullCalendar imports
@@ -91,6 +92,13 @@ export function CalendarView({ groupId, groupName, calendarId, tasks }: Calendar
             }, 50);
         }
     }, []);
+    
+    // Initialize Google API Client for this group
+    useEffect(() => {
+        if (groupId) {
+            initGoogleClient(groupId).catch(console.error);
+        }
+    }, [groupId]);
 
     // Form state
     const [showForm, setShowForm] = useState(false);
