@@ -406,17 +406,7 @@ export function CharacterizationModal({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        // EARLY AUTH FOR RAMAN SPECTRUM
-        if (type === 'Raman') {
-            try {
-                // This ensures the popup is triggered directly from the user's click event
-                await ensureAuth();
-            } catch (err) {
-                console.error("Google Auth failed or blocked", err);
-                toast.error("Google Drive Auth is required to save Raman previews.");
-                return;
-            }
-        }
+
 
         setIsSubmitting(true);
 
@@ -507,16 +497,29 @@ export function CharacterizationModal({
                     const blob = new Blob([jsonString], { type: 'application/json' });
                     const file = new File([blob], `${docName}.json`, { type: 'application/json' });
 
-                    const targetFolderId = driveSettings?.sampleFolderId || driveSettings?.folderId;
-                    const driveFile = await uploadFileToDrive(file, targetFolderId);
+                    // OPTIONAL: Try Google Drive Upload. Do not block if it fails or hangs on Desktop.
+                    try {
+                        const { ensureAuth } = await import('@/lib/google/auth');
+                        // 3-second timeout for Auth (Tauri blocks popups, causing it to hang)
+                        const authPromise = ensureAuth();
+                        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('AUTH_TIMEOUT')), 3000));
+                        await Promise.race([authPromise, timeoutPromise]);
 
-                    if (driveFile && driveFile.id) {
-                        cleanData['raman_spectrum_file_id'] = driveFile.id;
+                        const targetFolderId = driveSettings?.sampleFolderId || driveSettings?.folderId;
+                        const driveFile = await uploadFileToDrive(file, targetFolderId);
+
+                        if (driveFile && driveFile.id) {
+                            cleanData['raman_spectrum_file_id'] = driveFile.id;
+                        }
+                    } catch (driveErr: any) {
+                        console.warn("Drive upload skipped:", driveErr);
+                        // We do NOT abort. We just proceed saving locally/Supabase.
+                        toast.info("Saved data, but Google Drive sync was skipped.");
                     }
                 }
-            } catch (err) {
+             } catch (err: any) {
                 console.error('Error handling Raman spectrum:', err);
-                toast.error('Failed to generate or upload representative spectrum to Drive');
+                toast.error('Failed to parse or load representative spectrum');
             }
         }
 

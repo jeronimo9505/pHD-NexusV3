@@ -50,20 +50,15 @@ export const uploadFileToDrive = async (file: File, folderId?: string) => {
     });
 
     if (response.status === 401) {
-        // Token is likely expired or invalid, clear it and retry once
+        // Token is expired or revoked by Google.
+        // We MUST NOT call ensureAuth() here because we are deep inside an async fetch chain,
+        // so the browser will block the popup window.
+        // Instead, clear the token and tell the caller to prompt the user to try again natively.
         clearToken();
         if (typeof window !== 'undefined' && (window as any).gapi?.client) {
             (window as any).gapi.client.setToken(null);
         }
-        accessToken = await ensureAuth();
-        response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,thumbnailLink', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': `multipart/related; boundary=${boundary}`
-            },
-            body: multipartBody
-        });
+        throw new Error('GOOGLE_AUTH_EXPIRED');
     }
 
     if (!response.ok) {

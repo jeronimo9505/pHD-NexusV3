@@ -36,11 +36,15 @@ interface SampleGroup {
     files: VaultFile[];
 }
 
+import { createPortal } from 'react-dom';
+
 // --- Condensed Sample Overview Popover ---
-function SampleOverviewPopover({ group, onClose }: { group: SampleGroup, onClose: () => void }) {
+function SampleOverviewPopover({ group, onClose, position }: { group: SampleGroup, onClose: () => void, position: { top: number, left: number } }) {
     const ref = useRef<HTMLDivElement>(null);
+    const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
+        setMounted(true);
         const handleClick = (e: MouseEvent) => {
             if (ref.current && !ref.current.contains(e.target as Node)) {
                 onClose();
@@ -58,10 +62,16 @@ function SampleOverviewPopover({ group, onClose }: { group: SampleGroup, onClose
         ? Object.entries(group.attributes).filter(([, v]) => v !== null && v !== undefined && v !== '')
         : [];
 
-    return (
+    if (!mounted) return null;
+
+    return createPortal(
         <div
             ref={ref}
-            className="absolute left-full top-0 ml-3 z-50 w-72 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden animate-in slide-in-from-left-2 duration-200"
+            style={{ 
+                top: Math.min(position.top, typeof window !== 'undefined' ? window.innerHeight - 300 : position.top), 
+                left: position.left 
+            }}
+            className="fixed z-[100] w-72 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden animate-in slide-in-from-left-2 duration-200"
             onClick={e => e.stopPropagation()}
         >
             {/* Header */}
@@ -150,7 +160,8 @@ function SampleOverviewPopover({ group, onClose }: { group: SampleGroup, onClose
                     <span className="text-xs font-black text-indigo-600">{group.files.length}</span>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }
 
@@ -176,6 +187,7 @@ export function VaultLibrary({
     const [search, setSearch] = useState('');
     const [expandedSamples, setExpandedSamples] = useState<Record<string, boolean>>({});
     const [openOverview, setOpenOverview] = useState<string | null>(null);
+    const [overviewPosition, setOverviewPosition] = useState({ top: 0, left: 0 });
 
     const toggleSample = (name: string) => {
         setExpandedSamples(prev => ({ ...prev, [name]: !prev[name] }));
@@ -317,6 +329,8 @@ export function VaultLibrary({
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
+                                                const rect = e.currentTarget.getBoundingClientRect();
+                                                setOverviewPosition({ top: rect.top, left: rect.right + 12 });
                                                 setOpenOverview(prev => prev === group.name ? null : group.name);
                                             }}
                                             className={cn(
@@ -334,6 +348,7 @@ export function VaultLibrary({
                                         {openOverview === group.name && (
                                             <SampleOverviewPopover
                                                 group={group}
+                                                position={overviewPosition}
                                                 onClose={() => setOpenOverview(null)}
                                             />
                                         )}

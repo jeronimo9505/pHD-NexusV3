@@ -165,6 +165,7 @@ export async function fetchMapHeatmap(request: {
     h5_relative_path: string;
     start_wavenumber?: number;
     end_wavenumber?: number;
+    apply_snv?: boolean;
 }): Promise<{ success: boolean; n_spectra: number; heatmap: number[]; min: number; max: number; message?: string }> {
     const res = await fetch(`${SCIENCE_ENGINE_URL}/api/map/heatmap`, {
         method: "POST",
@@ -204,6 +205,7 @@ export async function fetchMapSpectrum(request: {
 export async function fetchGrapheneBands(request: {
     vault_root: string;
     h5_relative_path: string;
+    apply_snv?: boolean;
 }): Promise<{ 
     success: boolean; 
     n_spectra: number;
@@ -225,3 +227,28 @@ export async function fetchGrapheneBands(request: {
     return res.json();
 }
 
+/**
+ * Fetch Graphene Analytics composite image from Python engine.
+ */
+export async function fetchGrapheneAnalytics(request: {
+    vault_root: string;
+    h5_relative_path: string;
+    mono_th?: number;
+    damage_th?: number;
+    min_intensity?: number;
+    apply_snv?: boolean;
+}): Promise<{ 
+    success: boolean; 
+    composite_base64: string;
+}> {
+    const res = await fetch(`${SCIENCE_ENGINE_URL}/api/map/graphene-analytics`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Could not fetch graphene analytics");
+    }
+    return res.json();
+}
