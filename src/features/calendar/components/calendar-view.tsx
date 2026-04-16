@@ -303,6 +303,38 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
 
         if (res.error) { toast.error(res.error); }
         else {
+            // Persist attendees in localStorage keyed by event ID
+            const savedEventId = (res as any).event?.id || editEventId;
+            if (savedEventId && formAttendees.length > 0) {
+                try {
+                    const key = `phd_event_attendees_${savedEventId}`;
+                    localStorage.setItem(key, JSON.stringify(formAttendees));
+                } catch {}
+            }
+
+            // If we have a Google Calendar event + attendees, patch it to send email invites
+            if (calendarId && gcalEventId && formAttendees.length > 0) {
+                try {
+                    const { updateMeetConference } = await import('@/lib/google/calendar');
+                    const { ensureAuth } = await import('@/lib/google/auth');
+                    await ensureAuth();
+                    const gapi = (window as any).gapi;
+                    if (gapi?.client?.calendar) {
+                        await gapi.client.calendar.events.patch({
+                            calendarId,
+                            eventId: gcalEventId,
+                            resource: {
+                                attendees: formAttendees.map(e => ({ email: e })),
+                            },
+                            sendUpdates: 'all',
+                        });
+                        toast.success('Invitaciones enviadas ✓');
+                    }
+                } catch (e) {
+                    console.warn('[Calendar] Could not send invites:', e);
+                }
+            }
+
             toast.success(isEditing ? 'Evento actualizado ✓' : 'Evento creado ✓');
             setShowForm(false);
             setFormTitle(''); setFormLocation(''); setFormDesc(''); setFormUrl(''); setFormAllDay(false);
@@ -337,6 +369,13 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
         setFormUrl(selectedItem.url || '');
         setFormColor(selectedItem.color || 'indigo');
         setGcalEventId(selectedItem.gcalEventId || null);
+
+        // Restore attendees from localStorage
+        try {
+            const stored = localStorage.getItem(`phd_event_attendees_${selectedItem.eventId}`);
+            setFormAttendees(stored ? JSON.parse(stored) : []);
+        } catch { setFormAttendees([]); }
+
         setIsEditing(true);
         setEditEventId(selectedItem.eventId);
         setSelectedItem(null);
