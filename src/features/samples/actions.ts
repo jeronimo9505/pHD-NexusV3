@@ -226,7 +226,7 @@ export async function deleteLogbookAction(id: string, groupId: string) {
 
 export async function getSamplesAction(groupId: string, logbookId: string) {
     const supabase = await createClient();
-    const { data, error } = await supabase
+    let query = supabase
         .from('samples')
         .select(`
             *,
@@ -234,9 +234,13 @@ export async function getSamplesAction(groupId: string, logbookId: string) {
             created_by_user:created_by(full_name, email),
             characterizations:sample_characterizations(id, type, data, created_at, performed_at)
         `)
-        .eq('group_id', groupId)
-        .eq('logbook_id', logbookId) // Filter by logbook
-        .order('created_at', { ascending: false });
+        .eq('group_id', groupId);
+
+    if (logbookId) {
+        query = query.eq('logbook_id', logbookId);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) return { error: error.message };
 

@@ -323,6 +323,7 @@ class HeatmapRequest(BaseModel):
     h5_relative_path: str
     start_wavenumber: Optional[float] = None
     end_wavenumber: Optional[float] = None
+    apply_snv: bool = False
 
 @app.post("/api/map/heatmap")
 def get_map_heatmap(request: HeatmapRequest):
@@ -348,6 +349,12 @@ def get_map_heatmap(request: HeatmapRequest):
                 
             n_spectra = intensities.shape[0]
             
+            if request.apply_snv:
+                mean = np.mean(intensities, axis=1, keepdims=True)
+                std = np.std(intensities, axis=1, keepdims=True)
+                std[std == 0] = 1
+                intensities = (intensities - mean) / std
+                
             # Find bounds
             if request.start_wavenumber is not None and request.end_wavenumber is not None:
                 mask = (wavenumbers >= request.start_wavenumber) & (wavenumbers <= request.end_wavenumber)
@@ -414,6 +421,7 @@ def get_map_spectrum(request: SpectrumRequest):
 class GrapheneScriptRequest(BaseModel):
     vault_root: str
     h5_relative_path: str
+    apply_snv: bool = False
 
 @app.post("/api/map/graphene-bands")
 def get_graphene_bands(request: GrapheneScriptRequest):
@@ -439,6 +447,12 @@ def get_graphene_bands(request: GrapheneScriptRequest):
                 
             n_spectra = intensities_raw.shape[0]
             
+            if request.apply_snv:
+                mean = np.mean(intensities_raw, axis=1, keepdims=True)
+                std = np.std(intensities_raw, axis=1, keepdims=True)
+                std[std == 0] = 1
+                intensities_raw = (intensities_raw - mean) / std
+            
             # 1. Vectorized Smoothing
             # savgol_filter on axis=1 applies to each spectrum efficiently
             processed = savgol_filter(intensities_raw, window_length=7, polyorder=3, axis=1)
@@ -447,7 +461,7 @@ def get_graphene_bands(request: GrapheneScriptRequest):
             bands = {
                 'D': (1300, 1350),
                 'G': (1580, 1600),
-                '2D': (2600, 2700)
+                '2D': (2523, 2721)
             }
             noises = {
                 'D': [(1200, 1250), (1360, 1400)],
@@ -519,6 +533,45 @@ def get_graphene_bands(request: GrapheneScriptRequest):
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Graphene calc failed: {str(e)}")
+
+class GrapheneAnalyticsRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    mono_th: float = 1.5
+    damage_th: float = 0.3
+    min_intensity: float = 0.0
+    apply_snv: bool = False
+
+@app.post("/api/map/graphene-analytics")
+def get_graphene_analytics(request: GrapheneAnalyticsRequest):
+    import h5py
+    from scripts.graphene_analytics import generate_analytics_base64
+    
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+        
+    try:
+        with h5py.File(path, "r") as f:
+            wavenumbers = f["/spectrum/wavenumbers"][:]
+            intensities = f["/spectrum/intensities"][:]
+            
+            b64_img = generate_analytics_base64(
+                wavenumbers=wavenumbers, 
+                intensities=intensities,
+                mono_th=request.mono_th,
+                damage_th=request.damage_th,
+                min_intensity=request.min_intensity,
+                apply_snv=request.apply_snv
+            )
+            
+            return {
+                "success": True,
+                "composite_base64": b64_img
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Graphene analytics failed: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8765, reload=False)

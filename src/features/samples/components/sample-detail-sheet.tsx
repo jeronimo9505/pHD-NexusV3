@@ -236,7 +236,7 @@ export function SampleDetailSheet({
     const handleOpenFolder = async (path?: string) => {
         if (!isDesktop) return;
         try {
-            const { open: openShell } = await import('@tauri-apps/plugin-shell');
+            const { invoke } = await import('@tauri-apps/api/core');
             const vaultRoot = localStorage.getItem('phdnexus_vault_root');
             let target = path || expandedChar?.data?.file_origin || vaultRoot;
             
@@ -247,7 +247,8 @@ export function SampleDetailSheet({
                     parts.pop();
                     target = parts.join('/');
                 }
-                await openShell(target);
+                
+                await invoke('open_local_folder', { path: target });
             }
         } catch (e) {
             console.error("Failed to open folder", e);

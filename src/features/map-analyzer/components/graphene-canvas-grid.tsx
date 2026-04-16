@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { fetchGrapheneBands } from '@/lib/desktop';
+import { fetchGrapheneBands, fetchMapHeatmap } from '@/lib/desktop';
 import { Settings, Save, AlertCircle, RefreshCw, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -20,13 +20,19 @@ interface GrapheneProps {
     onUpdateDimensions?: (w: number, h: number, step?: number) => void;
     isDismissed?: boolean;
     onDismiss?: () => void;
+    applySnv?: boolean;
+    wavenumberRange?: [number, number];
 }
 
 export function GrapheneCanvasGrid({
-    vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1.0, nSpectra, selectedPixelIndex, onPixelSelect, onToggleStandard, onUpdateDimensions, isDismissed, onDismiss
+    vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1.0, nSpectra, selectedPixelIndex, onPixelSelect, onToggleStandard, onUpdateDimensions, isDismissed, onDismiss, applySnv = false, wavenumberRange
 }: GrapheneProps) {
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(false);
+    
+    // Custom region heatmap state
+    const [customHeatmap, setCustomHeatmap] = useState<number[] | null>(null);
+    const [customLoading, setCustomLoading] = useState(false);
 
     // Dimension Overrides
     const [wOverride, setWOverride] = useState(mapWidth);
@@ -61,6 +67,7 @@ export function GrapheneCanvasGrid({
             const res = await fetchGrapheneBands({
                 vault_root: vaultRoot,
                 h5_relative_path: h5Path,
+                apply_snv: applySnv,
             });
             if (res.success) {
                 setData(res);
@@ -73,7 +80,7 @@ export function GrapheneCanvasGrid({
         } finally {
             setLoading(false);
         }
-    }, [vaultRoot, h5Path]);
+    }, [vaultRoot, h5Path, applySnv]);
 
     const handleSaveDimensions = () => {
         if (onUpdateDimensions) {
@@ -87,6 +94,34 @@ export function GrapheneCanvasGrid({
     useEffect(() => {
         loadData();
     }, [loadData]);
+
+    const loadCustomHeatmap = useCallback(async () => {
+        if (!vaultRoot || !h5Path || !wavenumberRange) {
+            setCustomHeatmap(null);
+            return;
+        }
+        setCustomLoading(true);
+        try {
+            const res = await fetchMapHeatmap({
+                vault_root: vaultRoot,
+                h5_relative_path: h5Path,
+                start_wavenumber: wavenumberRange[0],
+                end_wavenumber: wavenumberRange[1],
+                apply_snv: applySnv
+            });
+            if (res.success) {
+                setCustomHeatmap(res.heatmap);
+            }
+        } catch (err: any) {
+            toast.error(err.message || 'Failed to load custom heatmap');
+        } finally {
+            setCustomLoading(false);
+        }
+    }, [vaultRoot, h5Path, wavenumberRange, applySnv]);
+
+    useEffect(() => {
+        loadCustomHeatmap();
+    }, [loadCustomHeatmap]);
 
     const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
         const canvas = e.currentTarget;
@@ -312,10 +347,31 @@ export function GrapheneCanvasGrid({
                         />
                     </div>
                     
-                    <div className="col-span-1 h-full w-full flex flex-col justify-center items-center text-center text-slate-400 text-sm">
-                        <AlertCircle size={48} className="opacity-20 mb-3"/>
-                        <span className="font-semibold text-slate-500">Graphene Neural Vision</span>
-                    </div>
+                    {customHeatmap ? (
+                        <div className="col-span-1 h-full w-full relative">
+                            {customLoading && (
+                                <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                                     <RefreshCw size={24} className="text-indigo-500 animate-spin" />
+                                </div>
+                            )}
+                            <RenderCanvas 
+                                title="Custom Range" 
+                                subtitle={wavenumberRange ? `${wavenumberRange[0].toFixed(0)} - ${wavenumberRange[1].toFixed(0)} cm⁻¹` : ""}
+                                dataArr={customHeatmap} 
+                                w={w} h={h} nSpectra={actualN} stepSize={stepSize} cmap="viridis" 
+                                selectedPixelIndex={selectedPixelIndex} 
+                                onClick={handleCanvasClick} 
+                                vmin={null} vmax={null}
+                                colorbarLabel="Intensity (counts)"
+                            />
+                        </div>
+                    ) : (
+                        <div className="col-span-1 h-full w-full flex flex-col justify-center items-center text-center text-slate-400 text-sm bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 m-2 xl:m-4">
+                            <AlertCircle size={48} className="opacity-20 mb-3"/>
+                            <span className="font-semibold text-slate-500">Custom Integration Region</span>
+                            <span className="text-[10px] text-slate-400 mt-2">Select a range below</span>
+                        </div>
+                    )}
 
                     <div className="col-span-1 h-full w-full">
                         <RenderCanvas 

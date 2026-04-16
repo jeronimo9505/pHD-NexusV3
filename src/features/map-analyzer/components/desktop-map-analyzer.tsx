@@ -8,12 +8,13 @@ import { VaultLibrary } from './vault-library';
 import { HeatmapCanvas } from './heatmap-canvas';
 import { SpectrumInspector } from './spectrum-inspector';
 import { GrapheneCanvasGrid } from './graphene-canvas-grid';
+import { GrapheneAnalyticsView } from './graphene-analytics-view';
 import { VaultExplorerModal } from './vault-explorer-modal';
 import { getLogbooksAction, getSamplesAction } from '@/features/samples/actions';
 import { Logbook } from '@/features/samples/types';
 
 export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
-    const [mode, setMode] = useState<'standard' | 'graphene'>('standard');
+    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics'>('standard');
     const [selectedH5, setSelectedH5] = useState('');
     const [vaultRoot, setVaultRoot] = useState('');
     const [sessionFiles, setSessionFiles] = useState<any[]>([]);
@@ -21,6 +22,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     const [dbLogbooks, setDbLogbooks] = useState<Logbook[]>([]);
     const [dbSamples, setDbSamples] = useState<any[]>([]);
     const [mounted, setMounted] = useState(false);
+    const [applySnv, setApplySnv] = useState(false);
     
     // Global dimension settings derived from metadata, but can be updated
     const [mapDim, setMapDim] = useState({ w: 0, h: 0 });
@@ -133,7 +135,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     return (
         <div className="flex h-full w-full bg-slate-50 text-slate-900 font-sans">
             {/* Sidebar Library (Light) */}
-            <div className="w-80 border-r border-slate-200 flex flex-col bg-white relative z-10 shrink-0 shadow-sm">
+            <div className="w-80 border-r border-slate-200 flex flex-col bg-white relative z-50 shrink-0 shadow-sm">
                 <VaultLibrary 
                     vaultRoot={vaultRoot} 
                     groupId={groupId}
@@ -160,15 +162,26 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                             <div className="flex flex-col">
                                 <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest leading-none mb-1">Active Context</span>
                                 <div className="flex items-center gap-2">
-                                    <h2 className="text-sm font-bold text-slate-900 truncate max-w-[200px]">
-                                        {dbSamples.find(s => s.sample_code === sessionFiles.find(f => f.h5_relative_path === selectedH5)?.sample_name)?.sample_code || 'Sample'}
+                                    <h2 className="text-sm font-bold text-slate-900 truncate max-w-[300px]">
+                                        {(() => {
+                                            const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
+                                            const s = dbSamples.find(s => s.sample_code === f?.sample_name);
+                                            return s?.name || f?.sample_name || 'Sample';
+                                        })()}
                                     </h2>
+                                    {(() => {
+                                        const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
+                                        const s = dbSamples.find(s => s.sample_code === f?.sample_name);
+                                        return s?.sample_code ? (
+                                            <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-md shrink-0">{s.sample_code}</span>
+                                        ) : null;
+                                    })()}
                                     <ChevronRight size={14} className="text-slate-300" />
-                                    <span className="text-xs font-medium text-slate-500 truncate max-w-[200px]">
+                                    <span className="text-xs font-medium text-slate-500 truncate max-w-[300px]">
                                         {dbLogbooks.find(l => dbSamples.find(s => s.sample_code === sessionFiles.find(f => f.h5_relative_path === selectedH5)?.sample_name)?.logbook_id === l.id)?.name || 'Project'}
                                     </span>
-                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-2" />
-                                    <span className="text-xs font-bold text-indigo-600 truncate max-w-[300px]">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-2 shrink-0" />
+                                    <span className="text-xs font-bold text-indigo-600 truncate max-w-2xl">
                                         {sessionFiles.find(f => f.h5_relative_path === selectedH5)?.name}
                                     </span>
                                 </div>
@@ -176,6 +189,19 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                         </div>
 
                         <div className="flex items-center gap-4">
+                             {(mode === 'graphene' || mode === 'analytics') && (
+                                 <button 
+                                     onClick={() => setApplySnv(!applySnv)}
+                                     className={cn(
+                                         "px-3 py-1.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-2",
+                                         applySnv ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                                     )}
+                                 >
+                                     <div className={cn("w-2 h-2 rounded-full", applySnv ? "bg-indigo-500 animate-pulse" : "bg-slate-300")} />
+                                     SNV Norm
+                                 </button>
+                             )}
+                             
                              <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
                                 <button 
                                     onClick={() => setMode('standard')}
@@ -194,6 +220,15 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     )}
                                 >
                                     Graphene
+                                </button>
+                                <button 
+                                    onClick={() => setMode('analytics')}
+                                    className={cn(
+                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                        mode === 'analytics' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                    )}
+                                >
+                                    Analytics
                                 </button>
                             </div>
                         </div>
@@ -239,7 +274,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     isDismissed={dismissedBanners.has(selectedH5)}
                                     onDismiss={handleDismissBanner}
                                 />
-                            ) : (
+                            ) : mode === 'graphene' ? (
                                 <GrapheneCanvasGrid 
                                     vaultRoot={vaultRoot}
                                     h5Path={selectedH5}
@@ -253,17 +288,27 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     onUpdateDimensions={handleUpdateDimensions}
                                     isDismissed={dismissedBanners.has(selectedH5)}
                                     onDismiss={handleDismissBanner}
+                                    applySnv={applySnv}
+                                    wavenumberRange={wavenumberRange}
+                                />
+                            ) : (
+                                <GrapheneAnalyticsView 
+                                    vaultRoot={vaultRoot}
+                                    h5Path={selectedH5}
+                                    applySnv={applySnv}
                                 />
                             )}
                         </div>
-                        <div className="h-72 shrink-0 bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 overflow-hidden">
-                            <SpectrumInspector 
-                                vaultRoot={vaultRoot}
-                                h5Path={selectedH5}
-                                pixelIndex={selectedPixelIndex}
-                                onRangeSelected={mode === 'standard' ? setWavenumberRange : undefined}
-                            />
-                        </div>
+                        {mode !== 'analytics' && (
+                            <div className="h-72 shrink-0 bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 overflow-hidden">
+                                <SpectrumInspector 
+                                    vaultRoot={vaultRoot}
+                                    h5Path={selectedH5}
+                                    pixelIndex={selectedPixelIndex}
+                                    onRangeSelected={setWavenumberRange}
+                                />
+                            </div>
+                        )}
                     </>
                 )}
             </div>
