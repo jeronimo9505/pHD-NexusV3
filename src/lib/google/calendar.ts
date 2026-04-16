@@ -1,4 +1,4 @@
-import { ensureAuth } from "./auth";
+import { ensureAuth, clearToken } from "./auth";
 
 const CALENDAR_DISCOVERY_URL = "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest";
 
@@ -16,6 +16,28 @@ async function ensureCalendarApi(): Promise<void> {
         } catch (e) {
             throw new Error("No se pudo cargar la API de Google Calendar. Verifica que esté habilitada en tu proyecto de Google Cloud.");
         }
+    }
+}
+
+/**
+ * Wraps a GAPI call with automatic token retry logic.
+ * If the call fails with a 401/403, the stale token is cleared and
+ * the user is re-authenticated via the GIS popup before retrying once.
+ */
+async function withAuthRetry<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+        return await fn();
+    } catch (error: any) {
+        // 401 = expired token, 403 = insufficient scope or token issue
+        const status = error?.status ?? error?.result?.error?.code;
+        if (status === 401 || status === 403) {
+            console.warn('[Calendar] Auth error, clearing token and retrying...', status);
+            clearToken();
+            // Force fresh GIS token (may show a mini popup if needed)
+            await ensureAuth();
+            return await fn();
+        }
+        throw error;
     }
 }
 
@@ -58,12 +80,14 @@ export async function createMeetConference(calendarId: string, eventData: {
         event.attendees = eventData.attendees.map(email => ({ email: email.trim() }));
     }
 
-    const response = await gapi.client.calendar.events.insert({
-        calendarId: calendarId,
-        resource: event,
-        conferenceDataVersion: 1,
-        sendUpdates: eventData.attendees && eventData.attendees.length > 0 ? 'all' : 'none',
-    });
+    const response = await withAuthRetry(() =>
+        gapi.client.calendar.events.insert({
+            calendarId: calendarId,
+            resource: event,
+            conferenceDataVersion: 1,
+            sendUpdates: eventData.attendees && eventData.attendees.length > 0 ? 'all' : 'none',
+        })
+    );
 
     return {
         id: response.result.id,
@@ -95,11 +119,13 @@ export async function updateMeetConference(calendarId: string, gcalEventId: stri
         },
     };
 
-    const response = await gapi.client.calendar.events.patch({
-        calendarId: calendarId,
-        eventId: gcalEventId,
-        resource: event,
-    });
+    const response = await withAuthRetry(() =>
+        gapi.client.calendar.events.patch({
+            calendarId: calendarId,
+            eventId: gcalEventId,
+            resource: event,
+        })
+    );
 
     return response.result;
 }
