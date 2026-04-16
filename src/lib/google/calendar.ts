@@ -80,7 +80,7 @@ export async function createMeetConference(calendarId: string, eventData: {
         event.attendees = eventData.attendees.map(email => ({ email: email.trim() }));
     }
 
-    const response = await withAuthRetry(() =>
+    const response = await withAuthRetry<any>(() =>
         gapi.client.calendar.events.insert({
             calendarId: calendarId,
             resource: event,
@@ -119,7 +119,7 @@ export async function updateMeetConference(calendarId: string, gcalEventId: stri
         },
     };
 
-    const response = await withAuthRetry(() =>
+    const response = await withAuthRetry<any>(() =>
         gapi.client.calendar.events.patch({
             calendarId: calendarId,
             eventId: gcalEventId,
