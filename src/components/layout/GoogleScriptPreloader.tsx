@@ -52,11 +52,14 @@ export function GoogleScriptPreloader({ apiKey, clientId }: { apiKey?: string; c
                     }
                 } catch {}
 
+                // Also pre-load Calendar API discovery doc
+                await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest").catch(() => {});
+
                 // Init token client (GIS) for future auth requests
                 if ((window as any).google?.accounts?.oauth2) {
                     (window as any).google.accounts.oauth2.initTokenClient({
                         client_id: clientId.trim(),
-                        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/presentations https://www.googleapis.com/auth/drive.readonly',
+                        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/presentations https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/calendar',
                         callback: () => {}, // Will be overridden when actually used
                     });
                 }
