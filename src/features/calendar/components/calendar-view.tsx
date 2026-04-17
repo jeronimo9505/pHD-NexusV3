@@ -33,6 +33,8 @@ interface LocalEvent {
     location?: string | null; url?: string | null; all_day: boolean;
     start_at: string; end_at: string; color: string;
     creator?: { full_name: string | null } | null;
+    gcal_event_id?: string | null;
+    attendees?: string[] | null;
 }
 interface CalendarViewProps {
     groupId: string; groupName: string;
@@ -476,10 +478,60 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
                 url: extended.original.url,
                 color: extended.original.color, 
                 eventId: extended.original.id,
-                gcalEventId: extended.original.gcal_event_id
+                gcalEventId: extended.original.gcal_event_id,
+                attendees: extended.original.attendees || []
             });
         }
         setShowForm(false);
+    };
+
+    const handleEventChange = async (changeInfo: any) => {
+        const { event } = changeInfo;
+        const original = event.extendedProps.original;
+        if (!original || event.extendedProps.type === 'task') return;
+
+        const startAt = event.startStr;
+        const endAt = event.endStr || event.startStr;
+        
+        const payload = {
+            groupId,
+            title: event.title,
+            description: original.description,
+            location: original.location,
+            url: original.url,
+            allDay: event.allDay,
+            startAt,
+            endAt,
+            color: original.color,
+            gcalEventId: original.gcal_event_id,
+            attendees: original.attendees,
+        };
+
+        // 1. Update Supabase
+        const res = await updateCalendarEventAction(original.id, payload);
+        if (res.error) {
+            toast.error('Error al sincronizar cambio: ' + res.error);
+            changeInfo.revert();
+            return;
+        }
+
+        // 2. Update Google Calendar if exists
+        if (calendarId && original.gcal_event_id) {
+            try {
+                const { updateMeetConference } = await import('@/lib/google/calendar');
+                await updateMeetConference(calendarId, original.gcal_event_id, {
+                    title: event.title,
+                    description: original.description,
+                    startAt: event.allDay ? `${startAt.slice(0, 10)}T09:00:00Z` : startAt,
+                    endAt: event.allDay ? `${startAt.slice(0, 10)}T10:00:00Z` : endAt,
+                });
+            } catch (e) {
+                console.warn('[Calendar Sync] Google Calendar update failed:', e);
+                toast.error('Local actualizado, pero falló la sincronización con Google.');
+            }
+        }
+
+        toast.success('Calendario actualizado ✓');
     };
 
     const handleGenerateMeet = async () => {
@@ -575,7 +627,10 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
                 location: item.original.location,
                 description: item.original.description,
                 url: item.original.url,
-                color: item.original.color, eventId: item.original.id
+                color: item.original.color, 
+                eventId: item.original.id,
+                gcalEventId: item.original.gcal_event_id,
+                attendees: item.original.attendees || []
             });
         }
         setShowForm(false);
@@ -666,11 +721,14 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
                             events={calendarData}
                             selectable={true}
                             selectMirror={true}
+                            editable={true} // Enable drag and resize
                             dayMaxEvents={true}
                             nowIndicator={true}
                             slotMinTime="06:00:00" // start display a bit later
                             select={handleDateSelect}
                             eventClick={handleEventClick}
+                            eventDrop={handleEventChange}
+                            eventResize={handleEventChange}
                             height="100%"
                             // Configuration for multiMonthYear
                             multiMonthMaxColumns={3}
@@ -890,6 +948,24 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
                                             <div className="text-xs text-slate-600 flex items-start gap-2 pt-1">
                                                 <FileText size={12} className="text-slate-400 mt-0.5 shrink-0" />
                                                 <p className="whitespace-pre-wrap leading-relaxed flex-1 min-w-0">{selectedItem.description}</p>
+                                            </div>
+                                        )}
+
+                                        {selectedItem.attendees && selectedItem.attendees.length > 0 && (
+                                            <div className="pt-2 border-t border-slate-100 mt-3">
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                                    <Users size={10} /> Invitados ({selectedItem.attendees.length})
+                                                </p>
+                                                <div className="flex flex-col gap-1.5">
+                                                    {selectedItem.attendees.map((email: string) => (
+                                                        <div key={email} className="flex items-center gap-2 group">
+                                                            <div className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] font-semibold text-slate-500 shrink-0">
+                                                                {email[0].toUpperCase()}
+                                                            </div>
+                                                            <span className="text-xs text-slate-600 truncate">{email}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
                                         )}
 
