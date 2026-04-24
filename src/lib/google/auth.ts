@@ -54,6 +54,11 @@ const loadToken = () => {
 export const clearToken = () => {
     if (typeof window === 'undefined') return;
     localStorage.removeItem(STORAGE_KEY);
+    // Also clear the GAPI in-memory token so withAuthRetry can get a fresh one
+    const gapi = (window as any).gapi;
+    if (gapi?.client?.setToken) {
+        gapi.client.setToken(null);
+    }
 };
 
 // --- Initialization ---
@@ -168,16 +173,9 @@ export const ensureAuth = async (): Promise<string> => {
         });
     }
 
-    // 1. Check if token is already active in GAPI
-    if (gapi.client && typeof gapi.client.getToken === 'function') {
-        const tokenObj = gapi.client.getToken();
-        if (tokenObj && tokenObj.access_token) {
-            // We assume GAPI keeps it valid or we manage it via localStorage
-            return tokenObj.access_token;
-        }
-    }
-
-    // 2. Check localStorage
+    // 1. Use localStorage as source of truth for expiry.
+    // gapi.client.getToken() returns whatever was last set in memory — it has no
+    // knowledge of our expiry tracking — so we never trust it directly.
     const savedToken = loadToken();
     if (savedToken) {
         if (gapi.client && typeof gapi.client.setToken === 'function') {
@@ -186,7 +184,9 @@ export const ensureAuth = async (): Promise<string> => {
         return savedToken;
     }
 
-    // 3. Request new token via GIS (silent if user already consented)
+    // 2. Token expired or missing — request a fresh one via GIS.
+    // prompt: '' = silent re-auth (no consent screen if already granted).
+    // This works automatically ~1 hour after login when the access token expires.
     // Avoid multiple simultaneous prompts
     if (googleAuthPromise) return googleAuthPromise;
 

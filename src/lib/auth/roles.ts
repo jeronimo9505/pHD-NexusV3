@@ -1,6 +1,7 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { Database } from "@/types/supabase";
 import { SupabaseClient } from "@supabase/supabase-js";
+import { cache } from "react";
 
 export type GroupRole = Database['public']['Tables']['group_members']['Row']['role'];
 export type SystemRole = 'admin' | 'user';
@@ -10,27 +11,32 @@ interface PermissionCheck {
     resource: 'report' | 'task' | 'group' | 'settings';
 }
 
+// Deduplicated per (groupId, userId) pair within a single request.
+// Both the layout and the page call getGroupRole — cache() ensures the DB
+// query only executes once even if called multiple times with the same args.
+const fetchGroupRole = cache(async (groupId: string, userId: string): Promise<GroupRole | null> => {
+    const supabase = await createClient();
+    const { data: member } = await supabase
+        .from('group_members')
+        .select('role')
+        .eq('group_id', groupId)
+        .eq('user_id', userId)
+        .single();
+    return member?.role || null;
+});
+
 /**
  * Fetches the current user's role in a specific group.
  * Accepts optional supabase client and userId to avoid redundant auth calls.
  */
 export async function getGroupRole(groupId: string, supabase?: SupabaseClient, userId?: string): Promise<GroupRole | null> {
-    const sb = supabase || await createClient();
     let uid = userId;
     if (!uid) {
-        const { data: { user } } = await sb.auth.getUser();
+        const user = await getUser();
         if (!user) return null;
         uid = user.id;
     }
-
-    const { data: member } = await sb
-        .from('group_members')
-        .select('role')
-        .eq('group_id', groupId)
-        .eq('user_id', uid)
-        .single();
-
-    return member?.role || null;
+    return fetchGroupRole(groupId, uid);
 }
 
 /**
@@ -41,7 +47,7 @@ export async function getSystemRole(supabase?: SupabaseClient, userId?: string):
     const sb = supabase || await createClient();
     let uid = userId;
     if (!uid) {
-        const { data: { user } } = await sb.auth.getUser();
+        const user = await getUser();
         if (!user) return null;
         uid = user.id;
     }

@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { getGroupRole } from "@/lib/auth/roles";
 import { PendingReviewCard } from "@/features/dashboard/components/pending-review-card";
 import { NotesWidget } from "@/features/dashboard/components/notes-widget";
@@ -13,13 +13,10 @@ export default async function GroupDashboardPage({
     params: Promise<{ groupId: string }>;
 }) {
     const { groupId } = await params;
-    const supabase = await createClient();
+    const [supabase, user] = await Promise.all([createClient(), getUser()]);
 
-    const role = await getGroupRole(groupId);
+    const role = await getGroupRole(groupId, supabase, user?.id);
     const canReview = role === 'supervisor' || role === 'labmanager' || role === 'owner';
-
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser();
 
     const today = new Date().toISOString();
 
