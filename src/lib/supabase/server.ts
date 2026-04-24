@@ -35,3 +35,14 @@ export const createClient = cache(async () => {
         }
     );
 });
+
+/**
+ * Returns the currently authenticated user. Wrapped with cache() so that
+ * multiple calls within the same request (e.g. layout + page) resolve from
+ * the same promise, avoiding redundant round trips to Supabase Auth.
+ */
+export const getUser = cache(async () => {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    return user;
+});

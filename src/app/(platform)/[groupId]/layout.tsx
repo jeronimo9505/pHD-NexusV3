@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Shell } from "@/components/layout/shell";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -14,10 +14,7 @@ interface GroupLayoutProps {
 
 export default async function GroupLayout(props: GroupLayoutProps) {
     const { groupId } = await props.params;
-    const supabase = await createClient();
-
-    // Single auth call for entire layout
-    const { data: { user } } = await supabase.auth.getUser();
+    const [supabase, user] = await Promise.all([createClient(), getUser()]);
     const userId = user?.id;
 
     // Fetch all needed data in parallel, reusing supabase client + userId
