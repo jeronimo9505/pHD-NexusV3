@@ -333,10 +333,10 @@ export function ReportCard({ report, currentUserId, groupId, driveSettings }: Re
                     isOpen={showDraftEditor}
                     onClose={() => setShowDraftEditor(false)}
                     initialData={{
-                        title: report.title,
-                        type: report.type as "report" | "ppt" | "meeting_note",
-                        startDate: report.start_date || undefined,
-                        endDate: report.end_date || undefined,
+                        title: report.title ?? '',
+                        type: (report.type as "report" | "ppt" | "meeting_note") ?? 'report',
+                        startDate: report.start_date ?? '',
+                        endDate: report.end_date ?? '',
                         sections: report.sections as any || undefined,
                     }}
                     groupId={groupId}
@@ -351,7 +351,7 @@ export function ReportCard({ report, currentUserId, groupId, driveSettings }: Re
                     onClose={() => setShowEditDialog(false)}
                     report={{
                         id: report.id,
-                        title: report.title,
+                        title: report.title ?? '',
                         type: report.type as any
                     }}
                     groupId={groupId}

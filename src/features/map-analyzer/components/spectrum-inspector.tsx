@@ -141,8 +141,8 @@ export function SpectrumInspector({ vaultRoot, h5Path, pixelIndex, onRangeSelect
                                     color: '#0f172a',
                                     fontWeight: 'bold'
                                 }}
-                                labelFormatter={(val: number) => `${val.toFixed(1)} cm⁻¹`}
-                                formatter={(val: number) => [val.toFixed(2), 'Intensity']}
+                                labelFormatter={(val: any) => `${val ? Number(val).toFixed(1) : '0'} cm⁻¹`}
+                                formatter={(val: any) => [val ? Number(val).toFixed(2) : '0', 'Intensity']}
                             />
                             <Line 
                                 type="linear" 

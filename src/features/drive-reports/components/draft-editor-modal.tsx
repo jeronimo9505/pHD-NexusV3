@@ -153,7 +153,7 @@ export function DraftEditorModal({ isOpen, onClose, groupId, draftId, initialDat
 
             // Update draft with Google Doc info
             const updateDocFormData = new FormData();
-            updateDocFormData.append('draft_id', currentDraftId);
+            updateDocFormData.append('draft_id', currentDraftId!);
             updateDocFormData.append('drive_file_id', fileResult.id);
             updateDocFormData.append('web_view_link', fileResult.webViewLink);
 

@@ -57,7 +57,14 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
         async function fetchInitialData() {
             try {
                 const { data: lbs } = await getLogbooksAction(groupId);
-                if (lbs) setDbLogbooks(lbs);
+                if (lbs) {
+                    const mappedLbs: Logbook[] = lbs.map(l => ({
+                        ...l,
+                        description: l.description ?? undefined,
+                        created_at: l.created_at ?? ''
+                    }));
+                    setDbLogbooks(mappedLbs);
+                }
 
                 // Fetch samples for the group to resolve names
                 const { data: samples } = await getSamplesAction(groupId, '');

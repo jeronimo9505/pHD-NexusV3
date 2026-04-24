@@ -60,8 +60,8 @@ export default async function SamplesPage(props: SamplesPageProps) {
 
     // Default to empty arrays if error
     const samples = samplesRes.data || [];
-    const fields = fieldsRes.data || [];
-    const nomenclatures = nomenclaturesRes.data || [];
+    const fields = (fieldsRes.data || []) as any[];
+    const nomenclatures = (nomenclaturesRes.data || []) as any[];
     const driveSettings = groupRes.data?.drive_settings as { clientId?: string; apiKey?: string; folderId?: string; sampleFolderId?: string } | undefined;
 
     return (

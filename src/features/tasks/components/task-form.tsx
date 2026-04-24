@@ -53,7 +53,7 @@ export function TaskForm({ task, groupId, onClose, onCreate, onSave, columns = [
     const handleDueDateChange = async (newDate: string) => {
         setDueDate(newDate);
         if (isEditMode && task) {
-            const res = await updateTaskAction(task.id, groupId, { due_date: newDate || null });
+            const res = await updateTaskAction(task.id, groupId, { due_date: newDate || undefined });
             if (res.error) {
                 toast.error("Failed to update due date");
                 setDueDate(task.due_date || '');
