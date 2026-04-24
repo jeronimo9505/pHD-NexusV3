@@ -1,9 +1,21 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 
-export async function middleware(request: NextRequest) {
-    // Update session and check for user
-    const { response, user } = await updateSession(request)
+export async function proxy(request: NextRequest) {
+    // Fail-open if Supabase env vars are missing (prevents MIDDLEWARE_INVOCATION_FAILED)
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        console.error('[middleware] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY')
+        return NextResponse.next()
+    }
+
+    let response: NextResponse
+    let user: Awaited<ReturnType<typeof updateSession>>['user']
+    try {
+        ;({ response, user } = await updateSession(request))
+    } catch (err) {
+        console.error('[middleware] updateSession failed:', err)
+        return NextResponse.next()
+    }
 
     const path = request.nextUrl.pathname
 
