@@ -114,8 +114,8 @@ export async function createLogbookAction(input: {
                 const newSamplePayload = {
                     group_id: input.group_id,
                     logbook_id: logbook.id,
-                    display_id: updateIds(s.display_id),
-                    sample_code: updateIds(s.sample_code),
+                    display_id: updateIds(s.display_id) ?? '',
+                    sample_code: updateIds(s.sample_code) ?? '',
                     name: s.name,
                     description: s.description,
                     parent_id: s.parent_id ? (oldToNewIdMap[s.parent_id] || null) : null,

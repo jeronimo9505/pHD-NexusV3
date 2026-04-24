@@ -422,7 +422,7 @@ export async function getAllGroupsAction() {
         code: g.code,
         created_by: g.created_by,
         owner_name: g.profiles?.full_name || g.profiles?.email || 'Unknown',
-        memberStatus: membershipMap.get(g.id) ?? null, // 'active' | 'pending' | null
+        memberStatus: (membershipMap.get(g.id) ?? null) as 'active' | 'pending' | null,
     }));
 
     return { data: enriched };

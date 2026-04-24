@@ -43,7 +43,7 @@ export function ReportList({ initialReports, currentUserId, groupId, driveSettin
             .filter(r => {
                 // Search filter
                 const matchesSearch = !searchQuery ||
-                    r.title.toLowerCase().includes(searchQuery.toLowerCase());
+                    (r.title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
 
                 // Type filter
                 const matchesType = typeFilter === 'all' || r.type === typeFilter;

@@ -2,8 +2,8 @@ import { Database } from "@/types/supabase";
 
 export type DriveReport = Database['public']['Tables']['drive_reports']['Row'] & {
     author_profile?: {
-        full_name: string;
-        avatar_url?: string;
+        full_name: string | null;
+        avatar_url?: string | null;
     };
     seen_count?: number;
     comment_count?: number;

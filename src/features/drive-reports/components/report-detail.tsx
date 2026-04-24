@@ -34,11 +34,11 @@ export function ReportDetail({ report, currentUserId, groupId }: ReportDetailPro
     const isSeen = (report.seen_by as string[])?.includes(currentUserId);
 
     // Icon mapping
-    const Icon = {
+    const Icon = (report.type ? {
         'report': FileText,
         'ppt': Presentation,
         'meeting_note': StickyNote
-    }[report.type] || FileText;
+    }[report.type] : undefined) || FileText;
 
     const handleDelete = async () => {
         if (!confirm('Are you sure you want to delete this report? This action cannot be undone.')) return;

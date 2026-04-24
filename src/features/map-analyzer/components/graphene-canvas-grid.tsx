@@ -134,7 +134,7 @@ export function GrapheneCanvasGrid({
 
         if (x >= 0 && x < w && y >= 0 && y < h) {
             const index = y * w + x;
-            if (index < actualN) {
+            if (index < actualN && onPixelSelect) {
                 onPixelSelect(index);
             }
         }

@@ -1,0 +1,82 @@
+﻿src/app/(platform)/[groupId]/drive-reports/page.tsx(71,21): error TS2322: Type '{ author_name: string; comment_count: number; task_count: number; author_id: string; created_at: string; drive_file_id: string | null; end_date: string | null; group_id: string; icon_link: string | null; ... 15 more ...; linked_tasks: { ...; }[]; }[]' is not assignable to type 'DriveReport[]'.
+  Type '{ author_name: string; comment_count: number; task_count: number; author_id: string; created_at: string; drive_file_id: string | null; end_date: string | null; group_id: string; icon_link: string | null; ... 15 more ...; linked_tasks: { ...; }[]; }' is not assignable to type 'DriveReport'.
+    Type '{ author_name: string; comment_count: number; task_count: number; author_id: string; created_at: string; drive_file_id: string | null; end_date: string | null; group_id: string; icon_link: string | null; ... 15 more ...; linked_tasks: { ...; }[]; }' is not assignable to type '{ author_profile?: { full_name: string; avatar_url?: string | undefined; } | undefined; seen_count?: number | undefined; comment_count?: number | undefined; task_count?: number | undefined; linked_tasks?: { ...; }[] | undefined; }'.
+      The types of 'author_profile.full_name' are incompatible between these types.
+        Type 'string | null' is not assignable to type 'string'.
+          Type 'null' is not assignable to type 'string'.
+src/app/(platform)/[groupId]/knowledge/page.tsx(35,11): error TS2322: Type '{ resource_type: "link" | "file" | "note" | undefined; category: string | null; content: string | null; created_at: string; created_by: string; drive_file_id: string | null; folder_id: string | null; ... 7 more ...; url: string | null; }[]' is not assignable to type 'KnowledgeItem[]'.
+  Type '{ resource_type: "link" | "file" | "note" | undefined; category: string | null; content: string | null; created_at: string; created_by: string; drive_file_id: string | null; folder_id: string | null; ... 7 more ...; url: string | null; }' is not assignable to type 'KnowledgeItem'.
+    Types of property 'url' are incompatible.
+      Type 'string | null' is not assignable to type 'string'.
+        Type 'null' is not assignable to type 'string'.
+src/app/(platform)/[groupId]/samples/page.tsx(95,25): error TS2322: Type '{ group_id: string; id: string; label: string; logbook_id: string | null; name: string; options: Json; order: number; required: boolean; type: string; }[]' is not assignable to type 'SampleFieldConfig[]'.
+  Type '{ group_id: string; id: string; label: string; logbook_id: string | null; name: string; options: Json; order: number; required: boolean; type: string; }' is not assignable to type 'SampleFieldConfig'.
+    Types of property 'logbook_id' are incompatible.
+      Type 'string | null' is not assignable to type 'string'.
+        Type 'null' is not assignable to type 'string'.
+src/app/(platform)/[groupId]/samples/page.tsx(96,25): error TS2322: Type '{ category: string; code: string; group_id: string; id: string; logbook_id: string | null; name: string; }[]' is not assignable to type 'SampleNomenclature[]'.
+  Type '{ category: string; code: string; group_id: string; id: string; logbook_id: string | null; name: string; }' is not assignable to type 'SampleNomenclature'.
+    Types of property 'logbook_id' are incompatible.
+      Type 'string | null' is not assignable to type 'string'.
+        Type 'null' is not assignable to type 'string'.
+src/app/(platform)/dashboard/page.tsx(35,13): error TS2322: Type 'never[] | { id: any; name: any; description: any; code: any; created_by: any; owner_name: any; memberStatus: string | null; }[]' is not assignable to type 'GroupInfo[]'.
+  Type '{ id: any; name: any; description: any; code: any; created_by: any; owner_name: any; memberStatus: string | null; }[]' is not assignable to type 'GroupInfo[]'.
+    Type '{ id: any; name: any; description: any; code: any; created_by: any; owner_name: any; memberStatus: string | null; }' is not assignable to type 'GroupInfo'.
+      Types of property 'memberStatus' are incompatible.
+        Type 'string | null' is not assignable to type '"active" | "pending" | null'.
+          Type 'string' is not assignable to type '"active" | "pending" | null'.
+src/app/(platform)/dashboard/page.tsx(36,13): error TS2322: Type '{ id: any; name: any; description: any; code: any; created_by: any; owner_name: any; memberStatus: string | null; }[]' is not assignable to type 'GroupInfo[]'.
+  Type '{ id: any; name: any; description: any; code: any; created_by: any; owner_name: any; memberStatus: string | null; }' is not assignable to type 'GroupInfo'.
+    Types of property 'memberStatus' are incompatible.
+      Type 'string | null' is not assignable to type '"active" | "pending" | null'.
+        Type 'string' is not assignable to type '"active" | "pending" | null'.
+src/features/drive-reports/components/draft-editor-modal.tsx(156,50): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(name: string, value: string | Blob): void', gave the following error.
+    Argument of type 'string | undefined' is not assignable to parameter of type 'string | Blob'.
+      Type 'undefined' is not assignable to type 'string | Blob'.
+  Overload 2 of 3, '(name: string, value: string): void', gave the following error.
+    Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+  Overload 3 of 3, '(name: string, blobValue: Blob, filename?: string | undefined): void', gave the following error.
+    Argument of type 'string | undefined' is not assignable to parameter of type 'Blob'.
+      Type 'undefined' is not assignable to type 'Blob'.
+src/features/drive-reports/components/report-card.tsx(336,25): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+src/features/drive-reports/components/report-card.tsx(338,25): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/features/drive-reports/components/report-card.tsx(339,25): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/features/drive-reports/components/report-card.tsx(354,25): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+src/features/drive-reports/components/report-detail.tsx(41,7): error TS2538: Type 'null' cannot be used as an index type.
+src/features/drive-reports/components/report-list.tsx(46,21): error TS18047: 'r.title' is possibly 'null'.
+src/features/map-analyzer/components/desktop-map-analyzer.tsx(60,40): error TS2345: Argument of type '{ created_at: string | null; description: string | null; group_id: string; id: string; name: string; prefix: string; }[]' is not assignable to parameter of type 'SetStateAction<Logbook[]>'.
+  Type '{ created_at: string | null; description: string | null; group_id: string; id: string; name: string; prefix: string; }[]' is not assignable to type 'Logbook[]'.
+    Type '{ created_at: string | null; description: string | null; group_id: string; id: string; name: string; prefix: string; }' is not assignable to type 'Logbook'.
+      Types of property 'description' are incompatible.
+        Type 'string | null' is not assignable to type 'string | undefined'.
+          Type 'null' is not assignable to type 'string | undefined'.
+src/features/map-analyzer/components/graphene-canvas-grid.tsx(138,17): error TS2722: Cannot invoke an object which is possibly 'undefined'.
+src/features/map-analyzer/components/spectrum-inspector.tsx(144,33): error TS2322: Type '(val: number) => string' is not assignable to type '((label: ReactNode, payload: readonly Payload<number, "Intensity">[]) => ReactNode) & ((label: any, payload: Payload<number, "Intensity">[]) => ReactNode)'.
+  Type '(val: number) => string' is not assignable to type '(label: ReactNode, payload: readonly Payload<number, "Intensity">[]) => ReactNode'.
+    Types of parameters 'val' and 'label' are incompatible.
+      Type 'ReactNode' is not assignable to type 'number'.
+        Type 'undefined' is not assignable to type 'number'.
+src/features/map-analyzer/components/spectrum-inspector.tsx(145,33): error TS2322: Type '(val: number) => [string, "Intensity"]' is not assignable to type 'Formatter<number, "Intensity"> & ((value: number, name: "Intensity", item: Payload<number, "Intensity">, index: number, payload: Payload<number, "Intensity">[]) => ReactNode | [...])'.
+  Type '(val: number) => [string, "Intensity"]' is not assignable to type 'Formatter<number, "Intensity">'.
+    Types of parameters 'val' and 'value' are incompatible.
+      Type 'number | undefined' is not assignable to type 'number'.
+        Type 'undefined' is not assignable to type 'number'.
+src/features/samples/actions.ts(131,29): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: { attributes?: Json | undefined; composition?: Json | undefined; created_at?: string | undefined; created_by?: string | null | undefined; description?: string | null | undefined; ... 10 more ...; updated_at?: string | undefined; }, options?: { ...; } | undefined): PostgrestFilterBuilder<...>', gave the following error.
+    Argument of type '{ group_id: string; logbook_id: string; display_id: string | null; sample_code: string | null; name: string; description: string | null; parent_id: string | null; type: string; status: string; attributes: Json; composition: Json; created_by: string | null; }' is not assignable to parameter of type '{ attributes?: Json | undefined; composition?: Json | undefined; created_at?: string | undefined; created_by?: string | null | undefined; description?: string | null | undefined; ... 10 more ...; updated_at?: string | undefined; }'.
+      Types of property 'display_id' are incompatible.
+        Type 'string | null' is not assignable to type 'string'.
+          Type 'null' is not assignable to type 'string'.
+  Overload 2 of 2, '(values: { attributes?: Json | undefined; composition?: Json | undefined; created_at?: string | undefined; created_by?: string | null | undefined; description?: string | null | undefined; ... 10 more ...; updated_at?: string | undefined; }[], options?: { ...; } | undefined): PostgrestFilterBuilder<...>', gave the following error.
+    Argument of type '{ group_id: string; logbook_id: string; display_id: string | null; sample_code: string | null; name: string; description: string | null; parent_id: string | null; type: string; status: string; attributes: Json; composition: Json; created_by: string | null; }' is not assignable to parameter of type '{ attributes?: Json | undefined; composition?: Json | undefined; created_at?: string | undefined; created_by?: string | null | undefined; description?: string | null | undefined; ... 10 more ...; updated_at?: string | undefined; }[]'.
+      Type '{ group_id: string; logbook_id: string; display_id: string | null; sample_code: string | null; name: string; description: string | null; parent_id: string | null; type: string; status: string; attributes: Json; composition: Json; created_by: string | null; }' is missing the following properties from type '{ attributes?: Json | undefined; composition?: Json | undefined; created_at?: string | undefined; created_by?: string | null | undefined; description?: string | null | undefined; ... 10 more ...; updated_at?: string | undefined; }[]': length, pop, push, concat, and 35 more.
+src/features/tasks/components/task-detail-sheet.tsx(41,64): error TS2322: Type 'string | null' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+src/features/tasks/components/task-form.tsx(56,68): error TS2322: Type 'string | null' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
