@@ -237,7 +237,7 @@ async function executeToolCall(toolName: string, args: Record<string, any>, grou
             const { category } = args;
             let query = supabase
                 .from('knowledge_items')
-                .select('title, content, category, tags, created_at')
+                .select('title, content, category, tags, url, drive_file_id, created_at')
                 .eq('group_id', groupId)
                 .order('created_at', { ascending: false })
                 .limit(20);
@@ -258,7 +258,7 @@ async function executeToolCall(toolName: string, args: Record<string, any>, grou
                 .limit(10);
             const { data: driveReports, error: drErr } = await supabase
                 .from('drive_reports')
-                .select('title, type, status, author:author_id(full_name), created_at')
+                .select('title, type, status, web_view_link, author:author_id(full_name), created_at')
                 .eq('group_id', groupId)
                 .order('created_at', { ascending: false })
                 .limit(10);
@@ -463,6 +463,7 @@ Your personality:
 - Proactively use tools to answer questions about the lab's data
 - Present data in clear, structured format (use markdown tables and lists when helpful)
 - When showing sample lists, include sample codes, names, status, and relevant dates
+- **IMPORTANT**: When the user asks for a report, file, or knowledge item, ALWAYS check if there is a 'web_view_link', 'url', or 'drive_file_id' available in the tool output and PROVIDE it as a clickable markdown link.
 - Always answer in the same language the user asks in (Spanish or English)
 - For questions about "this week" or "recently", use the get_samples_this_week tool
 - Do not make up data — always use tools to fetch real information
