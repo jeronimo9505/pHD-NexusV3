@@ -250,18 +250,18 @@ async function executeToolCall(toolName: string, args: Record<string, any>, grou
         }
 
         case 'get_reports_summary': {
-            const { data: reports, error } = await supabase
+            const { data: reports, error } = await (supabase
                 .from('reports')
                 .select('id, week_start, week_end, status, author:author_id(full_name), created_at')
                 .eq('group_id', groupId)
                 .order('created_at', { ascending: false })
-                .limit(10);
-            const { data: driveReports, error: drErr } = await supabase
+                .limit(10)) as any;
+            const { data: driveReports, error: drErr } = await (supabase
                 .from('drive_reports')
                 .select('title, type, status, web_view_link, author:author_id(full_name), created_at')
                 .eq('group_id', groupId)
                 .order('created_at', { ascending: false })
-                .limit(10);
+                .limit(10)) as any;
             if (error || drErr) return { error: (error || drErr)?.message };
             return { reports, drive_reports: driveReports };
         }
