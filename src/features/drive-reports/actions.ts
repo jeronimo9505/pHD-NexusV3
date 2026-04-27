@@ -141,11 +141,11 @@ export async function markAsSeenAction(id: string, groupId: string) {
         }
 
         // Fetch current seen_by
-        const { data: report, error: fetchError } = await supabase
+        const { data: report, error: fetchError } = await (supabase
             .from('drive_reports')
             .select('seen_by')
             .eq('id', id)
-            .single();
+            .single() as any);
 
         if (fetchError) {
             console.error('Fetch error:', fetchError);

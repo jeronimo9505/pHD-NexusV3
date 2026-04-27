@@ -8,16 +8,16 @@ export type KnowledgeItem = {
     id?: string;
     group_id: string;
     title: string;
-    url: string;
-    content?: string;
-    drive_file_id?: string;
-    category?: string;
-    folder_id?: string;
-    description?: string;
-    tags?: string[];
+    url?: string | null;
+    content?: string | null;
+    drive_file_id?: string | null;
+    category?: string | null;
+    folder_id?: string | null;
+    description?: string | null;
+    tags?: string[] | null;
     is_pinned?: boolean;
     is_starred?: boolean;
-    resource_type?: 'file' | 'link' | 'note';
+    resource_type?: 'file' | 'link' | 'note' | string | null;
     created_by?: string;
     created_at?: string;
     updated_at?: string;
@@ -50,7 +50,7 @@ export async function getKnowledgeItemsAction(groupId: string, search?: string, 
         return { error: error.message };
     }
 
-    return { data };
+    return { data: (data as KnowledgeItem[]) || [] };
 }
 
 export async function getKnowledgeFoldersAction(groupId: string) {

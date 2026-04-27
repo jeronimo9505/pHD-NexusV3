@@ -38,7 +38,7 @@ export function TaskDetailSheet({ task, groupId, onClose, columns = ["todo", "in
 
     const handleDueDateChange = async (newDate: string) => {
         setDueDate(newDate);
-        const res = await updateTaskAction(task.id, groupId, { due_date: newDate || undefined });
+        const res = await updateTaskAction(task.id, groupId, { due_date: newDate || null });
         if (res.error) {
             toast.error("Failed to update due date");
             setDueDate(task.due_date || '');

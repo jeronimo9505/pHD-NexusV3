@@ -16,11 +16,11 @@ export type Task = {
     id: string;
     group_id: string;
     title: string;
-    description?: string;
+    description?: string | null;
     status: string;
-    previous_status?: string; // To remember original status when marking as done
+    previous_status?: string | null; // To remember original status when marking as done
     priority: 'low' | 'medium' | 'high';
-    due_date?: string;
+    due_date?: string | null;
     created_by: string;
     created_at: string;
     completed: boolean;
@@ -63,10 +63,9 @@ export async function getTasksAction(groupId: string) {
     // Transform data to match Task type (specifically comments_count and subtasks safety)
     const formattedTasks = tasks.map((t: any) => ({
         ...t,
-        completed: t.completed ?? false, // Ensure boolean
-        subtasks: t.subtasks || [], // Ensure array
+        completed: t.completed ?? false,
+        subtasks: (t.subtasks as Subtask[]) || [],
         comments_count: t.comments?.[0]?.count || 0,
-        // Supabase returns array of objects for relations, we just keep it as is but typed
     }));
 
     // Fetch group columns

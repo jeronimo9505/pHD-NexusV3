@@ -10,7 +10,7 @@ export const isDesktop = typeof window !== "undefined" &&
  * URL of the local Python science engine sidecar.
  * This is only accessible when the desktop app is running.
  */
-export const SCIENCE_ENGINE_URL = "http://127.0.0.1:8765";
+export const SCIENCE_ENGINE_URL = "http://127.0.0.1:8888";
 
 /**
  * Check if the Python science engine is online.

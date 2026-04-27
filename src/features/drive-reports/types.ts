@@ -1,6 +1,8 @@
 import { Database } from "@/types/supabase";
 
-export type DriveReport = Database['public']['Tables']['drive_reports']['Row'] & {
+export type DriveReport = Omit<Database['public']['Tables']['drive_reports']['Row'], 'seen_by' | 'sections'> & {
+    seen_by: string[] | null;
+    sections: any | null;
     author_profile?: {
         full_name: string | null;
         avatar_url?: string | null;

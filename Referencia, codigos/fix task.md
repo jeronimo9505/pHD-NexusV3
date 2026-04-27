@@ -2,12 +2,12 @@ Comprehensive Code Audit — phd-nexusv3
 
   CRITICAL (fix before next release)
 
-  1. group_settings table reference — TypeScript error at build time
+  [x] 1. group_settings table reference — TypeScript error at build time
   - src/app/(dashboard)/[groupId]/knowledge/page.tsx queries a group_settings table that does not exist in supabase.ts types.
   - Causes type errors and will fail if RLS blocks access to a non-existent table.
   - Fix: either create the table in Supabase with a migration, or remove the dead query.
 
-  2. tsconfig.json — strict: false
+  [x] 2. tsconfig.json — strict: false
   - Disables null checks, implicit any, and strict function types across the entire codebase.
   - The 58+ Json type casting issues and several as any usages are only safe-looking because strict mode is off.
   - Fix: enable "strict": true and resolve the resulting errors incrementally.
@@ -50,7 +50,7 @@ Comprehensive Code Audit — phd-nexusv3
   - Several pages await multiple Supabase calls sequentially before rendering anything. Wrapping independent fetches in <Suspense> + parallel Promise.all
   would cut TTFB.
 
-  11. src/app/(auth)/login/page.tsx — direct createClient() call without guard
+  [x] 11. src/app/(auth)/login/page.tsx — direct createClient() call without guard
   - If NEXT_PUBLIC_SUPABASE_URL is missing at build time (e.g. preview deploys without env vars), the page throws before rendering.
   - The middleware already fails-open; the page should too. Wrap in try-catch or check env vars first.
 

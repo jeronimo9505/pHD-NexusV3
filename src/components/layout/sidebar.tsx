@@ -21,7 +21,8 @@ import {
     User,
     TestTube,
     CalendarDays,
-    Map
+    Map,
+    BrainCircuit
 } from 'lucide-react';
 import { GroupRole, SystemRole } from '@/lib/auth/roles';
 import { createBrowserClient } from '@supabase/ssr';
@@ -40,9 +41,10 @@ interface SidebarProps {
     userName?: string | null;
     userEmail?: string | null;
     groups?: GroupInfo[];
+    isOwner?: boolean;
 }
 
-export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups = [] }: SidebarProps) {
+export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups = [], isOwner = false }: SidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
     const { collapsed, toggle } = useSidebar();
@@ -132,6 +134,27 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
                         </Link>
                     );
                 })}
+
+                {/* Nexus AI — only for group owner */}
+                {isOwner && (
+                    <>
+                        <div className={cn("border-t border-slate-800 my-2", collapsed && "mx-1")} />
+                        <Link
+                            href={`/${groupId}/ai-chat`}
+                            title={collapsed ? "Nexus AI" : undefined}
+                            className={cn(
+                                "flex items-center rounded-lg transition-all",
+                                collapsed ? "justify-center p-3" : "gap-3 px-4 py-3",
+                                pathname === `/${groupId}/ai-chat`
+                                    ? "bg-violet-600/10 text-violet-400 border border-violet-600/20"
+                                    : "hover:bg-slate-800 text-violet-400/70 hover:text-violet-400"
+                            )}
+                        >
+                            <BrainCircuit size={20} className="flex-shrink-0" />
+                            {!collapsed && <span className="font-medium whitespace-nowrap">Nexus AI</span>}
+                        </Link>
+                    </>
+                )}
 
                 {/* Admin Panel link — system admins only */}
                 {isSysAdmin && (
