@@ -130,13 +130,47 @@ async function executeToolCall(toolName: string, args: Record<string, any>, grou
                 .select(`*, 
                     parent:parent_id(display_id, name),
                     created_by_user:created_by(full_name, email),
-                    characterizations:sample_characterizations(type, data, performed_at, created_at)
+                    characterizations:sample_characterizations(type, data, performed_at, created_at),
+                    raman:raman_measurements(technique, laser_wavelength_nm, laser_power_uw, integration_time_s, accumulations, objective, notes, measured_at)
                 `)
                 .eq('group_id', groupId)
                 .or(`display_id.eq.${sample_code},sample_code.eq.${sample_code}`)
                 .single();
             if (error) return { error: 'Sample not found' };
             return { sample: data };
+        }
+
+        case 'get_raman_measurements': {
+            const { sample_code, limit = 10 } = args;
+            let query = supabase
+                .from('raman_measurements')
+                .select(`*, sample:sample_id(display_id, name)`)
+                .eq('group_id', groupId)
+                .order('measured_at', { ascending: false })
+                .limit(limit);
+
+            if (sample_code) {
+                // Find sample ID first
+                const { data: s } = await supabase.from('samples').select('id').or(`display_id.eq.${sample_code},sample_code.eq.${sample_code}`).single();
+                if (s) query = query.eq('sample_id', s.id);
+            }
+
+            const { data, error } = await query;
+            if (error) return { error: error.message };
+            return { raman_measurements: data, count: data?.length || 0 };
+        }
+
+        case 'search_samples': {
+            const { query } = args;
+            const { data, error } = await supabase
+                .from('samples')
+                .select('display_id, name, type, status, composition, created_at')
+                .eq('group_id', groupId)
+                .or(`display_id.ilike.%${query}%,name.ilike.%${query}%,description.ilike.%${query}%`)
+                .order('created_at', { ascending: false })
+                .limit(20);
+            if (error) return { error: error.message };
+            return { samples: data, count: data?.length || 0, search_query: query };
         }
 
         case 'get_samples_stats': {
@@ -281,13 +315,36 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
     },
     {
         name: 'get_sample_detail',
-        description: 'Returns full details for a specific sample by its code or display ID (e.g. S1, S2-B1, etc.).',
+        description: 'Returns full details for a specific sample by its code or display ID (e.g. S1, S2-B1, etc.). Now includes associated Raman measurements and characterizations.',
         parameters: {
             type: SchemaType.OBJECT,
             properties: {
                 sample_code: { type: SchemaType.STRING, description: 'Sample display code, e.g. S1, S-12, G2' }
             },
             required: ['sample_code']
+        }
+    },
+    {
+        name: 'get_raman_measurements',
+        description: 'Returns Raman/SERS measurement conditions (laser power, wavelength, integration time, etc.) for samples. Use when asked about experimental conditions, laser power, or Raman details.',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                sample_code: { type: SchemaType.STRING, description: 'Optional: Filter by sample code (e.g. S1)' },
+                limit: { type: SchemaType.NUMBER, description: 'Optional: Limit results (default 10)' }
+            },
+            required: []
+        }
+    },
+    {
+        name: 'search_samples',
+        description: 'Searches the sample database by name, description, or code. Use when searching for specific names or broad topics.',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                query: { type: SchemaType.STRING, description: 'Search term' }
+            },
+            required: ['query']
         }
     },
     {
