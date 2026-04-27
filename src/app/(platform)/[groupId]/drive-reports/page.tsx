@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ReportList } from "@/features/drive-reports/components/report-list";
 import { CreateReportButton } from "@/features/drive-reports/components/create-report-button";
 import { FileText } from "lucide-react";
+import { DriveReport } from "@/features/drive-reports/types";
 
 export default async function DriveReportsPage({
     params,
@@ -42,12 +43,12 @@ export default async function DriveReportsPage({
     const driveSettings = group?.drive_settings as { clientId?: string; apiKey?: string; folderId?: string } | undefined;
 
     // Transform reports to include author_name and comment_count
-    const reportsWithAuthor = reports?.map(r => ({
+    const reportsWithAuthor = (reports?.map(r => ({
         ...r,
         author_name: r.author_profile?.full_name || 'Unknown',
-        comment_count: r.drive_report_comments?.[0]?.count || 0,
+        comment_count: (r as any).drive_report_comments?.[0]?.count || 0,
         task_count: r.linked_tasks?.length || 0
-    })) || [];
+    })) || []) as unknown as DriveReport[];
 
     return (
         <div className="h-full flex flex-col p-6">
