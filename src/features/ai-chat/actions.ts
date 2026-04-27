@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { isGroupOwner } from "@/lib/auth/roles";
-import { GoogleGenerativeAI, FunctionDeclaration, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI, FunctionDeclaration, SchemaType, Content } from "@google/generative-ai";
 import { revalidatePath } from "next/cache";
 
 // ─── CHAT HISTORY PERSISTENCE ──────────────────────────────────────
@@ -12,7 +12,7 @@ export async function getChatSessionsAction(groupId: string) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { error: 'Unauthorized' };
 
-    const { data, error } = await (supabase as any)
+    const { data, error } = await supabase
         .from('ai_chat_sessions')
         .select('id, title, created_at, updated_at')
         .eq('group_id', groupId)
@@ -29,7 +29,7 @@ export async function getChatMessagesAction(sessionId: string) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { error: 'Unauthorized' };
 
-    const { data, error } = await (supabase as any)
+    const { data, error } = await supabase
         .from('ai_chat_messages')
         .select('*')
         .eq('session_id', sessionId)
@@ -44,7 +44,7 @@ export async function createChatSessionAction(groupId: string, title: string) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { error: 'Unauthorized' };
 
-    const { data, error } = await (supabase as any)
+    const { data, error } = await supabase
         .from('ai_chat_sessions')
         .insert({ group_id: groupId, user_id: user.id, title })
         .select()
@@ -59,7 +59,7 @@ export async function deleteChatSessionAction(sessionId: string) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { error: 'Unauthorized' };
 
-    const { error } = await (supabase as any)
+    const { error } = await supabase
         .from('ai_chat_sessions')
         .delete()
         .eq('id', sessionId)
@@ -362,7 +362,7 @@ export async function sendAIChatMessageAction(input: {
     let sessionId = input.sessionId;
     if (!sessionId) {
         const title = message.length > 50 ? message.slice(0, 47) + '...' : message;
-        const { data: session, error: sessionErr } = await (supabase as any)
+        const { data: session, error: sessionErr } = await supabase
             .from('ai_chat_sessions')
             .insert({ group_id: groupId, user_id: user.id, title })
             .select()
@@ -372,14 +372,14 @@ export async function sendAIChatMessageAction(input: {
     }
 
     // 3. Save user message to DB
-    await (supabase as any).from('ai_chat_messages').insert({
+    await supabase.from('ai_chat_messages').insert({
         session_id: sessionId,
         role: 'user',
         content: message,
     });
 
     // Update session timestamp
-    await (supabase as any).from('ai_chat_sessions')
+    await supabase.from('ai_chat_sessions')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', sessionId);
 
@@ -406,10 +406,13 @@ Today's date is ${new Date().toLocaleDateString('en-CA')}.`,
     });
 
     // Build gemini history from our DB history (last 20 messages)
-    const geminiHistory = history.slice(-20).flatMap((m) => {
-        if (m.role === 'user') return [{ role: 'user' as const, parts: [{ text: m.content }] }];
-        return [{ role: 'model' as const, parts: [{ text: m.content }] }];
-    }) as any[];
+    const geminiHistory: Content[] = history.slice(-20).map((m) => {
+        const role: 'user' | 'model' = m.role === 'user' ? 'user' : 'model';
+        return {
+            role,
+            parts: [{ text: m.content }]
+        };
+    });
 
     const chat = model.startChat({ history: geminiHistory });
 
@@ -445,7 +448,7 @@ Today's date is ${new Date().toLocaleDateString('en-CA')}.`,
         const assistantText = response.text();
 
         // 6. Save assistant response to DB
-        await (supabase as any).from('ai_chat_messages').insert({
+        await supabase.from('ai_chat_messages').insert({
             session_id: sessionId,
             role: 'assistant',
             content: assistantText,
