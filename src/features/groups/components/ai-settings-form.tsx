@@ -77,9 +77,10 @@ export function AISettingsForm({ groupId, initialSettings }: AISettingsFormProps
                         </label>
                         <select
                             name="model"
-                            defaultValue={initialSettings?.model || 'gemini-2.0-flash-lite'}
+                            defaultValue={initialSettings?.model || 'gemini-2.5-flash-lite'}
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm bg-white"
                         >
+                            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Latest Stable)</option>
                             <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Fast & Efficient)</option>
                             <option value="gemini-2.0-flash">Gemini 2.0 Flash (Balanced)</option>
                             <option value="gemini-1.5-pro">Gemini 1.5 Pro (Most Capable)</option>
