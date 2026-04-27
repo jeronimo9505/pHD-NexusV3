@@ -290,6 +290,7 @@ export async function updateDriveSettingsAction(formData: FormData) {
 const aiSettingsSchema = z.object({
     groupId: z.string(),
     geminiApiKey: z.string().min(1, "Gemini API Key is required"),
+    model: z.string().optional().default('gemini-2.0-flash-lite'),
 });
 
 export async function updateAISettingsAction(formData: FormData) {
@@ -297,6 +298,7 @@ export async function updateAISettingsAction(formData: FormData) {
     const rawData = {
         groupId: formData.get('groupId'),
         geminiApiKey: formData.get('geminiApiKey'),
+        model: formData.get('model'),
     };
 
     const validation = aiSettingsSchema.safeParse(rawData);
@@ -321,6 +323,7 @@ export async function updateAISettingsAction(formData: FormData) {
         .update({
             ai_settings: {
                 geminiApiKey: validation.data.geminiApiKey,
+                model: validation.data.model,
             }
         } as any)
         .eq('id', validation.data.groupId);

@@ -448,14 +448,15 @@ export async function sendAIChatMessageAction(input: {
         .eq('id', groupId)
         .single();
 
-    const aiSettings = group?.ai_settings as { geminiApiKey?: string } | null;
+    const aiSettings = group?.ai_settings as { geminiApiKey?: string, model?: string } | null;
     const apiKey = aiSettings?.geminiApiKey || process.env.GOOGLE_GEMINI_API_KEY;
+    const modelName = aiSettings?.model || 'gemini-2.0-flash-lite';
 
     if (!apiKey) return { error: 'Gemini API key not configured. Add it in Group Settings or as GOOGLE_GEMINI_API_KEY in server environment.' };
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-        model: 'gemini-2.5-flash-lite',
+        model: modelName,
         systemInstruction: `You are Nexus AI, an intelligent research lab assistant for a PhD research group. You have access to the group's database through specialized tools.
 
 Your personality:
