@@ -398,7 +398,7 @@ export async function sendAIChatMessageAction(input: {
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-2.0-flash',
         systemInstruction: `You are Nexus AI, an intelligent research lab assistant for a PhD research group. You have access to the group's database through specialized tools.
 
 Your personality:
