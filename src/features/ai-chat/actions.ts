@@ -450,7 +450,7 @@ export async function sendAIChatMessageAction(input: {
 
     const aiSettings = group?.ai_settings as { geminiApiKey?: string, model?: string } | null;
     const apiKey = aiSettings?.geminiApiKey || process.env.GOOGLE_GEMINI_API_KEY;
-    const modelName = aiSettings?.model || 'gemini-2.0-flash-lite';
+    const modelName = aiSettings?.model || 'gemini-2.5-flash-lite';
 
     if (!apiKey) return { error: 'Gemini API key not configured. Add it in Group Settings or as GOOGLE_GEMINI_API_KEY in server environment.' };
 
