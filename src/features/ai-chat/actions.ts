@@ -409,7 +409,7 @@ Today's date is ${new Date().toLocaleDateString('en-CA')}.`,
     const geminiHistory = history.slice(-20).flatMap((m) => {
         if (m.role === 'user') return [{ role: 'user' as const, parts: [{ text: m.content }] }];
         return [{ role: 'model' as const, parts: [{ text: m.content }] }];
-    });
+    }) as any[];
 
     const chat = model.startChat({ history: geminiHistory });
 
