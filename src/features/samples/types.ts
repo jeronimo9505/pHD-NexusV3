@@ -29,7 +29,7 @@ export interface Sample {
     parent?: { id: string; display_id: string }; // joined
     type: 'stock' | 'derived';
     status: SampleStatus;
-    attributes: Record<string, any>;
+    attributes: any;
     composition: SampleCompositionItem[];
     level: number;
     created_by: string;
@@ -43,7 +43,7 @@ export interface Sample {
 export interface SampleNomenclature {
     id: string;
     group_id: string;
-    logbook_id: string; // New field
+    logbook_id: string | null;
     category: string;
     code: string;
     name: string;
@@ -53,11 +53,14 @@ export interface SampleCharacterization {
     id: string;
     sample_id: string;
     type: string;
-    data: Record<string, any>;
+    data: any; // Using any for data to avoid Record vs Json mismatches from Supabase
     images: string[];
     created_by: string;
     created_at: string;
-    performed_at: string; // New: Experiment date
+    performed_at: string;
+    created_by_user?: {
+        full_name: string;
+    };
 }
 
 export type SampleFieldType = 'text' | 'number' | 'select' | 'date' | 'nomenclature' | 'boolean' | 'rich-text';
@@ -65,7 +68,7 @@ export type SampleFieldType = 'text' | 'number' | 'select' | 'date' | 'nomenclat
 export interface SampleFieldConfig {
     id: string;
     group_id: string;
-    logbook_id: string; // New field
+    logbook_id: string | null;
     name: string;
     label: string;
     type: SampleFieldType;

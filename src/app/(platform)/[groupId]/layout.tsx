@@ -34,10 +34,12 @@ export default async function GroupLayout(props: GroupLayoutProps) {
                 .single()
             : Promise.resolve({ data: null }),
         supabase.from('groups')
-            .select('drive_settings')
+            .select('drive_settings, created_by')
             .eq('id', groupId)
             .single(),
     ]);
+
+    const isOwner = userId ? groupData.data?.created_by === userId : false;
 
     if (!role) {
         redirect('/dashboard');
@@ -67,6 +69,7 @@ export default async function GroupLayout(props: GroupLayoutProps) {
                 userName={userName}
                 userEmail={userEmail}
                 groups={userGroups}
+                isOwner={isOwner}
             />
         }>
             <GoogleTokenSync />

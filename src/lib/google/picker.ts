@@ -1,5 +1,12 @@
 import { loadGoogleScripts } from "./loader";
 import { ensureAuth } from "./auth";
+ 
+declare global {
+    interface Window {
+        google: any;
+        gapi: any;
+    }
+}
 
 export interface PickerConfiguration {
     clientId: string;

@@ -38,3 +38,10 @@ _archive/
 supabase/.temp/
 # Database backups
 backups/
+
+# Local MCP config
+mcp_config.json
+
+# Python
+__pycache__/
+*.pyc

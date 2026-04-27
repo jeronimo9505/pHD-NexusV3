@@ -15,6 +15,10 @@ import os
 from readers.witec import read_witec_txt
 from readers.matlab import read_matlab_mat
 from processor import convert_to_h5, generate_preview
+import h5py
+import numpy as np
+from scipy.signal import savgol_filter
+from scipy.interpolate import interp1d
 
 app = FastAPI(
     title="PhD Nexus Science Engine",
@@ -22,10 +26,10 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# Allow requests from the Tauri app (localhost)
+# Essential CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "tauri://localhost", "https://tauri.localhost"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -73,6 +77,7 @@ class RepresentativeSpectrumResponse(BaseModel):
 @app.get("/health")
 def health():
     """Check if the engine is running."""
+    print(">>> HEALTH CHECK RECEIVED <<<")
     return {"status": "online", "version": "0.1.0"}
 
 
@@ -154,11 +159,10 @@ def get_spectrum(h5_path: str, dataset_key: str = "/spectrum"):
     """
     Read an existing .h5 file and return the spectrum data for plotting.
     """
-    import h5py
-    import numpy as np
-
     path = Path(h5_path)
+    print(f"DEBUG: Getting spectrum from {path}")
     if not path.exists():
+        print(f"DEBUG: File NOT found at {path}")
         raise HTTPException(status_code=404, detail="HDF5 file not found")
 
     try:
@@ -166,7 +170,9 @@ def get_spectrum(h5_path: str, dataset_key: str = "/spectrum"):
             wavenumbers = f[f"{dataset_key}/wavenumbers"][:].tolist()
             intensities = f[f"{dataset_key}/intensities"][:].tolist()
             metadata = dict(f.attrs)
+            print(f"DEBUG: Successfully read spectrum. Points: {len(wavenumbers)}")
     except Exception as e:
+        print(f"DEBUG: h5py error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to read HDF5: {str(e)}")
 
     return {
@@ -331,15 +337,15 @@ def get_map_heatmap(request: HeatmapRequest):
     Returns the aggregated intensity (or peak intensity) for each spectrum to construct a heatmap.
     If a wavenumber range is provided, it integrates strictly within that range.
     """
-    import h5py
-    import numpy as np
-    
     path = Path(request.vault_root) / request.h5_relative_path
+    print(f"DEBUG: Processing heatmap for {path}")
     if not path.exists():
+        print(f"DEBUG: Heatmap file NOT found at {path}")
         raise HTTPException(status_code=404, detail="HDF5 file not found")
 
     try:
         with h5py.File(path, "r") as f:
+            print("DEBUG: File opened successfully")
             wavenumbers = f["/spectrum/wavenumbers"][:]
             intensities = f["/spectrum/intensities"][:]
             

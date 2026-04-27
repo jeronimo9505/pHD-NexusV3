@@ -18,8 +18,8 @@ import {
 import Link from 'next/link';
 import { Database } from '@/types/supabase';
 
-type DriveReport = Database['public']['Tables']['drive_reports']['Row'];
-
+import { DriveReport } from '../types';
+ 
 interface ReportDetailProps {
     report: DriveReport;
     currentUserId: string;
@@ -31,7 +31,7 @@ export function ReportDetail({ report, currentUserId, groupId }: ReportDetailPro
     const [isDeleting, setIsDeleting] = useState(false);
     const [isMarkingSeen, setIsMarkingSeen] = useState(false);
 
-    const isSeen = (report.seen_by as string[])?.includes(currentUserId);
+    const isSeen = report.seen_by?.includes(currentUserId);
 
     // Icon mapping
     const Icon = (report.type ? {
@@ -182,9 +182,9 @@ export function ReportDetail({ report, currentUserId, groupId }: ReportDetailPro
                                     <p className="text-xs text-slate-500 mb-2">Seen by:</p>
                                     <div className="flex -space-x-2">
                                         {/* Placeholder for avatars of people who have seen it */}
-                                        {((report.seen_by as string[]) || []).length > 0 ? (
+                                        {(report.seen_by || []).length > 0 ? (
                                             <span className="text-xs text-slate-600 font-medium pl-1">
-                                                {((report.seen_by as string[])?.length || 0)} user(s)
+                                                {report.seen_by?.length || 0} user(s)
                                             </span>
                                         ) : (
                                             <span className="text-xs text-slate-400 italic">No reviews yet</span>
