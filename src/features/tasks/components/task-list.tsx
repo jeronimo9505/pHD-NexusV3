@@ -122,7 +122,7 @@ export function TaskList({ tasks, groupId, columns, onTaskClick }: TaskListProps
     }, [tasks]);
 
     // Timezone-safe formatting
-    const formatDate = (dateString?: string) => {
+    const formatDate = (dateString?: string | null) => {
         if (!dateString) return <span className="text-slate-300">-</span>;
         try {
             const isoDate = dateString.split('T')[0];
