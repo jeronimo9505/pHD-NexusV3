@@ -4,8 +4,9 @@ import { redirect } from "next/navigation";
 import { EditGroupForm } from "@/features/groups/components/edit-group-form";
 import { MemberList } from "@/features/groups/components/member-list";
 import { DriveSettingsForm } from "@/features/groups/components/drive-settings-form";
+import { AISettingsForm } from "@/features/groups/components/ai-settings-form";
 import { InviteMemberForm } from "@/features/groups/components/invite-member-form";
-import { Settings, Users, HardDrive, Key, UserPlus, Info, Clock } from "lucide-react";
+import { Settings, Users, HardDrive, Key, UserPlus, Info, Clock, Sparkles } from "lucide-react";
 import { PendingRequests } from "@/features/groups/components/pending-requests";
 
 export default async function GroupSettingsPage({
@@ -32,6 +33,7 @@ export default async function GroupSettingsPage({
     const isSysAdmin = systemRole === 'admin';
 
     const driveSettings = group.drive_settings as { clientId?: string; apiKey?: string; folderId?: string } | undefined;
+    const aiSettings = group.ai_settings as { geminiApiKey?: string } | undefined;
 
     // Fetch pending join requests (only for managers)
     const pendingMembers = canManage ? await (async () => {
@@ -116,6 +118,17 @@ export default async function GroupSettingsPage({
                     </div>
                     <MemberList groupId={groupId} currentUserRole={canManage ? role : 'student'} />
                 </section>
+
+                {/* Nexus AI Integration — Admin/Owner/SystemAdmin only */}
+                {(canManage || isSysAdmin) && (
+                    <section className="space-y-4">
+                        <div className="flex items-center gap-2">
+                            <Sparkles size={18} className="text-indigo-600" />
+                            <h2 className="text-lg font-semibold text-slate-900">Nexus AI Integration</h2>
+                        </div>
+                        <AISettingsForm groupId={groupId} initialSettings={aiSettings} />
+                    </section>
+                )}
 
                 {/* Google Drive Integration — Admin/Owner/SystemAdmin only */}
                 {(canManage || isSysAdmin) && (

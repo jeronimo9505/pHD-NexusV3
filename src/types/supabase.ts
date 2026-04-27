@@ -558,6 +558,7 @@ export type Database = {
       }
       groups: {
         Row: {
+          ai_settings: Json | null
           code: string
           created_at: string
           created_by: string | null
@@ -568,6 +569,7 @@ export type Database = {
           name: string
         }
         Insert: {
+          ai_settings?: Json | null
           code: string
           created_at?: string
           created_by?: string | null
@@ -578,6 +580,7 @@ export type Database = {
           name: string
         }
         Update: {
+          ai_settings?: Json | null
           code?: string
           created_at?: string
           created_by?: string | null

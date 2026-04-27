@@ -286,6 +286,51 @@ export async function updateDriveSettingsAction(formData: FormData) {
     return { success: true };
 }
 
+// AI Settings Actions
+const aiSettingsSchema = z.object({
+    groupId: z.string(),
+    geminiApiKey: z.string().min(1, "Gemini API Key is required"),
+});
+
+export async function updateAISettingsAction(formData: FormData) {
+    const supabase = await createClient();
+    const rawData = {
+        groupId: formData.get('groupId'),
+        geminiApiKey: formData.get('geminiApiKey'),
+    };
+
+    const validation = aiSettingsSchema.safeParse(rawData);
+    if (!validation.success) return { error: 'Validation failed' };
+
+    // Auth Check
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { error: 'Unauthorized' };
+
+    // RBAC Check
+    const { data: member } = await supabase.from('group_members')
+        .select('role')
+        .eq('group_id', validation.data.groupId)
+        .eq('user_id', user.id)
+        .single();
+
+    if (!member || !['supervisor', 'labmanager', 'owner'].includes(member.role)) {
+        return { error: 'Insufficient permissions' };
+    }
+
+    const { error } = await supabase.from('groups')
+        .update({
+            ai_settings: {
+                geminiApiKey: validation.data.geminiApiKey,
+            }
+        } as any)
+        .eq('id', validation.data.groupId);
+
+    if (error) return { error: error.message };
+
+    revalidatePath(`/${validation.data.groupId}/settings`);
+    return { success: true };
+}
+
 // ─── SEARCH PLATFORM USERS (for invite) ──────────────────────────
 export async function searchPlatformUsersAction(searchQuery: string, groupId: string) {
     const supabase = await createClient();
