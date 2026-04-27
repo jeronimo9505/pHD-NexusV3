@@ -125,7 +125,7 @@ async function executeToolCall(toolName: string, args: Record<string, any>, grou
 
         case 'get_sample_detail': {
             const { sample_code } = args;
-            const { data, error } = await supabase
+            const { data, error } = await (supabase
                 .from('samples')
                 .select(`*, 
                     parent:parent_id(display_id, name),
@@ -135,19 +135,19 @@ async function executeToolCall(toolName: string, args: Record<string, any>, grou
                 `)
                 .eq('group_id', groupId)
                 .or(`display_id.eq.${sample_code},sample_code.eq.${sample_code}`)
-                .single();
+                .single()) as any;
             if (error) return { error: 'Sample not found' };
             return { sample: data };
         }
 
         case 'get_raman_measurements': {
             const { sample_code, limit = 10 } = args;
-            let query = supabase
+            let query = (supabase
                 .from('raman_measurements')
                 .select(`*, sample:sample_id(display_id, name)`)
                 .eq('group_id', groupId)
                 .order('measured_at', { ascending: false })
-                .limit(limit);
+                .limit(limit)) as any;
 
             if (sample_code) {
                 // Find sample ID first

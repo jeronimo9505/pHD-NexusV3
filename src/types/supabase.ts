@@ -175,6 +175,80 @@ export type Database = {
           },
         ]
       }
+      ai_chat_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          role: string
+          session_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          role: string
+          session_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
+          session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chat_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_chat_sessions: {
+        Row: {
+          created_at: string
+          group_id: string
+          id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          group_id: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          group_id?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_sessions_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_chat_sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       announcements: {
         Row: {
           author_id: string
@@ -1519,6 +1593,103 @@ export type Database = {
             columns: ["task_id"]
             isOneToOne: false
             referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      raman_measurements: {
+        Row: {
+          accumulations: number | null
+          analyte: string | null
+          created_at: string
+          created_by: string | null
+          group_id: string
+          h5_dataset_key: string | null
+          id: string
+          integration_time_s: number | null
+          laser_power_uw: number | null
+          laser_wavelength_nm: number | null
+          local_relative_path: string | null
+          measured_at: string | null
+          notes: string | null
+          objective: string | null
+          original_filename: string | null
+          preview_image_url: string | null
+          processed_at: string | null
+          sample_id: string | null
+          source_format: string | null
+          status: string
+          technique: string
+          updated_at: string
+        }
+        Insert: {
+          accumulations?: number | null
+          analyte?: string | null
+          created_at?: string
+          created_by?: string | null
+          group_id: string
+          h5_dataset_key?: string | null
+          id?: string
+          integration_time_s?: number | null
+          laser_power_uw?: number | null
+          laser_wavelength_nm?: number | null
+          local_relative_path?: string | null
+          measured_at?: string | null
+          notes?: string | null
+          objective?: string | null
+          original_filename?: string | null
+          preview_image_url?: string | null
+          processed_at?: string | null
+          sample_id?: string | null
+          source_format?: string | null
+          status?: string
+          technique?: string
+          updated_at?: string
+        }
+        Update: {
+          accumulations?: number | null
+          analyte?: string | null
+          created_at?: string
+          created_by?: string | null
+          group_id?: string
+          h5_dataset_key?: string | null
+          id?: string
+          integration_time_s?: number | null
+          laser_power_uw?: number | null
+          laser_wavelength_nm?: number | null
+          local_relative_path?: string | null
+          measured_at?: string | null
+          notes?: string | null
+          objective?: string | null
+          original_filename?: string | null
+          preview_image_url?: string | null
+          processed_at?: string | null
+          sample_id?: string | null
+          source_format?: string | null
+          status?: string
+          technique?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "raman_measurements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "raman_measurements_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "raman_measurements_sample_id_fkey"
+            columns: ["sample_id"]
+            isOneToOne: false
+            referencedRelation: "samples"
             referencedColumns: ["id"]
           },
         ]
