@@ -384,8 +384,17 @@ export async function sendAIChatMessageAction(input: {
         .eq('id', sessionId);
 
     // 4. Call Gemini
-    const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
-    if (!apiKey) return { error: 'Gemini API key not configured. Add GOOGLE_GEMINI_API_KEY to .env.local' };
+    // Try to get key from group settings first, then env
+    const { data: group } = await supabase
+        .from('groups')
+        .select('ai_settings')
+        .eq('id', groupId)
+        .single();
+
+    const aiSettings = group?.ai_settings as { geminiApiKey?: string } | null;
+    const apiKey = aiSettings?.geminiApiKey || process.env.GOOGLE_GEMINI_API_KEY;
+
+    if (!apiKey) return { error: 'Gemini API key not configured. Add it in Group Settings or as GOOGLE_GEMINI_API_KEY in server environment.' };
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
