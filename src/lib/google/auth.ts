@@ -163,21 +163,20 @@ export const initGoogleClient = async (apiKey: string, clientId: string) => {
  * Returns the access token.
  */
 export const ensureAuth = async (): Promise<string> => {
-    await loadGoogleScripts();
-    const gapi = (window as any).gapi;
-
-    // Ensure client is loaded
-    if (!gapi.client) {
-        await new Promise<void>((resolve, reject) => {
-            gapi.load('client', { callback: resolve, onerror: reject });
-        });
-    }
-
-    // 1. Use localStorage as source of truth for expiry.
-    // gapi.client.getToken() returns whatever was last set in memory — it has no
-    // knowledge of our expiry tracking — so we never trust it directly.
+    // 1. Check if token is valid BEFORE any async operations to maintain user-interaction context.
     const savedToken = loadToken();
+    
     if (savedToken) {
+        // We have a token, we can safely load scripts asynchronously
+        await loadGoogleScripts();
+        const gapi = (window as any).gapi;
+
+        if (!gapi.client) {
+            await new Promise<void>((resolve, reject) => {
+                gapi.load('client', { callback: resolve, onerror: reject });
+            });
+        }
+
         if (gapi.client && typeof gapi.client.setToken === 'function') {
             gapi.client.setToken({ access_token: savedToken });
         }
@@ -185,19 +184,20 @@ export const ensureAuth = async (): Promise<string> => {
     }
 
     // 2. Token expired or missing — request a fresh one via GIS.
-    // prompt: '' = silent re-auth (no consent screen if already granted).
-    // This works automatically ~1 hour after login when the access token expires.
-    // Avoid multiple simultaneous prompts
-    if (googleAuthPromise) return googleAuthPromise;
+    // We MUST call requestAccessToken synchronously (before any await) so the browser
+    // doesn't block the popup window (it requires transient user activation).
+    
+    if (googleAuthPromise) {
+        return googleAuthPromise;
+    }
+
+    if (!tokenClient) {
+        throw new Error("Google Token Client not initialized. Call initGoogleClient first.");
+    }
 
     googleAuthPromise = new Promise<string>((resolve, reject) => {
-        if (!tokenClient) {
-            reject(new Error("Google Token Client not initialized. Call initGoogleClient first."));
-            return;
-        }
-
         // Override callback for this specific request
-        tokenClient.callback = (resp: any) => {
+        tokenClient!.callback = (resp: any) => {
             googleAuthPromise = null; // Reset promise
             if (resp.error) {
                 console.error("Auth Error:", resp);
@@ -206,7 +206,6 @@ export const ensureAuth = async (): Promise<string> => {
             }
             if (resp.access_token) {
                 saveToken(resp);
-                gapi.client.setToken({ access_token: resp.access_token });
                 resolve(resp.access_token);
             } else {
                 reject(new Error("No access_token received"));
@@ -220,5 +219,23 @@ export const ensureAuth = async (): Promise<string> => {
         (tokenClient as any).requestAccessToken({ prompt: '', hint: emailHint });
     });
 
-    return googleAuthPromise;
+    // Wait for the token request to complete
+    const token = await googleAuthPromise;
+
+    // After token is received, ensure GAPI is loaded so we can set the token
+    await loadGoogleScripts();
+    const gapi = (window as any).gapi;
+
+    if (!gapi.client) {
+        await new Promise<void>((resolve, reject) => {
+            gapi.load('client', { callback: resolve, onerror: reject });
+        });
+    }
+
+    if (gapi.client && typeof gapi.client.setToken === 'function') {
+        gapi.client.setToken({ access_token: token });
+    }
+
+    return token;
 };
+

@@ -10,11 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 import os
 
 from readers.witec import read_witec_txt
 from readers.matlab import read_matlab_mat
-from processor import convert_to_h5, generate_preview
+from processor import convert_to_h5, generate_preview, get_representative_spectrum
 import h5py
 import numpy as np
 from scipy.signal import savgol_filter
@@ -52,6 +53,7 @@ class IngestRequest(BaseModel):
     technique: Optional[str] = "raman"
     measured_at: Optional[str] = None
     parameters: Optional[dict] = None
+    is_generic: Optional[bool] = False
 
 
 class IngestResponse(BaseModel):
@@ -97,15 +99,37 @@ async def ingest_file(request: IngestRequest):
 
     # Detect format and read
     ext = source_path.suffix.lower()
+    
+    # Check if we should do generic copy (no H5 conversion)
+    is_raman = request.technique and request.technique.lower() in ["raman", "sers"]
+    should_do_generic = request.is_generic or not is_raman or ext not in [".txt", ".mat"]
+
+    if should_do_generic:
+        from processor import copy_file_to_vault
+        try:
+            target_path, relative_path = copy_file_to_vault(
+                source_path=source_path,
+                metadata=request.dict(),
+                vault_root=request.vault_root
+            )
+            return IngestResponse(
+                success=True,
+                h5_relative_path=relative_path,
+                message=f"Successfully stored raw file: {source_path.name} → {relative_path}"
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Generic file storage failed: {str(e)}")
+
     try:
         if ext == ".txt":
             wavenumbers, intensities, metadata = read_witec_txt(source_path)
         elif ext == ".mat":
             wavenumbers, intensities, metadata = read_matlab_mat(source_path)
         else:
-            raise HTTPException(status_code=400, detail=f"Unsupported format: {ext}. Supported: .txt, .mat")
+            # This shouldn't be reached due to should_do_generic check above, but for safety:
+            raise HTTPException(status_code=400, detail=f"Unsupported spectral format: {ext}")
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Failed to parse file: {str(e)}")
+        raise HTTPException(status_code=422, detail=f"Failed to parse spectral file: {str(e)}")
 
     # Build metadata dict
     full_metadata = {
@@ -182,7 +206,7 @@ def get_spectrum(h5_path: str, dataset_key: str = "/spectrum"):
     }
 
 @app.post("/api/representative-spectrum", response_model=RepresentativeSpectrumResponse)
-def get_representative_spectrum(request: RepresentativeSpectrumRequest):
+def api_get_representative_spectrum(request: RepresentativeSpectrumRequest):
     """
     Computes a representative (median) spectrum from multiple local H5 files.
     """
@@ -207,11 +231,16 @@ def get_representative_spectrum(request: RepresentativeSpectrumRequest):
                 if "spectrum/wavenumbers" in f and "spectrum/intensities" in f:
                     x = f["spectrum/wavenumbers"][:]
                     y = f["spectrum/intensities"][:]
+                    
+                    if y.ndim == 2:
+                        y = np.mean(y, axis=0)
+                        
                     # Sort by x just in case
                     idx = np.argsort(x)
                     all_x.append(x[idx])
                     all_y.append(y[idx])
-        except Exception:
+        except Exception as e:
+            print(f"Error processing {rel_path}: {e}")
             pass
             
     if not all_x:
@@ -290,6 +319,13 @@ def list_vault_files(vault_root: str, group_id: str = None):
         try:
             with h5py.File(p, "r") as f:
                 meta = dict(f.attrs)
+                
+                def decode_attr(val, default=""):
+                    if val is None: return default
+                    if isinstance(val, bytes): return val.decode("utf-8", "ignore")
+                    if hasattr(val, "decode"): return val.decode("utf-8", "ignore")
+                    return str(val)
+
                 # We trust the folder structure for "Logbook filtering"
                 # If a group_id is provided, it means we already filtered the search_path to that folder.
                 # So any file found here belongs to this group/logbook.
@@ -309,13 +345,16 @@ def list_vault_files(vault_root: str, group_id: str = None):
                     "id": rel_path,
                     "h5_relative_path": rel_path,
                     "name": p.name,
-                    "sample_name": meta.get("sample_name") or meta.get("sample_code", "Unknown"),
-                    "technique": meta.get("technique", "Unknown"),
-                    "measured_at": meta.get("measured_at", ""),
-                    "created_at": meta.get("created_at", ""),
+                    "sample_name": decode_attr(meta.get("sample_name") or meta.get("sample_code", "Unknown")).strip(),
+                    "technique": decode_attr(meta.get("technique", "Unknown")).strip(),
+                    "measured_at": decode_attr(meta.get("measured_at", "")).strip(),
+                    "created_at": decode_attr(meta.get("created_at", "")),
                     "n_spectra": n_spectra,
                     "map_width": int(meta.get("map_width", 0)),
                     "map_height": int(meta.get("map_height", 0)),
+                    "pipeline_applied": decode_attr(meta.get("pipeline_applied")).lower() == "true",
+                    "pipeline_name": decode_attr(meta.get("pipeline_name", "")),
+                    "pipeline_history": decode_attr(meta.get("pipeline_history", "")),
                 })
         except Exception:
             pass
@@ -579,5 +618,429 @@ def get_graphene_analytics(request: GrapheneAnalyticsRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Graphene analytics failed: {str(e)}")
 
+class RepSpectrumRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+
+@app.post("/api/map/representative-spectrum")
+def get_map_representative_spectrum(request: RepSpectrumRequest):
+    """
+    Returns the median representative spectrum of a single HDF5 file.
+    """
+    rep_specs = get_representative_spectrum(request.vault_root, [request.h5_relative_path])
+    if not rep_specs:
+        raise HTTPException(status_code=404, detail="Could not extract representative spectrum")
+        
+    return {
+        "success": True,
+        "data": [{"x": float(pt["x"]), "y": float(pt["y"])} for pt in rep_specs]
+    }
+
+class PipelinePreviewRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    steps: list[dict]
+    focus_index: int = -1
+
+@app.post("/api/pipeline/preview")
+def preview_pipeline(request: PipelinePreviewRequest):
+    """
+    Runs the pipeline steps on the representative spectrum of the file.
+    Returns both the original and the processed spectrum, and optionally the baseline.
+    """
+    print(f"DEBUG: Pipeline Preview Request for {request.h5_relative_path}")
+    from pipeline_engine import apply_pipeline, _step_baseline
+    
+    # Get representative spectrum
+    rep_specs = get_representative_spectrum(request.vault_root, [request.h5_relative_path])
+    print(f"DEBUG: Representative spectrum points: {len(rep_specs)}")
+    if not rep_specs:
+        raise HTTPException(status_code=404, detail=f"Could not extract representative spectrum for {request.h5_relative_path}")
+        
+    x_raw = np.array([pt["x"] for pt in rep_specs])
+    y_raw = np.array([pt["y"] for pt in rep_specs])
+    
+    results = apply_pipeline(x_raw, y_raw, request.steps, focus_index=request.focus_index)
+    x_processed = results["x"]
+    y_processed = results["y"]
+    y_base = results["baseline"]
+    y_stage_in = results["stage_input"]
+    
+    return {
+        "success": True,
+        "original": [{"x": float(x), "y": float(y)} for x, y in zip(x_raw, y_raw)],
+        "processed": [{"x": float(x), "y": float(y)} for x, y in zip(x_processed, y_processed)],
+        "baseline": [{"x": float(x), "y": float(y)} for x, y in zip(x_processed, y_base)] if y_base is not None else None,
+        "stage_input": [{"x": float(x), "y": float(y)} for x, y in zip(results["x_stage"], results["stage_input"])] if results["stage_input"] is not None else None,
+        "spike_positions": results.get("spike_positions", []),
+    }
+
+class PipelineApplyRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    steps: list[dict]
+    pipeline_name: Optional[str] = "unnamed_pipeline"
+
+@app.post("/api/pipeline/apply")
+def apply_pipeline_to_file(request: PipelineApplyRequest):
+    """
+    Applies the pipeline to an entire HDF5 file (all spectra).
+    Saves a new derived file and returns its path.
+    """
+    from pipeline_engine import apply_pipeline
+    import json
+    
+    vault_root = Path(request.vault_root)
+    source_path = vault_root / request.h5_relative_path
+    
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail="Source HDF5 file not found")
+        
+    try:
+        # Load raw data
+        with h5py.File(source_path, "r") as f:
+            wavenumbers = f["/spectrum/wavenumbers"][:]
+            intensities = f["/spectrum/intensities"][:]
+            metadata = dict(f.attrs)
+            
+        # Process
+        results = apply_pipeline(wavenumbers, intensities, request.steps)
+        x_new = results["x"]
+        y_new = results["y"]
+        
+        # Build new filename
+        # E.g. Sample_A01_Raman_Spot1.h5 -> Sample_A01_Raman_Spot1_preprocessed.h5
+        stem = source_path.stem
+        parent_dir = source_path.parent
+        new_filename = f"{stem}_preprocessed.h5"
+        
+        # Ensure no overwrite
+        counter = 1
+        while (parent_dir / new_filename).exists():
+            new_filename = f"{stem}_preprocessed_{counter}.h5"
+            counter += 1
+            
+        target_path = parent_dir / new_filename
+        relative_path = target_path.relative_to(vault_root).as_posix()
+        
+        # Update metadata
+        metadata["pipeline_applied"] = "true"
+        metadata["pipeline_name"] = request.pipeline_name or "unnamed"
+        metadata["pipeline_history"] = json.dumps(request.steps)
+        metadata["processed_at"] = datetime.now().isoformat()
+        
+        # Save new file
+        with h5py.File(target_path, "w") as f:
+            # Copy all root attributes (metadata)
+            for k, v in metadata.items():
+                try:
+                    f.attrs[k] = v
+                except Exception:
+                    try:
+                        f.attrs[k] = str(v)
+                    except Exception:
+                        pass
+                
+            grp = f.create_group("spectrum")
+            ds_wn = grp.create_dataset("wavenumbers", data=x_new, compression="gzip")
+            ds_wn.attrs["units"] = "cm^-1"
+            ds_wn.attrs["label"] = "Raman Shift (Processed)"
+            
+            ds_int = grp.create_dataset("intensities", data=y_new, compression="gzip")
+            ds_int.attrs["units"] = "counts (Processed)"
+            ds_int.attrs["label"] = "Intensity (Processed)"
+            
+        def decode_attr(val, default=""):
+            if val is None: return default
+            if isinstance(val, bytes): return val.decode("utf-8", "ignore")
+            if hasattr(val, "decode"): return val.decode("utf-8", "ignore")
+            return str(val)
+
+        # Prepare the file metadata for the frontend to add to sidebar
+        file_info = {
+            "id": str(target_path.stat().st_mtime), # Temporary ID
+            "h5_relative_path": relative_path,
+            "name": new_filename,
+            "sample_name": decode_attr(metadata.get("sample_name") or metadata.get("sample_code", "Unknown")).strip(),
+            "technique": decode_attr(metadata.get("technique", "raman")).strip(),
+            "measured_at": decode_attr(metadata.get("measured_at", "")).strip(),
+            "created_at": decode_attr(metadata.get("processed_at", "")).strip(),
+            "n_spectra": int(y_new.shape[0]),
+            "map_width": int(metadata.get("map_width", 0)),
+            "map_height": int(metadata.get("map_height", 0)),
+            "pipeline_applied": True,
+            "pipeline_name": metadata.get("pipeline_name", "unnamed"),
+            "pipeline_history": metadata.get("pipeline_history", ""),
+            "parent_name": source_path.name
+        }
+        
+        return {
+            "success": True,
+            "file": file_info,
+            "message": f"Successfully created preprocessed file {new_filename}"
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": f"Pipeline application failed: {str(e)}"
+        }
+
+class DeleteMapRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+
+@app.post("/api/map/delete")
+def delete_map_file(request: DeleteMapRequest):
+    try:
+        path = Path(request.vault_root) / request.h5_relative_path
+        if not path.exists():
+            return {"success": False, "message": "File not found on disk"}
+            
+        import os
+        os.remove(path)
+        return {"success": True, "message": "File deleted successfully"}
+    except Exception as e:
+        return {"success": False, "message": f"Failed to delete file: {str(e)}"}
+
+
+
+
+# =============================================================================
+# DECONVOLUTION ENDPOINTS
+# =============================================================================
+
+class DeconvolutionFitRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    peaks: list[dict]           # list of PeakConfig dicts
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    mask_peaks: bool = False
+
+class DeconvolutionApplyRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    peaks: list[dict]
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    mask_peaks: bool = False
+    threshold_snr: float = 5.0
+    warm_start: bool = False
+    use_clustering: bool = False
+
+@app.get("/api/deconvolution/templates")
+def get_deconvolution_templates():
+    """Return all available model templates with their descriptions and default peaks."""
+    from scripts.deconvolution_engine import MODEL_TEMPLATES
+    # Make serializable (no dataclasses)
+    out = {}
+    for key, tmpl in MODEL_TEMPLATES.items():
+        out[key] = {
+            "label": tmpl["label"],
+            "description": tmpl["description"],
+            "peaks": tmpl["peaks"],  # already plain dicts
+        }
+    return {"success": True, "templates": out}
+
+
+@app.post("/api/deconvolution/fit-representative")
+def deconvolution_fit_representative(request: DeconvolutionFitRequest):
+    """
+    Fit peaks on the representative (median) spectrum of the file.
+    Used for interactive adjustment before applying to the full map.
+    """
+    from scripts.deconvolution_engine import fit_spectrum
+    from processor import get_representative_spectrum
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+
+    # Get representative spectrum
+    rep = get_representative_spectrum(request.vault_root, [request.h5_relative_path])
+    if not rep:
+        raise HTTPException(status_code=404, detail="Could not extract representative spectrum")
+
+    x = np.array([pt["x"] for pt in rep])
+    y = np.array([pt["y"] for pt in rep])
+
+    if not request.peaks:
+        return {"success": False, "message": "No peaks provided"}
+
+    params = request.baseline_params or {}
+    if request.mask_peaks and request.peaks:
+        # Create exclusion zones based on current peaks (center +/- fwhm)
+        exclude_regions = []
+        for p in request.peaks:
+            if p.get("active", True):
+                c = float(p.get("center", 0))
+                w = float(p.get("fwhm_init", 50))
+                exclude_regions.append((c - w*1.5, c + w*1.5))
+        params["exclude_regions"] = exclude_regions
+
+    result = fit_spectrum(
+        x=x,
+        y=y,
+        peaks=request.peaks,
+        baseline_method=request.baseline_method,
+        baseline_params=params,
+    )
+
+    def arr(a):
+        return [{"x": float(xi), "y": float(yi)} for xi, yi in zip(x, a)]
+
+    return {
+        "success": result.success,
+        "message": result.message,
+        "original":   arr(y),
+        "corrected":  arr(result.corrected),
+        "baseline":   arr(result.baseline),
+        "best_fit":   arr(result.best_fit),
+        "residuals":  arr(result.residuals),
+        "components": {
+            name: arr(vals) for name, vals in result.components.items()
+        },
+        "parameters": result.parameters,
+        "metrics":    result.metrics,
+        "local_metrics": result.local_metrics,
+    }
+
+
+@app.post("/api/deconvolution/apply-to-map")
+def deconvolution_apply_to_map(request: DeconvolutionApplyRequest):
+    """
+    Batch fit over every spectrum in the map.
+    Returns per-pixel parameter arrays and statistical quality metrics.
+    This is the heavy endpoint; it processes all N spectra sequentially.
+    """
+    from scripts.deconvolution_engine import fit_map_batch
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+
+    try:
+        with h5py.File(path, "r") as f:
+            wavenumbers  = f["/spectrum/wavenumbers"][:]
+            intensities  = f["/spectrum/intensities"][:]
+
+        if intensities.ndim == 1:
+            intensities = intensities.reshape(1, -1)
+
+        result = fit_map_batch(
+            wavenumbers=wavenumbers,
+            intensities_2d=intensities,
+            peaks=request.peaks,
+            baseline_method=request.baseline_method,
+            baseline_params=request.baseline_params or {},
+            threshold_snr=request.threshold_snr,
+            warm_start=request.warm_start,
+            use_clustering=request.use_clustering,
+        )
+        result["success"] = True
+        return result
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Batch fit failed: {str(e)}")
+
+
+class DeconvolutionAutoDetectRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    baseline_method: str = "asls"
+    baseline_params: dict = {}
+    threshold: float = 0.05
+
+@app.post("/api/deconvolution/auto-detect")
+def deconvolution_auto_detect(request: DeconvolutionAutoDetectRequest):
+    """
+    Auto-detect peaks on the representative spectrum using scipy.
+    Returns a list of suggested PeakConfig dicts.
+    """
+    from scripts.deconvolution_engine import auto_detect_peaks, apply_baseline
+    from processor import get_representative_spectrum
+
+    rep = get_representative_spectrum(request.vault_root, [request.h5_relative_path])
+    if not rep:
+        raise HTTPException(status_code=404, detail="Could not extract representative spectrum")
+
+    x = np.array([pt["x"] for pt in rep])
+    y = np.array([pt["y"] for pt in rep])
+
+    # Apply baseline first so detection is on corrected spectrum
+    y_corr, _ = apply_baseline(x, y, request.baseline_method, request.baseline_params or {})
+
+    detected = auto_detect_peaks(x, y_corr, prominence=request.threshold)
+    return {"success": True, "peaks": detected}
+
+
+class DeconvolutionPreviewBaselineRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    baseline_method: str = "asls"
+    baseline_params: dict = {}
+
+@app.post("/api/deconvolution/preview-baseline")
+def deconvolution_preview_baseline(request: DeconvolutionPreviewBaselineRequest):
+    from scripts.deconvolution_engine import apply_baseline
+    from processor import get_representative_spectrum
+
+    rep = get_representative_spectrum(request.vault_root, [request.h5_relative_path])
+    if not rep:
+        raise HTTPException(status_code=404, detail="Could not extract representative spectrum")
+
+    x = np.array([pt["x"] for pt in rep])
+    y = np.array([pt["y"] for pt in rep])
+
+    y_corr, baseline = apply_baseline(x, y, request.baseline_method, request.baseline_params)
+
+    return {
+        "success": True,
+        "baseline": [{"x": float(x[i]), "y": float(baseline[i])} for i in range(len(x))],
+        "corrected": [{"x": float(x[i]), "y": float(y_corr[i])} for i in range(len(x))]
+    }
+
+@app.post("/api/deconvolution/save-config")
+def deconvolution_save_config(request: DeconvolutionFitRequest):
+    import json
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+    try:
+        with h5py.File(path, "r+") as f:
+            if "config" not in f:
+                f.create_group("config")
+            config_data = {
+                "peaks": request.peaks,
+                "baseline_method": request.baseline_method,
+                "baseline_params": request.baseline_params or {},
+                "updated_at": datetime.now().isoformat()
+            }
+            f["config"].attrs["deconvolution"] = json.dumps(config_data)
+        return {"success": True, "message": "Configuration saved to file"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/deconvolution/load-config")
+def deconvolution_load_config(request: dict):
+    import json
+    path = Path(request.get("vault_root")) / request.get("h5_relative_path")
+    if not path.exists():
+        return {"success": False, "message": "File not found"}
+    try:
+        with h5py.File(path, "r") as f:
+            if "config" in f and "deconvolution" in f["config"].attrs:
+                data = json.loads(f["config"].attrs["deconvolution"])
+                return {"success": True, "config": data}
+        return {"success": False, "message": "No saved config found"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8765, reload=False)
+    uvicorn.run("main:app", host="127.0.0.1", port=8888, reload=False)

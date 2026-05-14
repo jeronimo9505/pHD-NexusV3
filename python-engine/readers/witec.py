@@ -1,33 +1,13 @@
-"""
-Witec .txt file reader.
-Handles single spectrum and map spectral files from Witec microscopes.
-
-Typical Witec .txt format:
------------
-(optional header lines starting with # or other char)
-Wavenumber  Intensity
-100.0       235.4
-101.0       237.8
-...
------------
-"""
-
 import numpy as np
 from pathlib import Path
 from typing import Tuple, Dict, Any
 
-
 def read_witec_txt(path: Path) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """
-    Parse a Witec .txt spectrum file.
-    
-    Returns:
-        wavenumbers: 1D numpy array of Raman shift (cm^-1)
-        intensities: 1D or 2D numpy array of intensity counts
-        metadata: dict with any header information extracted
+    Parse a Witec .txt spectrum file, handling maps and single spectra.
+    Robustly detects stacked 2-column formats and multi-column formats.
     """
     metadata: Dict[str, Any] = {}
-    header_lines = []
     data_lines = []
 
     with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -36,56 +16,60 @@ def read_witec_txt(path: Path) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     # Separate header from data
     for line in lines:
         stripped = line.strip()
-        if not stripped:
-            continue
-        
-        # Try to parse as float pair
+        if not stripped: continue
         parts = stripped.replace(",", ".").split()
         try:
             float(parts[0])
-            data_lines.append(parts)
+            data_lines.append([float(p.replace(",", ".")) for p in parts])
         except (ValueError, IndexError):
-            # It's a header line
-            header_lines.append(stripped)
+            continue
 
-    # Extract metadata from header
-    for h in header_lines:
-        lower = h.lower()
-        if "laser" in lower and "nm" in lower:
-            # e.g. "Laser: 633 nm"
-            try:
-                metadata["laser_wavelength_nm"] = int("".join(filter(str.isdigit, h.split("nm")[0])))
-            except Exception:
-                pass
-        if "power" in lower or "intensity" in lower:
-            metadata["raw_header_power"] = h
-        if "integration" in lower or "accumulation" in lower:
-            metadata["raw_header_time"] = h
-
-    # Parse the data
     if not data_lines:
-        raise ValueError("No numeric data found in file. Make sure it has two columns (wavenumber, intensity).")
+        raise ValueError("No numeric data found in file.")
 
-    try:
-        # Read ALL columns, not just [:2]
-        array = np.array([[float(p.replace(",", ".")) for p in row] for row in data_lines if len(row) >= 2])
-    except ValueError as e:
-        raise ValueError(f"Could not parse data rows: {e}")
+    array = np.array(data_lines)
+    
+    # Case 1: Multi-column format (Wn, Int1, Int2, ...)
+    if array.shape[1] > 2:
+        wavenumbers = array[:, 0]
+        intensities = array[:, 1:].T
+    # Case 2: Stacked 2-column format (Wn, Int) repeated for each spectrum
+    else:
+        raw_wn = array[:, 0]
+        raw_int = array[:, 1]
+        
+        # Detect where the X axis restarts (new spectrum)
+        # We look for a significant jump back in wavenumber
+        if len(raw_wn) > 1:
+            # Determine if it's descending or ascending
+            is_descending = raw_wn[1] < raw_wn[0]
+            if is_descending:
+                restarts = np.where(np.diff(raw_wn) > 100)[0] # Large positive jump in descending data
+            else:
+                restarts = np.where(np.diff(raw_wn) < -100)[0] # Large negative jump in ascending data
+            
+            if len(restarts) > 0:
+                # It's a stacked map
+                n_points = restarts[0] + 1
+                n_spectra = len(raw_wn) // n_points
+                wavenumbers = raw_wn[:n_points]
+                intensities = raw_int[:n_spectra * n_points].reshape(n_spectra, n_points)
+            else:
+                # Just a single spectrum
+                wavenumbers = raw_wn
+                intensities = raw_int.reshape(1, -1)
+        else:
+            wavenumbers = raw_wn
+            intensities = raw_int.reshape(1, -1)
 
-    if array.shape[1] < 2:
-        raise ValueError("Expected at least 2 columns (wavenumber, intensity).")
-
-    wavenumbers = array[:, 0]
-    # The rest are intensities: shape (n_wavenumbers, n_spectra)
-    # We transpose it to (n_spectra, n_wavenumbers)
-    intensities = array[:, 1:].T
-
-    # If it's just one spectrum, ensure it's a 1D array to match conventions
-    if intensities.shape[0] == 1:
-        intensities = intensities[0]
+    # CRITICAL: Always return data in ASCENDING wavenumber order
+    if len(wavenumbers) > 1 and wavenumbers[1] < wavenumbers[0]:
+        wavenumbers = wavenumbers[::-1]
+        intensities = intensities[:, ::-1]
 
     metadata["wavenumber_min"] = float(np.min(wavenumbers))
     metadata["wavenumber_max"] = float(np.max(wavenumbers))
     metadata["total_points"] = len(wavenumbers)
+    metadata["n_spectra"] = intensities.shape[0]
 
     return wavenumbers, intensities, metadata

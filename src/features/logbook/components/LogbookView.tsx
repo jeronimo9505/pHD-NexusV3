@@ -276,7 +276,7 @@ function Composer({ groupId, userId, onSent }: {
                     value={text}
                     onChange={e => setText(e.target.value)}
                     onKeyDown={handleKey}
-                    placeholder="Escribe una nota... Usa #tags o [muestra:M23] para vincular"
+                    placeholder="Write a note... Use #tags or [sample:M23] to link"
                     rows={1}
                     className="flex-1 bg-transparent resize-none outline-none text-sm text-slate-800 placeholder:text-slate-400 min-h-[24px] max-h-[160px] py-1"
                 />
@@ -288,7 +288,7 @@ function Composer({ groupId, userId, onSent }: {
                     {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                 </button>
             </div>
-            <p className="text-[10px] text-slate-400 mt-1.5 px-1">Ctrl+Enter para enviar · Se espeja en Telegram</p>
+            <p className="text-[10px] text-slate-400 mt-1.5 px-1">Ctrl+Enter to send · Mirrored on Telegram</p>
         </div>
     );
 }
@@ -331,7 +331,7 @@ export function LogbookView({ groupId, userId, isPrivate, isOwner }: LogbookView
 
     const handleSyncToDrive = async () => {
         if (!googleReady) {
-            toast.error('Cargando servicios de Google, inténtalo de nuevo en un segundo...');
+            toast.error('Loading Google services, try again in a second...');
             return;
         }
 
@@ -341,12 +341,12 @@ export function LogbookView({ groupId, userId, isPrivate, isOwner }: LogbookView
             
             const pendingEntries = entries.filter(e => e.media_files?.some(m => !m.drive_file_id && m.telegram_file_id));
             if (pendingEntries.length === 0) {
-                toast.info('No hay imágenes pendientes de sincronizar');
+                toast.info('No pending images to sync');
                 return;
             }
 
             if (!driveSettings?.apiKey || !driveSettings?.clientId) {
-                toast.error('Google Drive no configurado en este grupo. Ve a "Settings".');
+                toast.error('Google Drive not configured for this group. Go to "Settings".');
                 return;
             }
 
@@ -362,7 +362,7 @@ export function LogbookView({ groupId, userId, isPrivate, isOwner }: LogbookView
                 for (let i = 0; i < updatedMedia.length; i++) {
                     const m = updatedMedia[i];
                     if (!m.drive_file_id && m.telegram_file_id) {
-                        toast.loading(`Sincronizando imagen...`, { id: 'sync' });
+                        toast.loading(`Syncing image...`, { id: 'sync' });
                         const proxyUrl = `/api/logbook/image?file_id=${m.telegram_file_id}`;
                         const res = await fetch(proxyUrl);
                         if (!res.ok) continue;
@@ -400,10 +400,10 @@ export function LogbookView({ groupId, userId, isPrivate, isOwner }: LogbookView
                     await supabase.from('logbook_entries' as any).update({ media_files: updatedMedia }).eq('id', entry.id);
                 }
             }
-            toast.success(`¡Sincronización completada! (${totalSynced} imágenes)`, { id: 'sync' });
+            toast.success(`Sync complete! (${totalSynced} images)`, { id: 'sync' });
         } catch (e) {
             console.error("Sync error:", e);
-            toast.error('Error al sincronizar con Drive', { id: 'sync' });
+            toast.error('Error syncing with Drive', { id: 'sync' });
         } finally {
             setSyncing(false);
         }
@@ -501,10 +501,10 @@ export function LogbookView({ groupId, userId, isPrivate, isOwner }: LogbookView
                 <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
                     <Lock size={32} className="text-slate-400" />
                 </div>
-                <h2 className="text-xl font-bold text-slate-900 mb-2">Bitácora Privada</h2>
+                <h2 className="text-xl font-bold text-slate-900 mb-2">Private Logbook</h2>
                 <p className="text-slate-500 max-w-md">
-                    Esta bitácora ha sido marcada como privada por el administrador del grupo. 
-                    Solo el creador del grupo puede visualizar las entradas.
+                    This logbook has been marked as private by the group administrator. 
+                    Only the group creator can view the entries.
                 </p>
             </div>
         );
@@ -519,8 +519,8 @@ export function LogbookView({ groupId, userId, isPrivate, isOwner }: LogbookView
                         <NotebookPen size={18} className="text-white" />
                     </div>
                     <div>
-                        <h1 className="text-lg font-bold text-slate-900 leading-tight">Bitácora</h1>
-                        <p className="text-xs text-slate-500">{entries.length} entradas</p>
+                        <h1 className="text-lg font-bold text-slate-900 leading-tight">Logbook</h1>
+                        <p className="text-xs text-slate-500">{entries.length} entries</p>
                     </div>
                 </div>
 
@@ -541,7 +541,7 @@ export function LogbookView({ groupId, userId, isPrivate, isOwner }: LogbookView
                     <input
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
-                        placeholder="Buscar en la bitácora..."
+                        placeholder="Search logbook..."
                         className="w-full pl-9 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition-all"
                     />
                     {searchQuery && (

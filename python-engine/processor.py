@@ -8,7 +8,8 @@ import base64
 import io
 from pathlib import Path
 from datetime import datetime
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any, Optional, List
+import shutil
 
 
 def _build_h5_filename(metadata: Dict[str, Any], target_dir: Path) -> str:
@@ -215,3 +216,88 @@ def generate_preview(
     except Exception as e:
         print(f"Preview generation failed: {e}")
         return None
+
+def copy_file_to_vault(
+    source_path: Path,
+    metadata: Dict[str, Any],
+    vault_root: str,
+) -> Tuple[Path, str]:
+    """
+    Copies a generic file to the vault without conversion.
+    Maintains original filename but follows vault directory organization.
+    """
+    subpath = _build_vault_subpath(metadata)
+    abs_dir = Path(vault_root) / subpath
+    abs_dir.mkdir(parents=True, exist_ok=True)
+
+    target_path = abs_dir / source_path.name
+    
+    # If file exists, add a suffix to avoid overwriting
+    if target_path.exists():
+        stem = source_path.stem
+        ext = source_path.suffix
+        counter = 1
+        while target_path.exists():
+            target_path = abs_dir / f"{stem}_{counter}{ext}"
+            counter += 1
+            
+    shutil.copy2(source_path, target_path)
+    relative_path = target_path.relative_to(Path(vault_root)).as_posix()
+    
+    return target_path, relative_path
+
+def get_representative_spectrum(vault_root: str, h5_relative_paths: List[str]) -> List[Dict[str, float]]:
+    """
+    Computes a single representative spectrum (median) from multiple H5 files or a map.
+    Ensures all spectra are aligned to the same X-grid before merging.
+    """
+    if not h5_relative_paths:
+        return []
+
+    target_wn = None
+    all_spectra = []
+
+    for rel_path in h5_relative_paths:
+        abs_path = Path(vault_root) / rel_path
+        if not abs_path.exists(): continue
+        
+        try:
+            with h5py.File(abs_path, 'r') as f:
+                if "spectrum" not in f: continue
+                
+                wn = f["spectrum/wavenumbers"][:]
+                ints = f["spectrum/intensities"][:]
+                
+                # Force 2D (n_spectra, n_points)
+                if ints.ndim == 1:
+                    ints = ints.reshape(1, -1)
+                
+                # Sort this file's data by wavenumber
+                idx = np.argsort(wn)
+                wn = wn[idx]
+                ints = ints[:, idx]
+                
+                if target_wn is None:
+                    target_wn = wn
+                    
+                # Align if grids differ
+                if not np.array_equal(wn, target_wn):
+                    from scipy.interpolate import interp1d
+                    for i in range(ints.shape[0]):
+                        f_int = interp1d(wn, ints[i], bounds_error=False, fill_value=0)
+                        all_spectra.append(f_int(target_wn))
+                else:
+                    for i in range(ints.shape[0]):
+                        all_spectra.append(ints[i])
+        except Exception as e:
+            print(f"Error reading {rel_path}: {e}")
+
+    if target_wn is None or not all_spectra:
+        return []
+
+    # Median aggregate
+    stacked = np.vstack(all_spectra)
+    median_spec = np.median(stacked, axis=0)
+    
+    # Final data conversion for JSON
+    return [{"x": float(x), "y": float(y)} for x, y in zip(target_wn, median_spec)]

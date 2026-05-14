@@ -65,18 +65,27 @@ export async function getSystemRole(supabase?: SupabaseClient, userId?: string):
  * Checks if the current user is the creator (owner) of a group.
  */
 export async function isGroupOwner(groupId: string): Promise<boolean> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    try {
+        const user = await getUser();
+        if (!user) return false;
 
-    if (!user) return false;
+        const supabase = await createClient();
+        const { data: group, error } = await supabase
+            .from('groups')
+            .select('created_by')
+            .eq('id', groupId)
+            .single();
 
-    const { data: group } = await supabase
-        .from('groups')
-        .select('created_by')
-        .eq('id', groupId)
-        .single();
+        if (error || !group) {
+            console.warn(`[isGroupOwner] Group not found or query error for ID ${groupId}:`, error?.message);
+            return false;
+        }
 
-    return group?.created_by === user.id;
+        return group.created_by === user.id;
+    } catch (e) {
+        console.error("[isGroupOwner] Unexpected error:", e);
+        return false;
+    }
 }
 
 /**

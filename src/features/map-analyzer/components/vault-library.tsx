@@ -4,12 +4,18 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import { 
     RefreshCw, FileText, Database, Map, Search, 
     ChevronDown, ChevronRight, FlaskConical, 
-    Calendar, Layers, X, Trash2, Zap, Info, 
-    Tag, Beaker, SlidersHorizontal
+    Calendar, Layers, X, Trash2, Zap, Info, Check,
+    Tag, Beaker, SlidersHorizontal, Save,
+    Bookmark, History
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+
+interface PipelineStep {
+    type: string;
+    params?: Record<string, any>;
+}
 
 interface VaultFile {
     id: string;
@@ -22,6 +28,9 @@ interface VaultFile {
     n_spectra: number;
     map_width: number;
     map_height: number;
+    pipeline_applied?: boolean;
+    pipeline_name?: string;
+    pipeline_history?: string; // JSON string of steps
 }
 
 interface SampleGroup {
@@ -171,18 +180,34 @@ export function VaultLibrary({
     selectedH5,
     sessionFiles,
     dbSamples = [],
+    compareFiles = [],
     onSelect,
     onOpenExplorer,
-    onRemove 
+    onSaveWorkspace,
+    onSaveComparison,
+    isSaving,
+    savedWorkspaces = [],
+    onLoadWorkspace,
+    onRemove,
+    onDeleteFile,
+    onToggleCompare
 }: { 
     vaultRoot: string;
     groupId: string;
     selectedH5: string;
     sessionFiles: VaultFile[];
     dbSamples?: any[];
+    compareFiles?: VaultFile[];
     onSelect: (file: any) => void;
     onOpenExplorer: () => void;
+    onSaveWorkspace?: () => void;
+    onSaveComparison?: () => void;
+    isSaving?: boolean;
+    savedWorkspaces?: any[];
+    onLoadWorkspace?: (ws: any) => void;
     onRemove: (path: string) => void;
+    onDeleteFile?: (file: any) => void;
+    onToggleCompare?: (file: any) => void;
 }) {
     const [search, setSearch] = useState('');
     const [expandedSamples, setExpandedSamples] = useState<Record<string, boolean>>({});
@@ -194,22 +219,17 @@ export function VaultLibrary({
     };
 
     const groupedData = useMemo(() => {
-        const filtered = sessionFiles.filter(f => 
-            f.name.toLowerCase().includes(search.toLowerCase()) || 
-            f.sample_name.toLowerCase().includes(search.toLowerCase())
-        );
-
-        const groups = filtered.reduce((acc, file) => {
-            const sName = file.sample_name || 'Uncategorized';
+        // 1. Group all files first to maintain hierarchy
+        const groups = sessionFiles.reduce((acc, file) => {
+            const rawSName = (file.sample_name || 'Uncategorized').trim();
+            
+            const dbMatch = dbSamples.find(s => s.sample_code === rawSName) || 
+                            dbSamples.find(s => file.name.includes(s.sample_code)) || 
+                            dbSamples.find(s => s.name === rawSName);
+            
+            const sName = dbMatch ? dbMatch.sample_code : rawSName;
             
             if (!acc[sName]) {
-                // Find matching sample in Supabase metadata
-                const dbMatch = dbSamples.find(s => 
-                    s.sample_code === sName || 
-                    s.name === sName || 
-                    file.name.includes(s.sample_code)
-                );
-
                 acc[sName] = { 
                     name: sName, 
                     displayName: dbMatch?.name || sName,
@@ -219,20 +239,42 @@ export function VaultLibrary({
                     status: dbMatch?.status,
                     attributes: dbMatch?.attributes || {},
                     files: [], 
-                    latestDate: file.measured_at || file.created_at || '' 
+                    latestDate: file.measured_at || file.created_at || ''
                 };
             }
             acc[sName].files.push(file);
-            const fileDate = file.measured_at || file.created_at || '';
-            if (fileDate > acc[sName].latestDate) {
-                acc[sName].latestDate = fileDate;
+            
+            if (!file.pipeline_applied) {
+                const fileDate = file.measured_at || file.created_at || '';
+                if (fileDate > acc[sName].latestDate) {
+                    acc[sName].latestDate = fileDate;
+                }
             }
             return acc;
         }, {} as Record<string, SampleGroup>);
 
-        return Object.values(groups).sort((a, b) => 
-            b.latestDate.localeCompare(a.latestDate)
-        );
+        // 2. Filter groups based on sample info or file names (including pipeline names)
+        const searchLower = search.toLowerCase();
+        if (!searchLower) {
+            return Object.values(groups).sort((a, b) => b.latestDate.localeCompare(a.latestDate));
+        }
+
+        const filteredGroups = Object.values(groups).filter(group => {
+            // Match in sample metadata
+            const groupMatch = group.name.toLowerCase().includes(searchLower) || 
+                               group.displayName.toLowerCase().includes(searchLower) ||
+                               (group.sampleCode && group.sampleCode.toLowerCase().includes(searchLower));
+            
+            if (groupMatch) return true;
+
+            // Match in any of the files
+            return group.files.some(f => 
+                f.name.toLowerCase().includes(searchLower) || 
+                (f.pipeline_name && f.pipeline_name.toLowerCase().includes(searchLower))
+            );
+        });
+
+        return filteredGroups.sort((a, b) => b.latestDate.localeCompare(a.latestDate));
     }, [sessionFiles, search, dbSamples]);
 
     return (
@@ -248,13 +290,35 @@ export function VaultLibrary({
                         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{sessionFiles.length} Maps Loaded</p>
                     </div>
                 </div>
-                <button 
-                    onClick={onOpenExplorer}
-                    className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all shadow-lg shadow-indigo-100 active:scale-95 group"
-                    title="Import Maps from Vault"
-                >
-                    <Layers size={16} className="group-hover:scale-110 transition-transform" />
-                </button>
+                <div className="flex items-center gap-2">
+                    {compareFiles.length > 0 && onSaveComparison && (
+                        <button 
+                            onClick={onSaveComparison}
+                            disabled={isSaving}
+                            className="p-2.5 bg-emerald-50 text-emerald-600 border border-emerald-100 hover:bg-emerald-100 rounded-xl transition-all shadow-sm active:scale-95 group"
+                            title="Save Active Comparison"
+                        >
+                            {isSaving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} className="group-hover:scale-110 transition-transform" />}
+                        </button>
+                    )}
+                    {sessionFiles.length > 0 && onSaveWorkspace && (
+                        <button 
+                            onClick={onSaveWorkspace}
+                            disabled={isSaving}
+                            className="p-2.5 bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100 rounded-xl transition-all shadow-sm active:scale-95 group"
+                            title="Save Entire Workspace"
+                        >
+                            {isSaving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} className="group-hover:scale-110 transition-transform" />}
+                        </button>
+                    )}
+                    <button 
+                        onClick={onOpenExplorer}
+                        className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all shadow-lg shadow-indigo-100 active:scale-95 group"
+                        title="Import Maps from Vault"
+                    >
+                        <Layers size={16} className="group-hover:scale-110 transition-transform" />
+                    </button>
+                </div>
             </div>
 
             {/* Search */}
@@ -292,140 +356,117 @@ export function VaultLibrary({
                 ) : groupedData.length === 0 ? (
                     <div className="py-20 text-center text-slate-400 text-xs font-medium italic">No matches found</div>
                 ) : (
-                    <div className="space-y-1">
-                        {groupedData.map(group => (
-                            <div key={group.name} className="flex flex-col">
-                                {/* Sample Header Row */}
-                                <div 
-                                    className="w-full flex items-center gap-2 p-3 hover:bg-slate-50 rounded-2xl transition-all group border border-transparent hover:border-slate-100 cursor-pointer"
-                                    onClick={() => toggleSample(group.name)}
-                                >
-                                    <div className={cn(
-                                        "p-1.5 rounded-lg transition-colors shrink-0",
-                                        expandedSamples[group.name] ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-400 group-hover:bg-slate-200"
-                                    )}>
-                                        <FlaskConical size={14} />
-                                    </div>
-                                    <div className="flex-1 text-left min-w-0">
-                                        {/* Primary: Composition Name */}
-                                        <div className="text-xs font-bold text-slate-900 truncate leading-tight">
-                                            {group.displayName}
+                    <div className="flex flex-col h-full overflow-hidden">
+                        {/* Table Headers */}
+                        <div className="flex items-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50/80 border-b border-slate-200 shrink-0">
+                             <div className="w-10 border-r border-slate-200 py-2.5 flex items-center justify-center">
+                                 <div className="w-3.5 h-3.5 rounded border border-slate-300 bg-white" />
+                             </div>
+                             <div className="w-24 border-r border-slate-200 px-3 py-2.5">Code</div>
+                             <div className="flex-1 px-3 py-2.5">Name</div>
+                             <div className="w-10 border-l border-slate-200 py-2.5"></div>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto custom-scrollbar">
+                            {groupedData.map(group => (
+                                <div key={group.name} className="flex flex-col">
+                                    {/* Sample Header Row */}
+                                    <div 
+                                        className="flex items-center text-[11px] border-b border-slate-100 hover:bg-slate-50/50 group/row cursor-pointer"
+                                        onClick={() => toggleSample(group.name)}
+                                    >
+                                        <div className="w-10 border-r border-slate-100 py-2.5 flex items-center justify-center shrink-0">
+                                            <div className="w-3.5 h-3.5 rounded border border-slate-300 bg-white" />
                                         </div>
-                                        {/* Secondary: Code badge + file count */}
-                                        <div className="flex items-center gap-1.5 mt-0.5">
-                                            {group.sampleCode && (
-                                                <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-md">
-                                                    {group.sampleCode}
-                                                </span>
-                                            )}
-                                            <span className="text-[9px] font-bold text-slate-400">
-                                                {group.files.length} map{group.files.length !== 1 ? 's' : ''}
-                                            </span>
+                                        <div className="w-24 border-r border-slate-100 px-3 py-2.5 font-black text-indigo-600 shrink-0">
+                                            {group.sampleCode || group.name}
                                         </div>
-                                    </div>
-                                    
-                                    {/* Info button (Quick Overview) */}
-                                    <div className="relative shrink-0">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                const rect = e.currentTarget.getBoundingClientRect();
-                                                setOverviewPosition({ top: rect.top, left: rect.right + 12 });
-                                                setOpenOverview(prev => prev === group.name ? null : group.name);
-                                            }}
-                                            className={cn(
-                                                "p-1.5 rounded-lg transition-all",
-                                                openOverview === group.name
-                                                    ? "bg-indigo-100 text-indigo-600"
-                                                    : "text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 opacity-0 group-hover:opacity-100"
+                                        <div className="flex-1 px-3 py-2.5 flex items-center gap-2 min-w-0">
+                                            <div className="p-0.5 hover:bg-slate-200 rounded transition-colors shrink-0">
+                                                {expandedSamples[group.name] !== false ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                            </div>
+                                            <span className="font-bold text-slate-700 truncate">{group.displayName || group.sample_name}</span>
+                                            
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const rect = e.currentTarget.getBoundingClientRect();
+                                                    setOverviewPosition({ top: rect.top, left: rect.right + 12 });
+                                                    setOpenOverview(prev => prev === group.name ? null : group.name);
+                                                }}
+                                                className="p-1 text-slate-300 hover:text-indigo-500 opacity-0 group-hover/row:opacity-100 transition-all"
+                                            >
+                                                <Info size={12} />
+                                            </button>
+                                            
+                                            {openOverview === group.name && (
+                                                <SampleOverviewPopover group={group} position={overviewPosition} onClose={() => setOpenOverview(null)} />
                                             )}
-                                            title="Quick Sample Overview"
-                                        >
-                                            <Info size={13} />
-                                        </button>
+                                        </div>
 
-                                        {/* Overview Popover */}
-                                        {openOverview === group.name && (
-                                            <SampleOverviewPopover
-                                                group={group}
-                                                position={overviewPosition}
-                                                onClose={() => setOpenOverview(null)}
-                                            />
-                                        )}
+                                        <div className="w-10 border-l border-slate-100 py-2.5 shrink-0 text-center text-[9px] font-bold text-slate-300">
+                                            {group.files.length}
+                                        </div>
                                     </div>
 
-                                    {/* Expand arrow */}
-                                    {expandedSamples[group.name] ? 
-                                        <ChevronDown size={14} className="text-slate-400 shrink-0" /> : 
-                                        <ChevronRight size={14} className="text-slate-400 shrink-0" />
-                                    }
+                                    {/* Child File Rows */}
+                                    {expandedSamples[group.name] !== false && group.files.map(file => (
+                                        <FileItem 
+                                            key={file.id} 
+                                            file={file} 
+                                            isSelected={selectedH5 === file.h5_relative_path} 
+                                            isCompared={compareFiles?.some(f => f.id === file.id) || false} 
+                                            onToggleCompare={onToggleCompare} 
+                                            onSelect={onSelect} 
+                                            onRemove={onRemove} 
+                                            onDeleteFile={onDeleteFile}
+                                            isNested={true}
+                                        />
+                                    ))}
                                 </div>
-
-                                {expandedSamples[group.name] && (
-                                    <div className="mt-1 mb-2 space-y-0.5 pl-4 ml-4 border-l-2 border-slate-100">
-                                        {group.files.map(file => {
-                                            const isSelected = selectedH5 === file.h5_relative_path;
-                                            const isMap = file.n_spectra > 1;
-
-                                            return (
-                                                <div key={file.id} className="relative group pb-0.5">
-                                                    <button
-                                                        onClick={() => onSelect(file)}
-                                                        className={cn(
-                                                            "w-full text-left px-4 py-3 rounded-xl flex items-start gap-4 transition-all relative",
-                                                            isSelected 
-                                                                ? "bg-white border border-indigo-200 shadow-lg shadow-indigo-100/50" 
-                                                                : "hover:bg-slate-50 border border-transparent"
-                                                        )}
-                                                    >
-                                                        <div className={cn(
-                                                            "mt-0.5 p-1.5 rounded-lg shrink-0 transition-all",
-                                                            isSelected 
-                                                                ? "bg-indigo-600 text-white shadow-md shadow-indigo-200" 
-                                                                : "bg-slate-100 text-slate-400 group-hover:bg-slate-200 group-hover:text-slate-600"
-                                                        )}>
-                                                            {isMap ? <Map size={13} /> : <FileText size={13} />}
-                                                        </div>
-                                                        <div className="flex-1 min-w-0 pr-6">
-                                                            <div className={cn(
-                                                                "text-xs font-bold tracking-tight mb-1 truncate",
-                                                                isSelected ? "text-indigo-900" : "text-slate-600 group-hover:text-slate-900"
-                                                            )}>
-                                                                {file.name}
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <span className={cn(
-                                                                    "text-[9px] font-extrabold px-1 rounded",
-                                                                    isSelected ? "bg-indigo-50 text-indigo-500" : "bg-slate-100 text-slate-500"
-                                                                )}>
-                                                                    {file.technique}
-                                                                </span>
-                                                                {isMap && <span className="text-[9px] font-medium text-slate-400">{file.map_width}x{file.map_height}</span>}
-                                                            </div>
-                                                        </div>
-                                                    </button>
-                                                    
-                                                    {/* Remove Button */}
-                                                    <button 
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            onRemove(file.h5_relative_path);
-                                                        }}
-                                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded-lg hover:bg-red-50"
-                                                        title="Remove from Workspace"
-                                                    >
-                                                        <X size={14} />
-                                                    </button>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 )}
             </div>
+
+            {/* Saved Sessions Section */}
+            {savedWorkspaces.length > 0 && (
+                <div className="shrink-0 border-t border-slate-100 bg-slate-50/50">
+                    <div className="p-4 py-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <History size={14} className="text-slate-400" />
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Saved Sessions</span>
+                        </div>
+                        <span className="bg-slate-200 text-slate-600 text-[9px] font-bold px-1.5 py-0.5 rounded-md">{savedWorkspaces.length}</span>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto px-2 pb-4 space-y-1 custom-scrollbar">
+                        {savedWorkspaces.slice(0, 8).map((ws) => (
+                            <button
+                                key={ws.id}
+                                onClick={() => onLoadWorkspace?.(ws)}
+                                className="w-full flex items-center justify-between p-2.5 hover:bg-white hover:shadow-sm rounded-xl transition-all group border border-transparent hover:border-slate-200"
+                            >
+                                <div className="flex items-center gap-3 overflow-hidden">
+                                    <div className={cn(
+                                        "w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
+                                        ws.settings?.type === 'comparison' ? "bg-emerald-50 text-emerald-600" : "bg-indigo-50 text-indigo-600"
+                                    )}>
+                                        {ws.settings?.type === 'comparison' ? <Bookmark size={14} /> : <FileText size={14} />}
+                                    </div>
+                                    <div className="text-left overflow-hidden">
+                                        <p className="text-xs font-bold text-slate-700 truncate">{ws.name}</p>
+                                        <p className="text-[9px] text-slate-400 font-medium">
+                                            {ws.files?.length || 0} files • {new Date(ws.updated_at).toLocaleDateString()}
+                                        </p>
+                                    </div>
+                                </div>
+                                <ChevronRight size={14} className="text-slate-300 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all" />
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
             
             {/* Sync Status Bar */}
             <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between">
@@ -437,6 +478,189 @@ export function VaultLibrary({
                     <Zap size={10} className="text-yellow-500" />
                     <span className="text-[9px] font-bold text-slate-400">v1.2.0</span>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+// Subcomponent for cleaner code
+function PipelineStepsModal({ name, history, onClose }: { name: string, history: PipelineStep[], onClose: () => void }) {
+    const STEP_LABELS: Record<string, string> = {
+        crop: 'Crop', despike: 'Despike', baseline: 'Baseline',
+        normalize: 'Normalize', smooth: 'Smooth', peak_protection: 'Peak Protection',
+    };
+    const PARAM_LABELS: Record<string, string> = {
+        start: 'Min (cm\u207b\u00b9)', end: 'Max (cm\u207b\u00b9)', window_length: 'Window',
+        threshold: 'Threshold', method: 'Method', smoothing_factor: 'Factor',
+        order: 'Order', lam: 'Lambda', p: 'Asymmetry p',
+        window: 'Window (pts)', iterations: 'Iterations', poly_order: 'Poly Order',
+        eta: 'Eta', show_spikes: 'Show Spikes',
+    };
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => { setMounted(true); }, []);
+    if (!mounted) return null;
+    return createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-4 bg-gradient-to-r from-orange-500 to-amber-500 flex items-center justify-between">
+                    <div>
+                        <div className="text-[10px] font-black uppercase tracking-widest text-orange-100">Pipeline Template</div>
+                        <div className="text-lg font-black text-white">{name}</div>
+                        <div className="text-xs text-orange-100 mt-0.5">{history.length} steps aplicados</div>
+                    </div>
+                    <button onClick={onClose} className="p-2 bg-white/20 hover:bg-white/30 rounded-xl transition-colors">
+                        <X size={16} className="text-white" />
+                    </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {history.map((step, i) => (
+                        <div key={i} className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                            <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100">
+                                <div className="w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-black flex items-center justify-center shadow-sm">{i + 1}</div>
+                                <span className="font-bold text-sm uppercase tracking-wider text-slate-700">{STEP_LABELS[step.type] || step.type}</span>
+                            </div>
+                            {step.params && Object.keys(step.params).length > 0 && (
+                                <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-1.5">
+                                    {Object.entries(step.params)
+                                        .filter(([k, v]) => v !== null && v !== undefined && v !== '' && k !== 'peak_regions' && k !== 'id')
+                                        .map(([k, v]) => (
+                                            <div key={k} className="flex items-center justify-between gap-2">
+                                                <span className="text-[10px] text-slate-400 font-medium">{PARAM_LABELS[k] || k}</span>
+                                                <span className="text-[10px] font-bold text-slate-700">{Array.isArray(v) ? v.join(', ') : String(v)}</span>
+                                            </div>
+                                        ))}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    {history.length === 0 && (
+                        <div className="text-center py-12 text-slate-400">
+                            <p className="text-sm">No hay pasos registrados en este pipeline</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>,
+        document.body
+    );
+}
+
+function FileItem({ file, isSelected, isCompared, onToggleCompare, onSelect, onRemove, onDeleteFile, isNested = false }: { file: VaultFile, isSelected: boolean, isCompared?: boolean, onToggleCompare?: (f: VaultFile) => void, onSelect: (f: VaultFile) => void, onRemove: (path: string) => void, onDeleteFile?: (f: VaultFile) => void, isNested?: boolean }) {
+    const isMap = file.n_spectra > 1;
+    const [confirmDelete, setConfirmDelete] = useState(false);
+    const [showPipelineInfo, setShowPipelineInfo] = useState(false);
+
+    const pipelineSteps: PipelineStep[] = (() => {
+        if (!file.pipeline_history) return [];
+        try { return JSON.parse(file.pipeline_history); } catch { return []; }
+    })();
+
+    const meta = (() => {
+        const prefixCode = file.name.split('_')[0];
+        let shortName = file.name;
+        if (shortName.startsWith(prefixCode)) {
+            shortName = shortName.substring(prefixCode.length);
+            if (shortName.startsWith('_')) shortName = shortName.substring(1);
+        }
+        if (shortName.endsWith('.h5')) shortName = shortName.substring(0, shortName.length - 3);
+        if (shortName.length > 25) shortName = shortName.substring(0, 22) + '...';
+        return { prefixCode, shortName };
+    })();
+    
+    return (
+        <div 
+            role="button"
+            tabIndex={0}
+            onClick={() => onSelect(file)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(file); }}
+            className={cn(
+                "flex items-center text-[11px] border-b border-slate-50 transition-all cursor-pointer group/row",
+                isSelected ? "bg-indigo-50/30" : "hover:bg-slate-50/80"
+            )}
+        >
+            {/* Column 1: Checkbox (Fixed) */}
+            <div className="w-10 border-r border-slate-100 py-2 flex items-center justify-center shrink-0 relative group/icon">
+                <div 
+                    className={cn(
+                        "w-3.5 h-3.5 rounded border flex items-center justify-center transition-all bg-white shadow-sm cursor-pointer",
+                        isCompared ? "border-orange-500 text-orange-500 bg-orange-50/30" : "border-slate-300 text-transparent"
+                    )}
+                    onClick={(e) => { e.stopPropagation(); onToggleCompare?.(file); }}
+                >
+                    <Check size={10} strokeWidth={4} className={cn(!isCompared && "opacity-0 group-hover/row:opacity-20 text-slate-400")} />
+                </div>
+            </div>
+
+            {/* Column 2: Code with Tree Connector */}
+            <div className="w-24 border-r border-slate-100 px-3 py-2 flex items-center gap-2 shrink-0">
+                <span className="text-slate-300 text-[10px] font-light">└</span>
+                <span className="text-[10px] font-bold text-slate-400 truncate">
+                    {meta.prefixCode}
+                </span>
+            </div>
+
+            {/* Column 3: Name */}
+            <div className="flex-1 px-3 py-2 flex items-center justify-between min-w-0">
+                <span className={cn(
+                    "truncate transition-colors",
+                    file.pipeline_applied ? "text-indigo-600 font-bold italic" : (isSelected ? "text-indigo-900 font-bold" : "text-slate-600 font-medium")
+                )}>
+                    {file.pipeline_applied && file.pipeline_name ? file.pipeline_name : meta.shortName}
+                </span>
+                
+                {file.pipeline_applied && (
+                    <div className="relative shrink-0">
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setShowPipelineInfo(v => !v); }}
+                            className="w-4 h-4 rounded bg-orange-100 text-orange-600 flex items-center justify-center hover:bg-orange-200 transition-colors"
+                        >
+                            <Zap size={8} />
+                        </button>
+                        {showPipelineInfo && (
+                            <PipelineStepsModal
+                                name={file.pipeline_name || 'Processed'}
+                                history={pipelineSteps}
+                                onClose={() => setShowPipelineInfo(false)}
+                            />
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* Column 4: Actions */}
+            <div className="w-10 border-l border-slate-100 py-2 flex items-center justify-center shrink-0 opacity-0 group-hover/row:opacity-100 transition-all">
+                {!confirmDelete ? (
+                    <button 
+                        onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setConfirmDelete(true); 
+                        }}
+                        className={cn(
+                            "p-1 transition-colors",
+                            file.pipeline_applied ? "text-slate-300 hover:text-red-500" : "text-slate-300 hover:text-indigo-500"
+                        )}
+                        title={file.pipeline_applied ? "Eliminar ficha y archivo" : "Quitar del espacio de trabajo"}
+                    >
+                        {file.pipeline_applied ? <Trash2 size={12} /> : <X size={12} />}
+                    </button>
+                ) : (
+                    <button 
+                        onMouseLeave={() => setConfirmDelete(false)}
+                        onClick={(e) => { 
+                            e.stopPropagation(); 
+                            if (file.pipeline_applied) {
+                                onDeleteFile?.(file);
+                            } else {
+                                onRemove(file.h5_relative_path);
+                            }
+                            setConfirmDelete(false);
+                        }}
+                        className="p-1 text-white bg-red-500 rounded-md shadow-sm active:scale-95 transition-all animate-in fade-in zoom-in duration-200"
+                        title="Click para confirmar"
+                    >
+                        <Check size={10} strokeWidth={4} />
+                    </button>
+                )}
             </div>
         </div>
     );

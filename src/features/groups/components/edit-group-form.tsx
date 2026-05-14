@@ -63,7 +63,7 @@ export function EditGroupForm({
                         Private Logbook
                     </label>
                     <p className="text-xs text-slate-500">
-                        Only the group creator will be able to see the Bitácora entries.
+                        Only the group creator will be able to see the Logbook entries.
                     </p>
                 </div>
             </div>

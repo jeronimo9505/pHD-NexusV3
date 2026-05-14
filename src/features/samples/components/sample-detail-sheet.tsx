@@ -233,26 +233,55 @@ export function SampleDetailSheet({
         }
     };
 
-    const handleOpenFolder = async (path?: string) => {
+    const handleOpenVaultFolder = async () => {
         if (!isDesktop) return;
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const vaultRoot = localStorage.getItem('phdnexus_vault_root');
-            let target = path || expandedChar?.data?.file_origin || vaultRoot;
+            if (!vaultRoot) return;
+
+            let targetDir = vaultRoot;
             
-            if (target) {
-                // If it's a file path, get the directory
-                if (target.includes('.') && (target.includes('/') || target.includes('\\'))) {
-                    const parts = target.split(/[\\/]/);
-                    parts.pop();
-                    target = parts.join('/');
+            // Priority 1: Open the directory where the vault files are stored
+            const paths = expandedChar?.data?.local_h5_paths || (expandedChar?.data?.local_h5_path ? [expandedChar?.data?.local_h5_path] : []);
+            
+            if (paths.length > 0) {
+                const firstPath = paths[0];
+                const parts = firstPath.split(/[\\/]/);
+                parts.pop(); // remove filename
+                if (parts.length > 0) {
+                    targetDir = `${vaultRoot}/${parts.join('/')}`;
                 }
-                
-                await invoke('open_local_folder', { path: target });
+            } else if (expandedChar?.data?.file_origin) {
+                // Priority 2: Origin folder
+                let origin = expandedChar.data.file_origin;
+                if (origin.includes('.') && (origin.includes('/') || origin.includes('\\'))) {
+                    const parts = origin.split(/[\\/]/);
+                    parts.pop();
+                    origin = parts.join('/');
+                }
+                targetDir = origin;
             }
+            
+            await invoke('open_local_folder', { path: targetDir });
         } catch (e) {
             console.error("Failed to open folder", e);
             toast.error("Could not open folder.");
+        }
+    };
+
+    const handleOpenFile = async (path: string) => {
+        if (!isDesktop) return;
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const vaultRoot = localStorage.getItem('phdnexus_vault_root');
+            if (vaultRoot && path) {
+                const fullPath = `${vaultRoot}/${path}`.replace(/\\/g, '/');
+                await invoke('open_local_folder', { path: fullPath });
+            }
+        } catch (e) {
+            console.error("Failed to open file", e);
+            toast.error("Could not open file.");
         }
     };
 
@@ -417,7 +446,7 @@ export function SampleDetailSheet({
                                                 </h4>
                                                 {isDesktop && (
                                                     <button 
-                                                        onClick={() => handleOpenFolder()}
+                                                        onClick={() => handleOpenVaultFolder()}
                                                         className="p-1 hover:bg-emerald-100 text-emerald-600 rounded-md transition-colors flex items-center gap-1 text-[10px] font-bold uppercase"
                                                         title="Open in Explorer"
                                                     >
@@ -436,9 +465,13 @@ export function SampleDetailSheet({
                                                         return (
                                                             <div key={i} className="p-2 flex flex-col gap-1 hover:bg-emerald-100/30 transition-colors">
                                                                 <div className="flex justify-between items-start gap-2">
-                                                                    <span className="text-[10px] text-emerald-800 font-mono break-all leading-tight flex-1" title={path}>
+                                                                    <button 
+                                                                        onClick={() => handleOpenFile(path)}
+                                                                        className="text-[10px] text-emerald-800 hover:text-blue-600 hover:underline font-mono break-all leading-tight flex-1 text-left" 
+                                                                        title="Click to open file"
+                                                                    >
                                                                         {filename}
-                                                                    </span>
+                                                                    </button>
                                                                 </div>
                                                                 {meta && (
                                                                     <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -557,7 +590,14 @@ export function SampleDetailSheet({
                                 </span>
                                 <span className="text-slate-400 text-[10px] font-mono">{sample.sample_code}</span>
                             </div>
-                            <h2 className="text-lg font-bold text-slate-900 leading-tight">{sample.name}</h2>
+                            <h2 className="text-lg font-bold text-slate-900 leading-tight flex flex-wrap items-baseline gap-x-2">
+                                <span>{sample.name}</span>
+                                {sample.description && (
+                                    <span className="text-[11px] font-medium text-slate-500 italic line-clamp-2" title={sample.description}>
+                                        — {sample.description}
+                                    </span>
+                                )}
+                            </h2>
                         </div>
                         <div className="flex items-center gap-1">
                             {allSamples.length > 0 && (
