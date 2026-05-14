@@ -956,7 +956,9 @@ function ParametersTable({ parameters }: { parameters: any[] }) {
             <td className="px-3 py-1.5 font-bold flex items-center gap-1.5" style={{ color: PEAK_COLORS[i % PEAK_COLORS.length] }}>
               {p.name}
               {p.description && (
-                <Info size={12} className="text-slate-500 cursor-help opacity-70 hover:opacity-100" title={p.description} />
+                <span title={p.description} className="text-slate-500 cursor-help opacity-70 hover:opacity-100">
+                  <Info size={12} />
+                </span>
               )}
             </td>
             <td className="px-3 py-1.5 text-slate-400">{p.model}</td>
