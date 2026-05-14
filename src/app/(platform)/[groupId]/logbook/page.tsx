@@ -21,7 +21,7 @@ export default async function LogbookPage({ params }: PageProps) {
         .from('groups')
         .select('logbook_is_private, created_by')
         .eq('id', groupId)
-        .single();
+        .single() as any;
 
     const isPrivate = group?.logbook_is_private || false;
     const isOwner = group?.created_by === user.id;
