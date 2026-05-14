@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
 
     // 1. Save to DB directly
     const { data: entry, error: dbError } = await supabase
-        .from("logbook_entries")
+        .from("logbook_entries" as any)
         .insert({
             group_id: groupId,
             user_id: user.id,
