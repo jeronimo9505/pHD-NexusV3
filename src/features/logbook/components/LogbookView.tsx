@@ -393,7 +393,7 @@ export function LogbookView({ groupId, userId }: LogbookViewProps) {
                 }
 
                 if (changed) {
-                    await supabase.from('logbook_entries').update({ media_files: updatedMedia }).eq('id', entry.id);
+                    await supabase.from('logbook_entries' as any).update({ media_files: updatedMedia }).eq('id', entry.id);
                 }
             }
             toast.success(`¡Sincronización completada! (${totalSynced} imágenes)`, { id: 'sync' });
@@ -408,7 +408,7 @@ export function LogbookView({ groupId, userId }: LogbookViewProps) {
     const fetchEntries = useCallback(async () => {
         setLoading(true);
         let query = supabase
-            .from('logbook_entries')
+            .from('logbook_entries' as any)
             .select('*')
             .eq('group_id', groupId)
             .order('created_at', { ascending: true });
