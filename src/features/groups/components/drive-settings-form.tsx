@@ -18,6 +18,7 @@ interface DriveSettingsFormProps {
         meetingFolderId?: string;
         pptFolderId?: string;
         sampleFolderId?: string;
+        logbookFolderId?: string;
         calendarId?: string;
     };
 }
@@ -33,13 +34,14 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
 
     // Add new state for folder picker
     const [showFolderModal, setShowFolderModal] = useState(false);
-    const [activeFolderField, setActiveFolderField] = useState<'folderId' | 'reportFolderId' | 'meetingFolderId' | 'pptFolderId' | 'sampleFolderId' | null>(null);
+    const [activeFolderField, setActiveFolderField] = useState<'folderId' | 'reportFolderId' | 'meetingFolderId' | 'pptFolderId' | 'sampleFolderId' | 'logbookFolderId' | null>(null);
     const [formValues, setFormValues] = useState({
         folderId: initialSettings?.folderId || '',
         reportFolderId: initialSettings?.reportFolderId || '',
         meetingFolderId: initialSettings?.meetingFolderId || '',
         pptFolderId: initialSettings?.pptFolderId || '',
         sampleFolderId: initialSettings?.sampleFolderId || '',
+        logbookFolderId: initialSettings?.logbookFolderId || '',
         calendarId: initialSettings?.calendarId || '',
     });
 
@@ -87,6 +89,7 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
         formData.set('meetingFolderId', formValues.meetingFolderId);
         formData.set('pptFolderId', formValues.pptFolderId);
         formData.set('sampleFolderId', formValues.sampleFolderId);
+        formData.set('logbookFolderId', formValues.logbookFolderId);
         formData.set('calendarId', formValues.calendarId);
 
         try {
@@ -295,6 +298,29 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
                                         type="button"
                                         onClick={() => handleOpenFolderSelector('sampleFolderId')}
                                         className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition"
+                                        title="Select Drive Folder"
+                                    >
+                                        <Search size={18} />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                                    <Folder className="w-4 h-4 text-blue-500" /> Logbook Media Folder ID
+                                    <span className="text-xs text-slate-400 font-normal">(where Telegram/Web images are synced)</span>
+                                </label>
+                                <div className="flex gap-2">
+                                    <input
+                                        name="logbookFolderId"
+                                        value={formValues.logbookFolderId}
+                                        onChange={(e) => setFormValues({ ...formValues, logbookFolderId: e.target.value })}
+                                        placeholder="Folder for Logbook images"
+                                        className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => handleOpenFolderSelector('logbookFolderId')}
+                                        className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition"
                                         title="Select Drive Folder"
                                     >
                                         <Search size={18} />
