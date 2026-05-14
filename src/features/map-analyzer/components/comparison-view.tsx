@@ -423,8 +423,8 @@ export function ComparisonView({
                                 const file = activeFiles[p.curveNumber];
                                 return {
                                     id: file?.name.split('_')[0] || '?',
-                                    y: p.y,
-                                    color: p.fullData.line.color
+                                    y: p.y as number,
+                                    color: (p as any).fullData.line.color
                                 };
                             })
                             .sort((a, b) => b.y - a.y);
