@@ -105,6 +105,7 @@ const updateGroupSchema = z.object({
     groupId: z.string(),
     name: z.string().min(3),
     description: z.string().optional(),
+    logbook_is_private: z.boolean().optional(),
 });
 
 export async function updateGroupAction(formData: FormData) {
@@ -113,6 +114,7 @@ export async function updateGroupAction(formData: FormData) {
         groupId: formData.get('groupId'),
         name: formData.get('name'),
         description: formData.get('description'),
+        logbook_is_private: formData.get('logbook_is_private') === 'true',
     };
 
     const validation = updateGroupSchema.safeParse(rawData);
@@ -136,7 +138,8 @@ export async function updateGroupAction(formData: FormData) {
     const { error } = await supabase.from('groups')
         .update({
             name: validation.data.name,
-            description: validation.data.description
+            description: validation.data.description,
+            logbook_is_private: validation.data.logbook_is_private
         })
         .eq('id', validation.data.groupId);
 

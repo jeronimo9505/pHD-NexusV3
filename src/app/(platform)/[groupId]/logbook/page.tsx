@@ -16,9 +16,24 @@ export default async function LogbookPage({ params }: PageProps) {
     const user = await getUser();
     if (!user) redirect('/login');
 
+    const supabase = await createClient();
+    const { data: group } = await supabase
+        .from('groups')
+        .select('logbook_is_private, created_by')
+        .eq('id', groupId)
+        .single();
+
+    const isPrivate = group?.logbook_is_private || false;
+    const isOwner = group?.created_by === user.id;
+
     return (
         <div className="h-full flex flex-col">
-            <LogbookView groupId={groupId} userId={user.id} />
+            <LogbookView 
+                groupId={groupId} 
+                userId={user.id} 
+                isPrivate={isPrivate}
+                isOwner={isOwner}
+            />
         </div>
     );
 }
