@@ -5,7 +5,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import {
     Search, SlidersHorizontal, X, Pin, Image as ImageIcon,
     FileText, Link2, Tag, Send, ChevronDown, ExternalLink,
-    Loader2, NotebookPen, Maximize2, Hash, CloudUpload
+    Loader2, NotebookPen, Maximize2, Hash, CloudUpload, Lock
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -43,6 +43,8 @@ interface LogbookEntry {
 interface LogbookViewProps {
     groupId: string;
     userId: string;
+    isPrivate?: boolean;
+    isOwner?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -292,7 +294,7 @@ function Composer({ groupId, userId, onSent }: {
 }
 
 // ─── Main View ────────────────────────────────────────────────────────────────
-export function LogbookView({ groupId, userId }: LogbookViewProps) {
+export function LogbookView({ groupId, userId, isPrivate, isOwner }: LogbookViewProps) {
     const [entries, setEntries] = useState<LogbookEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
@@ -492,8 +494,24 @@ export function LogbookView({ groupId, userId }: LogbookViewProps) {
         }
     }, [googleReady, entries, driveSettings, syncing]);
 
+    // 10. Privacy Check
+    if (isPrivate && !isOwner) {
+        return (
+            <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 p-8 text-center">
+                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                    <Lock size={32} className="text-slate-400" />
+                </div>
+                <h2 className="text-xl font-bold text-slate-900 mb-2">Bitácora Privada</h2>
+                <p className="text-slate-500 max-w-md">
+                    Esta bitácora ha sido marcada como privada por el administrador del grupo. 
+                    Solo el creador del grupo puede visualizar las entradas.
+                </p>
+            </div>
+        );
+    }
+
     return (
-        <div className="flex flex-col h-full bg-slate-50">
+        <div className="flex-1 flex flex-col min-h-0 bg-slate-50">
             {/* Header */}
             <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center gap-4 flex-shrink-0">
                 <div className="flex items-center gap-2">
