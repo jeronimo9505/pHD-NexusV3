@@ -351,7 +351,7 @@ export function LogbookView({ groupId, userId, isPrivate, isOwner }: LogbookView
             }
 
             setSyncing(true);
-            const folderId = driveSettings.folderId; 
+            const folderId = driveSettings.logbookFolderId || driveSettings.folderId; 
             
             let totalSynced = 0;
 

@@ -233,6 +233,7 @@ const driveSettingsSchema = z.object({
     meetingFolderId: z.string().optional(),
     pptFolderId: z.string().optional(),
     sampleFolderId: z.string().optional(),
+    logbookFolderId: z.string().optional(),
     calendarId: z.string().optional(),
 });
 
@@ -247,6 +248,7 @@ export async function updateDriveSettingsAction(formData: FormData) {
         meetingFolderId: formData.get('meetingFolderId'),
         pptFolderId: formData.get('pptFolderId'),
         sampleFolderId: formData.get('sampleFolderId'),
+        logbookFolderId: formData.get('logbookFolderId'),
         calendarId: formData.get('calendarId'),
     };
 
