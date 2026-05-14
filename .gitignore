@@ -45,3 +45,8 @@ mcp_config.json
 # Python
 __pycache__/
 *.pyc
+
+# Debug & Temporary
+debug_webhook.ts
+Nueva carpeta/
+.gemini/
