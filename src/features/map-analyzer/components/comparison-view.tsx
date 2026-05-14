@@ -430,7 +430,7 @@ export function ComparisonView({
                             .sort((a, b) => b.y - a.y);
 
                         setHoverData({
-                            x,
+                            x: x as number,
                             xPos: event.clientX - rect.left,
                             yPos: event.clientY - rect.top,
                             items
