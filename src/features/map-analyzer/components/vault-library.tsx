@@ -385,7 +385,7 @@ export function VaultLibrary({
                                             <div className="p-0.5 hover:bg-slate-200 rounded transition-colors shrink-0">
                                                 {expandedSamples[group.name] !== false ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                                             </div>
-                                            <span className="font-bold text-slate-700 truncate">{group.displayName || group.sample_name}</span>
+                                            <span className="font-bold text-slate-700 truncate">{group.displayName || group.name}</span>
                                             
                                             <button
                                                 onClick={(e) => {
