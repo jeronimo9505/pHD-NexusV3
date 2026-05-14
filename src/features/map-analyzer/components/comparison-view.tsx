@@ -244,8 +244,8 @@ export function ComparisonView({
         plot_bgcolor: 'white',
         paper_bgcolor: 'white',
         showlegend: true,
-        uirevision: 'true' // Preserva el estado de la UI (zoom, pan, drag) al actualizar
-    }), []);
+        uirevision: 'true' 
+    }) as any, []);
 
     const plotlyConfig = useMemo(() => ({
         responsive: true,
@@ -437,7 +437,7 @@ export function ComparisonView({
                         });
                     }}
                     onUnhover={() => setHoverData(null)}
-                    layout={plotlyLayout}
+                    layout={plotlyLayout as any}
                     config={plotlyConfig}
                     style={{ width: '100%', height: '100%' }}
                     useResizeHandler={true}
