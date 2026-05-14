@@ -165,8 +165,10 @@ function EntryBubble({ entry, groupId, onImageClick }: {
                     {entry.media_files.map((f, i) => {
                         const isDrive = !!f.drive_file_id;
                         const proxyUrl = f.telegram_file_id ? `/api/logbook/image?file_id=${f.telegram_file_id}` : '';
-                        const thumbUrl = isDrive ? f.thumbnail_url! : proxyUrl;
-                        const fullUrl = isDrive ? f.view_url! : proxyUrl;
+                        
+                        // Priority to Telegram proxy for fast rendering. Fallback to Drive.
+                        const thumbUrl = proxyUrl || f.thumbnail_url!;
+                        const fullUrl = proxyUrl || f.view_url!;
 
                         return (
                         <div key={f.drive_file_id || f.telegram_file_id || i}
