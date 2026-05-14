@@ -140,7 +140,7 @@ export async function updateGroupAction(formData: FormData) {
             name: validation.data.name,
             description: validation.data.description,
             logbook_is_private: validation.data.logbook_is_private
-        })
+        } as any)
         .eq('id', validation.data.groupId);
 
     if (error) return { error: error.message };
