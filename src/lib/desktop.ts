@@ -39,6 +39,7 @@ export type IngestRequest = {
     accumulations?: number;
     technique?: string;
     parameters?: Record<string, string>;
+    is_generic?: boolean;
 };
 
 export type IngestResponse = {
