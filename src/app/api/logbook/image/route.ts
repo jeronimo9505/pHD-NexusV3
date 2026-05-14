@@ -6,7 +6,7 @@ export async function GET(req: NextRequest) {
 
     if (!fileId) return new NextResponse('Missing file_id', { status: 400 });
 
-    const botToken = process.env.TELEGRAM_BOT_TOKEN || '8712905649:AAGZaZgFanJ3ALFVPdJHRUizQmlEjaxUKl8';
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
     if (!botToken) return new NextResponse('Missing BOT_TOKEN', { status: 500 });
 
     try {

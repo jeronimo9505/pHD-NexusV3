@@ -65,8 +65,8 @@ export async function POST(req: NextRequest) {
 
     // 2. Mirror to Telegram (fire & forget — don't fail if Telegram is down)
     try {
-        const botToken = process.env.TELEGRAM_BOT_TOKEN || '8712905649:AAGZaZgFanJ3ALFVPdJHRUizQmlEjaxUKl8';
-        const chatId = process.env.TELEGRAM_CHAT_ID || '7035746288';
+        const botToken = process.env.TELEGRAM_BOT_TOKEN;
+        const chatId = process.env.TELEGRAM_CHAT_ID;
 
         if (botToken && chatId) {
             await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
