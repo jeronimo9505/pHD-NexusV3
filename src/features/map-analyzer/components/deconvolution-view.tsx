@@ -810,9 +810,9 @@ export function DeconvolutionView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpe
         {/* Parameters table (after fit) */}
         {fitData && status !== 'done' && (
           <div className="shrink-0 border-t border-slate-800 overflow-x-auto flex flex-col">
-            {fitData.local_metrics && Object.keys(fitData.local_metrics).length > 0 && (
+            {(fitData as any).local_metrics && Object.keys((fitData as any).local_metrics).length > 0 && (
               <div className="flex gap-4 p-2 bg-slate-900 border-b border-slate-800 overflow-x-auto">
-                {Object.entries(fitData.local_metrics).map(([k, v]) => (
+                {Object.entries((fitData as any).local_metrics).map(([k, v]) => (
                   <span key={k} className="text-[10px] text-slate-400 font-mono whitespace-nowrap">
                     <strong className="text-slate-300">{k.toUpperCase()}:</strong> {v as number}
                   </span>
