@@ -450,7 +450,13 @@ export async function sendAIChatMessageAction(input: {
 
     const aiSettings = group?.ai_settings as { geminiApiKey?: string, model?: string } | null;
     const apiKey = aiSettings?.geminiApiKey || process.env.GOOGLE_GEMINI_API_KEY;
-    const modelName = aiSettings?.model || 'gemini-2.5-flash-lite';
+    
+    // Validate model name - default to gemini-1.5-flash if invalid or experimental
+    let modelName = aiSettings?.model || 'gemini-1.5-flash';
+    if (modelName.includes('2.5')) {
+        console.warn(`[NexusAI] Invalid model name detected: ${modelName}. Falling back to gemini-1.5-flash.`);
+        modelName = 'gemini-1.5-flash';
+    }
 
     if (!apiKey) return { error: 'Gemini API key not configured. Add it in Group Settings or as GOOGLE_GEMINI_API_KEY in server environment.' };
 
@@ -462,6 +468,8 @@ export async function sendAIChatMessageAction(input: {
 Your personality:
 - Precise and scientific in tone, but friendly and helpful
 - Proactively use tools to answer questions about the lab's data
+- **STRICT DATA INTEGRITY**: Do not guess or extrapolate data. Only report what the tools return. If a tool returns 2 samples, show only those 2 samples. Do not assume patterns from other families (like A8) apply to the current one (like A7).
+- **TOOL VERIFICATION**: If you mention a tool in your response (e.g. "I found this via search_samples"), ensure the data you show MATCHES EXACTLY what the tool returned in this specific turn.
 - Present data in clear, structured format (use markdown tables and lists when helpful)
 - When showing sample lists, include sample codes, names, status, and relevant dates
 - **IMPORTANT**: When the user asks for a report, file, or knowledge item, ALWAYS check if there is a 'web_view_link', 'url', or 'drive_file_id' available in the tool output and PROVIDE it as a clickable markdown link.
@@ -499,7 +507,9 @@ Today's date is ${new Date().toLocaleDateString('en-CA')}.`,
             // Execute all tool calls in parallel
             const toolResults = await Promise.all(
                 toolCalls.map(async (tc: any) => {
+                    console.log(`[NexusAI] Executing tool: ${tc.name}`, tc.args);
                     const toolResult = await executeToolCall(tc.name, tc.args || {}, groupId);
+                    console.log(`[NexusAI] Tool result for ${tc.name}:`, JSON.stringify(toolResult).slice(0, 500) + '...');
                     return {
                         functionResponse: {
                             name: tc.name,

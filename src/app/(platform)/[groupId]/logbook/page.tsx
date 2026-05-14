@@ -7,8 +7,8 @@ interface PageProps {
 }
 
 export const metadata = {
-    title: "Bitácora | PHD Nexus",
-    description: "Tu bitácora de investigación personal conectada con Telegram",
+    title: "Logbook | PHD Nexus",
+    description: "Your personal research logbook connected with Telegram",
 };
 
 export default async function LogbookPage({ params }: PageProps) {

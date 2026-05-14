@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Sample, SampleCharacterization } from '../types';
-import { createCharacterizationAction, updateCharacterizationAction } from '../actions';
+import { createCharacterizationAction, updateCharacterizationAction, getGroupCharacterizationTypesAction } from '../actions';
 import { toast } from 'sonner';
 import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity, HardDrive, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,7 @@ import { uploadFileToDrive } from '@/lib/google/upload';
 import { ensureAuth } from '@/lib/google/auth';
 import { isDesktop, ingestFile, checkEngineHealth, SCIENCE_ENGINE_URL, fetchRepresentativeSpectrum } from '@/lib/desktop';
 import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 
 interface CharacterizationModalProps {
     groupId: string;
@@ -30,7 +31,8 @@ interface CharacterizationModalProps {
     driveSettings?: { clientId?: string; apiKey?: string; folderId?: string; sampleFolderId?: string };
 }
 
-const CHAR_TYPES = ['Raman', 'AFM', 'SEM', 'UV-Vis', 'X-Ray', 'Other'];
+const DEFAULT_CHAR_TYPES = ['Raman', 'AFM', 'SEM', 'UV-Vis', 'X-Ray'];
+const ADD_NEW_OPTION = '___ADD_NEW___';
 
 export function CharacterizationModal({
     groupId,
@@ -47,7 +49,7 @@ export function CharacterizationModal({
     setParameterOrder,
     driveSettings
 }: CharacterizationModalProps) {
-    const [type, setType] = useState(CHAR_TYPES[0]);
+    const [type, setType] = useState(DEFAULT_CHAR_TYPES[0]);
     const [equipment, setEquipment] = useState('');
     const [dataFields, setDataFields] = useState<{ key: string; value: string; unit: string }[]>([{ key: '', value: '', unit: '' }]);
     const [notes, setNotes] = useState('');
@@ -63,6 +65,11 @@ export function CharacterizationModal({
     const [fileMetadata, setFileMetadata] = useState<Record<string, { range?: [number, number], points?: number, spectra?: number }>>({});
     const [spectrumPreviewB64, setSpectrumPreviewB64] = useState('');
     const [engineOnline, setEngineOnline] = useState(false);
+    
+    // Dynamic Types
+    const [availableTypes, setAvailableTypes] = useState<string[]>(DEFAULT_CHAR_TYPES);
+    const [isAddingCustomType, setIsAddingCustomType] = useState(false);
+    const [customTypeName, setCustomTypeName] = useState('');
 
     // UI States
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -75,19 +82,12 @@ export function CharacterizationModal({
     useEffect(() => {
         if (isOpen && driveSettings?.apiKey && driveSettings?.clientId) {
             if (!scriptsLoaded) {
-                import('@/lib/google/auth').then(({ initGoogleClient, ensureAuth }) => {
+                import('@/lib/google/auth').then(({ initGoogleClient }) => {
                     initGoogleClient(driveSettings.apiKey!, driveSettings.clientId!)
                         .then(() => {
                             setScriptsLoaded(true);
-                            // Try a silent auth check on load if possible
-                            ensureAuth().catch(() => console.log("Silent auth failed, normal popup will occur on action."));
                         })
                         .catch((e) => console.warn('Google init failed:', e));
-                });
-            } else {
-                // If scripts already loaded, just try a silent re-auth
-                import('@/lib/google/auth').then(({ ensureAuth }) => {
-                    ensureAuth().catch(() => {});
                 });
             }
         }
@@ -95,17 +95,26 @@ export function CharacterizationModal({
         if (isOpen && isDesktop) {
             checkEngineHealth().then(setEngineOnline);
         }
-    }, [isOpen, driveSettings, scriptsLoaded]);
+
+        // Fetch dynamic types
+        if (isOpen) {
+            getGroupCharacterizationTypesAction(groupId).then(res => {
+                if (res.data) {
+                    const merged = Array.from(new Set([...DEFAULT_CHAR_TYPES, ...res.data]));
+                    setAvailableTypes(merged);
+                }
+            });
+        }
+    }, [isOpen, driveSettings, scriptsLoaded, groupId]);
 
     const handleSelectRawFile = async () => {
         try {
             const selected = await open({
                 multiple: true,
                 title: 'Select Raw Data File(s)',
-                filters: [{
-                    name: 'Data Files',
-                    extensions: ['txt', 'mat', 'csv', 'h5', 'hdf5']
-                }]
+                filters: (type === 'Raman' || type === 'SERS') 
+                    ? [{ name: 'Data Files', extensions: ['txt', 'mat', 'csv', 'h5', 'hdf5'] }]
+                    : undefined
             });
             if (selected) {
                 setLocalFilePaths(Array.isArray(selected) ? selected : [selected]);
@@ -166,8 +175,9 @@ export function CharacterizationModal({
                     analyte,
                     laser_wavelength_nm: laserNm,
                     laser_power_uw: powerUw,
-                    technique: type.toLowerCase(),
+                    technique: type,
                     parameters,
+                    is_generic: !(type === 'Raman' || type === 'SERS')
                 });
                 
                 newH5Paths.push(result.h5_relative_path);
@@ -228,13 +238,29 @@ export function CharacterizationModal({
             }
             
             if (targetPath) {
-                await openShell(targetPath);
+                // Use native Rust command to bypass frontend shell regex limitations
+                await invoke('open_local_folder', { path: targetPath });
             } else {
                 toast.error("No folder path available to open.");
             }
         } catch (e) {
             console.error("Failed to open folder", e);
             toast.error("Could not open folder. Make sure the path exists.");
+        }
+    };
+
+    const handleOpenFileDirectly = async (originalPath: string, relativeVaultPath?: string) => {
+        if (!isDesktop) return;
+        try {
+            const currentVaultRoot = typeof window !== 'undefined' ? localStorage.getItem('phdnexus_vault_root') : null;
+            let targetPath = originalPath;
+            if (relativeVaultPath && currentVaultRoot) {
+                targetPath = `${currentVaultRoot}/${relativeVaultPath}`;
+            }
+            await invoke('open_local_folder', { path: targetPath });
+        } catch (err) {
+            console.error("Failed to open file", err);
+            toast.error("Failed to open file.");
         }
     };
 
@@ -314,12 +340,20 @@ export function CharacterizationModal({
                 // Set type (default Raman or keep last? typically default to first)
                 // Actually if we just opened, we can default to Raman.
                 // But let's check if we should trigger the type change logic manually to load defaults.
-                handleTypeSelection(CHAR_TYPES[0]);
+                handleTypeSelection(DEFAULT_CHAR_TYPES[0]);
             }
         }
     }, [isOpen, initialData]);
 
     const handleTypeSelection = (newType: string) => {
+        if (newType === ADD_NEW_OPTION) {
+            setIsAddingCustomType(true);
+            setType('Other'); // Internal fallback
+            setCustomTypeName('');
+            return;
+        }
+
+        setIsAddingCustomType(false);
         setType(newType);
 
         // Load defaults for this type if creating new
@@ -405,10 +439,19 @@ export function CharacterizationModal({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-
-
-
         setIsSubmitting(true);
+
+        // Prime Google Auth early to preserve user interaction context for popups
+        if (type === 'Raman' && scriptsLoaded) {
+            import('@/lib/google/auth').then(({ ensureAuth }) => ensureAuth().catch(() => {}));
+        }
+
+        const finalType = isAddingCustomType ? customTypeName.trim() : type;
+        if (!finalType) {
+            toast.error('Please specify a technique name');
+            setIsSubmitting(false);
+            return;
+        }
 
         const cleanData: Record<string, any> = {};
         const orderedKeys: string[] = [];
@@ -518,8 +561,8 @@ export function CharacterizationModal({
                     }
                 }
              } catch (err: any) {
-                console.error('Error handling Raman spectrum:', err);
-                toast.error('Failed to parse or load representative spectrum');
+                console.warn('Warning handling Raman spectrum (Engine may be offline):', err.message);
+                toast.error('Could not load representative spectrum, but saved other data.');
             }
         }
 
@@ -536,7 +579,7 @@ export function CharacterizationModal({
             res = await updateCharacterizationAction({
                 id: initialData.id,
                 group_id: groupId,
-                type,
+                type: finalType,
                 data: cleanData,
                 performed_at: performedAt ? new Date(performedAt).toISOString() : undefined,
                 updateBatch: updateBatch
@@ -545,7 +588,7 @@ export function CharacterizationModal({
             res = await createCharacterizationAction({
                 group_id: groupId,
                 sample_id: sample.id,
-                type,
+                type: finalType,
                 data: cleanData,
                 performed_at: performedAt ? new Date(performedAt).toISOString() : undefined
             });
@@ -642,10 +685,20 @@ export function CharacterizationModal({
                             <h2 className="text-lg font-bold text-slate-800 leading-tight">
                                 {initialData?.id ? 'Edit Characterization' : 'New Characterization'}
                             </h2>
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
+                                <span className="font-bold text-slate-800">{sample.sample_code || sample.display_id}</span>
+                                <span className="text-slate-300">|</span>
                                 <span className="font-medium text-slate-700">{sample.name}</span>
-                                <span>•</span>
-                                <span>{type}</span>
+                                <span className="text-slate-300">•</span>
+                                <span className="px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded text-[10px] font-bold uppercase">{type}</span>
+                                {sample.description && (
+                                    <>
+                                        <span className="text-slate-300">•</span>
+                                        <span className="italic text-slate-400 truncate max-w-[300px]" title={sample.description}>
+                                            "{sample.description}"
+                                        </span>
+                                    </>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -665,16 +718,30 @@ export function CharacterizationModal({
                             <div className="space-y-1.5">
                                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Technique</label>
                                 <div className="space-y-3">
-                                    <div className="relative">
-                                        <select
-                                            value={type}
-                                            onChange={e => handleTypeSelection(e.target.value)}
-                                            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none appearance-none font-medium text-slate-700 shadow-sm"
-                                        >
-                                            {CHAR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                                        </select>
-                                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
-                                    </div>
+                                            <div className="relative">
+                                                <select
+                                                    value={isAddingCustomType ? ADD_NEW_OPTION : type}
+                                                    onChange={e => handleTypeSelection(e.target.value)}
+                                                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none appearance-none font-medium text-slate-700 shadow-sm"
+                                                >
+                                                    {availableTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                                                    <option value="Other">Other (Generic)</option>
+                                                    <option value={ADD_NEW_OPTION} className="text-purple-600 font-bold">+ Add New Technique...</option>
+                                                </select>
+                                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                                            </div>
+
+                                            {isAddingCustomType && (
+                                                <div className="relative animate-in slide-in-from-top-2 duration-200">
+                                                    <input
+                                                        autoFocus
+                                                        value={customTypeName}
+                                                        onChange={e => setCustomTypeName(e.target.value)}
+                                                        placeholder="New Technique Name (e.g. XRD)"
+                                                        className="w-full text-sm border border-purple-200 rounded-lg px-3 py-2.5 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all placeholder:text-slate-400 font-bold text-purple-700"
+                                                    />
+                                                </div>
+                                            )}
 
                                     <div className="relative">
                                         <input
@@ -702,9 +769,9 @@ export function CharacterizationModal({
                             {/* External Links */}
                             <div className="space-y-4">
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 justify-between">
-                                        <div className="flex items-center gap-1.5"><FolderOpen size={13} /> Raw Data</div>
-                                        {isDesktop && (
+                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 justify-between mb-2">
+                                        <div className="flex items-center gap-1.5"><FolderOpen size={13} /> Raw Data & Files</div>
+                                        {isDesktop && fileOrigin && (
                                             <button 
                                                 type="button" 
                                                 onClick={handleOpenFolder} 
@@ -715,12 +782,71 @@ export function CharacterizationModal({
                                             </button>
                                         )}
                                     </label>
-                                    <input
-                                        value={fileOrigin}
-                                        onChange={e => setFileOrigin(e.target.value)}
-                                        placeholder="Path to raw files..."
-                                        className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-blue-500 transition-all text-slate-600 bg-slate-50/50"
-                                    />
+                                    
+                                    {(isDesktop && type !== 'Raman' && type !== 'SERS') ? (
+                                        <div className="space-y-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSelectRawFile}
+                                                    className="flex-1 flex items-center justify-center gap-1.5 text-[11px] font-medium border border-slate-300 border-dashed rounded-md px-2 py-1.5 outline-none hover:border-purple-400 bg-white hover:bg-purple-50 hover:text-purple-600 transition-colors text-slate-600 shadow-sm"
+                                                >
+                                                    <FolderOpen size={12} /> Select Files
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleDesktopFileIngest}
+                                                    disabled={ingestStatus === 'loading' || !engineOnline || localFilePaths.length === 0}
+                                                    className={cn(
+                                                        "px-3 py-1.5 text-[11px] font-bold rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap",
+                                                        engineOnline && localFilePaths.length > 0
+                                                            ? "bg-purple-600 text-white hover:bg-purple-700 shadow-sm"
+                                                            : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                                                    )}
+                                                >
+                                                    {ingestStatus === 'loading' ? <><Loader2 size={12} className="animate-spin" /> Saving...</> : 'Save to Vault'}
+                                                </button>
+                                            </div>
+
+                                            {localFilePaths.length > 0 && (
+                                                <div className="flex flex-col gap-1 max-h-24 overflow-y-auto">
+                                                    {localFilePaths.map((fp, i) => {
+                                                        const isIngested = !!h5RelativePaths[i];
+                                                        const filename = fp.split(/[\\/]/).pop();
+                                                        return (
+                                                            <div key={i} className="flex justify-between items-center px-2 py-1 bg-white border border-slate-200 rounded text-[10px] group">
+                                                                <div className="flex items-center gap-1.5 overflow-hidden">
+                                                                    {isIngested ? (
+                                                                        <CheckCircle2 size={10} className="text-emerald-500 flex-shrink-0" />
+                                                                    ) : (
+                                                                        <div className="w-2.5 h-2.5 rounded-full border border-slate-200 border-t-purple-400 animate-spin flex-shrink-0" />
+                                                                    )}
+                                                                    <button 
+                                                                        type="button" 
+                                                                        onClick={() => handleOpenFileDirectly(fp, h5RelativePaths[i])}
+                                                                        className="font-mono text-slate-600 hover:text-blue-600 hover:underline truncate text-left" 
+                                                                        title="Open file"
+                                                                    >
+                                                                        {filename}
+                                                                    </button>
+                                                                </div>
+                                                                <button type="button" onClick={() => handleRemoveIngestedFile(i)} className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-red-500 rounded transition-all ml-1 flex-shrink-0">
+                                                                    <X size={10} />
+                                                                </button>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <input
+                                            value={fileOrigin}
+                                            onChange={e => setFileOrigin(e.target.value)}
+                                            placeholder="Path to raw files..."
+                                            className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-blue-500 transition-all text-slate-600 bg-slate-50/50"
+                                        />
+                                    )}
                                 </div>
 
                                 <div className="space-y-1.5">
@@ -939,7 +1065,7 @@ export function CharacterizationModal({
                                         </div>
                                     </div>
 
-                                    {isDesktop ? (
+                                {isDesktop ? (
                                         /* ─── DESKTOP: File Ingestion UI ─── */
                                         <div className="space-y-3">
                                             {/* Engine status */}
@@ -970,7 +1096,14 @@ export function CharacterizationModal({
                                                                                 ) : (
                                                                                     <div className="w-3 h-3 rounded-full border-2 border-slate-200 border-t-purple-400 animate-spin flex-shrink-0" />
                                                                                 )}
-                                                                                <span className="text-xs font-mono text-slate-600 truncate" title={fp}>{filename}</span>
+                                                                                <button 
+                                                                                    type="button" 
+                                                                                    onClick={() => handleOpenFileDirectly(fp, h5RelativePaths[i])}
+                                                                                    className="text-xs font-mono text-slate-600 hover:text-blue-600 hover:underline truncate text-left" 
+                                                                                    title="Click to open file directly"
+                                                                                >
+                                                                                    {filename}
+                                                                                </button>
                                                                             </div>
                                                                             <button type="button" onClick={() => handleRemoveIngestedFile(i)} className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-all ml-2 flex-shrink-0">
                                                                                 <X size={12} />

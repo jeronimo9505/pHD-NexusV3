@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Search, ChevronRight, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import { isDesktop } from '@/lib/desktop';
 import { VaultLibrary } from './vault-library';
 import { HeatmapCanvas } from './heatmap-canvas';
@@ -10,25 +11,33 @@ import { SpectrumInspector } from './spectrum-inspector';
 import { GrapheneCanvasGrid } from './graphene-canvas-grid';
 import { GrapheneAnalyticsView } from './graphene-analytics-view';
 import { VaultExplorerModal } from './vault-explorer-modal';
+import { PipelineEditor } from './pipeline-editor';
+import { ComparisonView } from './comparison-view';
+import { DeconvolutionView } from './deconvolution-view';
 import { getLogbooksAction, getSamplesAction } from '@/features/samples/actions';
 import { Logbook } from '@/features/samples/types';
 
 export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
-    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics'>('standard');
+    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics' | 'pipeline' | 'compare' | 'deconvolution'>('standard');
     const [selectedH5, setSelectedH5] = useState('');
     const [vaultRoot, setVaultRoot] = useState('');
     const [sessionFiles, setSessionFiles] = useState<any[]>([]);
+    const [compareFiles, setCompareFiles] = useState<any[]>([]);
     const [isExplorerOpen, setIsExplorerOpen] = useState(false);
     const [dbLogbooks, setDbLogbooks] = useState<Logbook[]>([]);
     const [dbSamples, setDbSamples] = useState<any[]>([]);
     const [mounted, setMounted] = useState(false);
     const [applySnv, setApplySnv] = useState(false);
+    const [saveName, setSaveName] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+    const [savedWorkspaces, setSavedWorkspaces] = useState<any[]>([]);
     
     // Global dimension settings derived from metadata, but can be updated
     const [mapDim, setMapDim] = useState({ w: 0, h: 0 });
     const [stepSize, setStepSize] = useState(1.0); // Default 1.0 micron per spectrum
     const [nSpectra, setNSpectra] = useState(0);
     const [dismissedBanners, setDismissedBanners] = useState<Set<string>>(new Set());
+    const [fileSettings, setFileSettings] = useState<Record<string, { w?: number, h?: number, stepSize?: number }>>({});
 
     // Spectrum integration window
     const [wavenumberRange, setWavenumberRange] = useState<[number, number] | undefined>(undefined);
@@ -69,6 +78,11 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                 // Fetch samples for the group to resolve names
                 const { data: samples } = await getSamplesAction(groupId, '');
                 if (samples) setDbSamples(samples);
+
+                // Fetch saved workspaces/comparisons
+                const { getRamanWorkspacesAction } = await import('../actions');
+                const { data: ws } = await getRamanWorkspacesAction(groupId);
+                if (ws) setSavedWorkspaces(ws);
             } catch (err) {
                 console.error("Failed to fetch metadata", err);
             }
@@ -90,13 +104,60 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
             const uniqueNew = newFiles.filter(f => !existingPaths.has(f.h5_relative_path));
             return [...prev, ...uniqueNew];
         });
+        
+        // Auto-select the newly generated/imported file for better UX
+        if (newFiles.length === 1) {
+            setSelectedH5(newFiles[0].h5_relative_path);
+            toast.success(`Loaded ${newFiles[0].name}`);
+        } else if (newFiles.length > 1) {
+            toast.success(`Loaded ${newFiles.length} files`);
+        }
     };
 
     const handleRemove = (path: string) => {
         setSessionFiles(prev => prev.filter(f => f.h5_relative_path !== path));
+        setCompareFiles(prev => prev.filter(f => f.h5_relative_path !== path));
         if (selectedH5 === path) {
             setSelectedH5('');
         }
+    };
+
+    const handleDeleteFile = async (file: any) => {
+        try {
+            const res = await fetch('http://127.0.0.1:8888/api/map/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    vault_root: vaultRoot,
+                    h5_relative_path: file.h5_relative_path
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                toast.success(`Deleted ${file.name}`);
+                handleRemove(file.h5_relative_path);
+            } else {
+                toast.error(data.message || 'Failed to delete file');
+            }
+        } catch (e: any) {
+            toast.error('Engine connection failed');
+        }
+    };
+
+    const handleLoadWorkspace = (ws: any) => {
+        if (!ws || !ws.files) return;
+        
+        // If it's a comparison, we might want to just add to compareFiles
+        // but usually the user wants to load the whole state
+        if (ws.settings?.type === 'comparison') {
+            setCompareFiles(ws.files);
+            setMode('compare');
+            toast.success(`Loaded comparison: ${ws.name}`);
+        } else {
+            setSessionFiles(ws.files);
+            toast.success(`Loaded workspace: ${ws.name}`);
+        }
+        setSaveName(ws.name);
     };
 
     if (!mounted) return null;
@@ -127,8 +188,12 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     const handleUpdateDimensions = (w: number, h: number, step?: number) => {
         setMapDim({ w, h });
         if (step !== undefined) setStepSize(step);
-        // also mark as dismissed for this path
+        
         if (selectedH5) {
+            setFileSettings(prev => ({
+                ...prev,
+                [selectedH5]: { w, h, stepSize: step ?? prev[selectedH5]?.stepSize ?? 1.0 }
+            }));
             setDismissedBanners(prev => new Set(prev).add(selectedH5));
         }
     };
@@ -139,21 +204,89 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
         }
     }
 
+    const handleToggleCompare = (file: any) => {
+        setCompareFiles(prev => {
+            const exists = prev.some(f => f.h5_relative_path === file.h5_relative_path);
+            if (exists) return prev.filter(f => f.h5_relative_path !== file.h5_relative_path);
+            return [...prev, file];
+        });
+        
+        // Auto-switch to compare mode if we just selected the second file
+        if (mode !== 'compare' && compareFiles.length === 1) {
+            setMode('compare');
+        }
+    };
+
+    const handleSaveWorkspace = async (customName?: string, customFiles?: any[]) => {
+        const name = customName || saveName;
+        const targetFiles = customFiles || sessionFiles;
+        
+        if (!name.trim() || targetFiles.length === 0) {
+            const promptName = prompt("Enter a name for this workspace/comparison set:", name);
+            if (!promptName) return;
+            setSaveName(promptName);
+            saveInternal(promptName, targetFiles);
+        } else {
+            saveInternal(name, targetFiles);
+        }
+    };
+
+    const saveInternal = async (name: string, files: any[]) => {
+        setIsSaving(true);
+        try {
+            const { saveRamanWorkspaceAction } = await import('../actions');
+            const res = await saveRamanWorkspaceAction({
+                group_id: groupId,
+                name: name,
+                files: files,
+                settings: { 
+                    type: files === compareFiles ? 'comparison' : 'workspace',
+                    timestamp: new Date().toISOString()
+                }
+            });
+            if (res.data) {
+                toast.success('Saved successfully');
+                setSaveName(name);
+                // Actualizar la lista local inmediatamente
+                setSavedWorkspaces(prev => [res.data, ...prev.filter(w => w.id !== res.data.id)]);
+            } else {
+                toast.error(res.error || 'Failed to save');
+            }
+        } catch (e) {
+            toast.error('Error saving');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     return (
         <div className="flex h-full w-full bg-slate-50 text-slate-900 font-sans">
             {/* Sidebar Library (Light) */}
-            <div className="w-80 border-r border-slate-200 flex flex-col bg-white relative z-50 shrink-0 shadow-sm">
+            <div className="w-96 border-r border-slate-200 flex flex-col bg-white relative z-50 shrink-0 shadow-sm">
                 <VaultLibrary 
                     vaultRoot={vaultRoot} 
                     groupId={groupId}
                     selectedH5={selectedH5}
                     sessionFiles={sessionFiles}
                     dbSamples={dbSamples}
+                    compareFiles={compareFiles}
+                    onToggleCompare={handleToggleCompare}
                     onOpenExplorer={() => setIsExplorerOpen(true)}
+                    onSaveWorkspace={() => handleSaveWorkspace()}
+                    onSaveComparison={() => handleSaveWorkspace(undefined, compareFiles)}
+                    isSaving={isSaving}
+                    savedWorkspaces={savedWorkspaces}
+                    onLoadWorkspace={handleLoadWorkspace}
                     onRemove={handleRemove}
+                    onDeleteFile={handleDeleteFile}
                     onSelect={(file) => {
                         setSelectedH5(file.h5_relative_path);
-                        setMapDim({ w: file.map_width || 0, h: file.map_height || 0 });
+                        const settings = fileSettings[file.h5_relative_path];
+                        setMapDim({ 
+                            w: settings?.w || file.map_width || 0, 
+                            h: settings?.h || file.map_height || 0 
+                        });
+                        setStepSize(settings?.stepSize ?? 1.0);
                         setNSpectra(file.n_spectra || 0);
                         setSelectedPixelIndex(0);
                         setWavenumberRange(undefined);
@@ -163,34 +296,54 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
 
             {/* Main Visualizer Area */}
             <div className="flex-1 flex flex-col overflow-hidden relative bg-slate-100/30">
-                {selectedH5 && (
+                {(selectedH5 || mode === 'compare') && (
                     <div className="h-16 px-8 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between shrink-0 relative z-30 shadow-sm">
                         <div className="flex items-center gap-6">
                             <div className="flex flex-col">
                                 <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest leading-none mb-1">Active Context</span>
                                 <div className="flex items-center gap-2">
                                     <h2 className="text-sm font-bold text-slate-900 truncate max-w-[300px]">
-                                        {(() => {
+                                        {mode === 'compare' ? 'Comparison Mode' : (() => {
                                             const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
-                                            const s = dbSamples.find(s => s.sample_code === f?.sample_name);
+                                            const s = dbSamples.find(s => 
+                                                s.sample_code === f?.sample_name || 
+                                                s.name === f?.sample_name || 
+                                                (f?.name && s.sample_code && f.name.includes(s.sample_code))
+                                            );
                                             return s?.name || f?.sample_name || 'Sample';
                                         })()}
                                     </h2>
-                                    {(() => {
+                                    {mode !== 'compare' && (() => {
                                         const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
-                                        const s = dbSamples.find(s => s.sample_code === f?.sample_name);
+                                        const s = dbSamples.find(s => 
+                                            s.sample_code === f?.sample_name || 
+                                            s.name === f?.sample_name || 
+                                            (f?.name && s.sample_code && f.name.includes(s.sample_code))
+                                        );
                                         return s?.sample_code ? (
                                             <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-md shrink-0">{s.sample_code}</span>
                                         ) : null;
                                     })()}
-                                    <ChevronRight size={14} className="text-slate-300" />
-                                    <span className="text-xs font-medium text-slate-500 truncate max-w-[300px]">
-                                        {dbLogbooks.find(l => dbSamples.find(s => s.sample_code === sessionFiles.find(f => f.h5_relative_path === selectedH5)?.sample_name)?.logbook_id === l.id)?.name || 'Project'}
-                                    </span>
-                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-2 shrink-0" />
-                                    <span className="text-xs font-bold text-indigo-600 truncate max-w-2xl">
-                                        {sessionFiles.find(f => f.h5_relative_path === selectedH5)?.name}
-                                    </span>
+                                    {mode !== 'compare' && <ChevronRight size={14} className="text-slate-300" />}
+                                    {mode !== 'compare' && (
+                                        <span className="text-xs font-medium text-slate-500 truncate max-w-[300px]">
+                                            {dbLogbooks.find(l => {
+                                                const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
+                                                const sMatch = dbSamples.find(s => 
+                                                    s.sample_code === f?.sample_name || 
+                                                    s.name === f?.sample_name || 
+                                                    (f?.name && s.sample_code && f.name.includes(s.sample_code))
+                                                );
+                                                return sMatch?.logbook_id === l.id;
+                                            })?.name || 'Project'}
+                                        </span>
+                                    )}
+                                    {mode !== 'compare' && <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-2 shrink-0" />}
+                                    {mode !== 'compare' && (
+                                        <span className="text-xs font-bold text-indigo-600 truncate max-w-2xl">
+                                            {sessionFiles.find(f => f.h5_relative_path === selectedH5)?.name}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -236,6 +389,41 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     )}
                                 >
                                     Analytics
+                                </button>
+                                <button 
+                                    onClick={() => setMode('pipeline')}
+                                    className={cn(
+                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                        mode === 'pipeline' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                    )}
+                                >
+                                    Pipeline
+                                </button>
+                                <button 
+                                    onClick={() => setMode('deconvolution')}
+                                    className={cn(
+                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                        mode === 'deconvolution' ? "bg-white text-violet-600 shadow-sm" : "text-slate-500 hover:text-violet-600"
+                                    )}
+                                >
+                                    Deconvolution
+                                </button>
+                                <button 
+                                    onClick={() => setMode('compare')}
+                                    className={cn(
+                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                                        mode === 'compare' ? "bg-white text-orange-600 shadow-sm" : "text-slate-500 hover:text-orange-600"
+                                    )}
+                                >
+                                    Compare
+                                    {compareFiles.length > 0 && (
+                                        <span className={cn(
+                                            "flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-black",
+                                            mode === 'compare' ? "bg-orange-100 text-orange-600" : "bg-slate-200 text-slate-500"
+                                        )}>
+                                            {compareFiles.length}
+                                        </span>
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -298,6 +486,31 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     applySnv={applySnv}
                                     wavenumberRange={wavenumberRange}
                                 />
+                            ) : mode === 'compare' ? (
+                                <ComparisonView 
+                                    vaultRoot={vaultRoot}
+                                    compareFiles={compareFiles}
+                                    dbSamples={dbSamples}
+                                    onSaveWorkspace={() => handleSaveWorkspace(undefined, compareFiles)}
+                                    isSaving={isSaving}
+                                    savedWorkspaces={savedWorkspaces}
+                                    onLoadWorkspace={handleLoadWorkspace}
+                                    onClear={() => setCompareFiles([])}
+                                />
+                            ) : mode === 'pipeline' ? (
+                                <PipelineEditor 
+                                    vaultRoot={vaultRoot}
+                                    h5Path={selectedH5}
+                                    onFileCreated={(file) => handleImport([file])}
+                                />
+                            ) : mode === 'deconvolution' ? (
+                                <DeconvolutionView
+                                    vaultRoot={vaultRoot}
+                                    h5Path={selectedH5}
+                                    mapWidth={mapDim.w}
+                                    mapHeight={mapDim.h}
+                                    nSpectra={nSpectra}
+                                />
                             ) : (
                                 <GrapheneAnalyticsView 
                                     vaultRoot={vaultRoot}
@@ -306,7 +519,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 />
                             )}
                         </div>
-                        {mode !== 'analytics' && (
+                        {mode !== 'analytics' && mode !== 'pipeline' && mode !== 'compare' && mode !== 'deconvolution' && (
                             <div className="h-72 shrink-0 bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 overflow-hidden">
                                 <SpectrumInspector 
                                     vaultRoot={vaultRoot}

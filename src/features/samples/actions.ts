@@ -540,6 +540,21 @@ export async function deleteCharacterizationAction(id: string, groupId: string) 
     return { success: true };
 }
 
+export async function getGroupCharacterizationTypesAction(groupId: string) {
+    const supabase = await createClient();
+
+    // Fetch unique types from characterizations linked to samples in this group
+    const { data, error } = await supabase
+        .from('sample_characterizations')
+        .select('type, samples!inner(group_id)')
+        .eq('samples.group_id', groupId);
+
+    if (error) return { error: error.message };
+
+    const uniqueTypes = Array.from(new Set((data || []).map(c => c.type)));
+    return { data: uniqueTypes };
+}
+
 export async function getCharacterizationsAction(sampleId: string) {
     const supabase = await createClient();
     const { data, error } = await supabase

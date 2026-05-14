@@ -211,6 +211,7 @@ export function VaultExplorerModal({
         setLoading(true);
         setSelectedDbLogbook(dbLb);
         setIsLegacyMode(false);
+        setSelectedSample(null);
         try {
             const samplesRes = await getSamplesAction(dbLb.group_id, dbLb.id);
             if (samplesRes.data) {
@@ -220,7 +221,51 @@ export function VaultExplorerModal({
                     )
                 );
                 setDbSamples(ramanSamples);
-                setStep(2);
+
+                const allVaultFiles: VaultFile[] = [];
+                ramanSamples.forEach((sample: any) => {
+                    const ramanChars = sample.characterizations.filter((c: any) => 
+                        c.type === 'Raman' && (c.data.local_h5_paths?.length > 0 || c.data.local_h5_path)
+                    );
+                    ramanChars.forEach((c: any) => {
+                        const h5Paths = c.data.local_h5_paths || (c.data.local_h5_path ? [c.data.local_h5_path] : []);
+                        const meta = c.data.file_metadata || {};
+                        
+                        h5Paths.forEach((path: string) => {
+                            const fileName = path.split(/[/\\]/).pop() || 'Untitled';
+                            const fileMeta = meta[path] || {};
+                            const params = c.data || {};
+                            
+                            const findKey = (searchStr: string) => {
+                                const keys = Object.keys(params);
+                                const found = keys.find(k => k.toLowerCase().includes(searchStr.toLowerCase()));
+                                return found ? params[found] : undefined;
+                            };
+
+                            allVaultFiles.push({
+                                id: `${c.id}-${path}`,
+                                h5_relative_path: path,
+                                name: fileName,
+                                sample_name: sample.sample_code || sample.name,
+                                technique: 'Raman',
+                                measured_at: c.performed_at || c.created_at,
+                                created_at: c.created_at,
+                                n_spectra: fileMeta.spectra || 0,
+                                map_width: fileMeta.range?.x || 0,
+                                map_height: fileMeta.range?.y || 0,
+                                metadata: {
+                                    laser: findKey('laser'),
+                                    power: findKey('power'),
+                                    analyte: findKey('analyte'),
+                                    objective: findKey('objective')
+                                }
+                            });
+                        });
+                    });
+                });
+
+                setFiles(allVaultFiles);
+                setStep(3);
                 setSearch('');
             }
         } catch (err) {
@@ -360,6 +405,16 @@ export function VaultExplorerModal({
         );
     }, [files, search, techniqueFilter]);
 
+    const groupedFiles = useMemo(() => {
+        const groups: Record<string, VaultFile[]> = {};
+        filteredFiles.forEach(file => {
+            const sName = file.sample_name || 'Uncategorized';
+            if (!groups[sName]) groups[sName] = [];
+            groups[sName].push(file);
+        });
+        return groups;
+    }, [filteredFiles]);
+
     if (!isOpen) return null;
 
     return (
@@ -406,19 +461,20 @@ export function VaultExplorerModal({
 
                     <div className="flex items-center gap-4">
                         {currentSessionFiles.length > 0 && (
-                            <div className="flex items-center gap-2 bg-indigo-50/50 p-1 pr-3 rounded-2xl border border-indigo-100">
+                            <div className="flex items-center gap-2 bg-slate-50 p-1.5 pr-3 rounded-2xl border border-slate-200 shadow-sm">
+                                <div className="pl-3 pr-1 text-[9px] font-black text-slate-400 uppercase tracking-widest border-r border-slate-200">Name</div>
                                 <input 
-                                    className="bg-transparent text-xs font-bold text-indigo-900 px-3 py-2 outline-none w-40 placeholder:text-indigo-300"
-                                    placeholder="Comparison Name..."
+                                    className="bg-transparent text-xs font-bold text-slate-900 px-3 py-1.5 outline-none w-48 placeholder:text-slate-300"
+                                    placeholder="e.g. Analysis Batch A..."
                                     value={saveName}
                                     onChange={(e) => setSaveName(e.target.value)}
                                 />
                                 <button 
                                     onClick={handleSaveWorkspace}
                                     disabled={!saveName.trim() || isSaving}
-                                    className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all disabled:opacity-50"
+                                    className="px-5 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed shadow-md shadow-indigo-100"
                                 >
-                                    {isSaving ? <RefreshCw size={14} className="animate-spin" /> : 'Save Current'}
+                                    {isSaving ? <RefreshCw size={14} className="animate-spin" /> : 'Save Workspace'}
                                 </button>
                             </div>
                         )}
@@ -483,70 +539,6 @@ export function VaultExplorerModal({
                                                         </div>
                                                     )}
                                                     
-                                                    {/* Sample List (Inline) */}
-                                                    {isSelected && (
-                                                        <div className="pl-6 space-y-1 mt-1 pb-4">
-                                                            {dbSamples.map(sample => {
-                                                                const isSelectedSample = selectedSample?.id === sample.id;
-                                                                const isOverviewOpen = openSampleOverview === sample.id;
-                                                                return (
-                                                                    <div key={sample.id} className="relative group/sample">
-                                                                        <button
-                                                                            onClick={() => handleSelectSample(sample)}
-                                                                            className={cn(
-                                                                                "w-full text-left px-3 py-2.5 rounded-xl transition-all border pr-8",
-                                                                                isSelectedSample
-                                                                                    ? "bg-white border-indigo-300 shadow-md shadow-indigo-100"
-                                                                                    : "hover:bg-indigo-50/50 border-transparent text-slate-500"
-                                                                            )}
-                                                                        >
-                                                                            <div className="flex items-start gap-2.5">
-                                                                                <FlaskConical size={13} className={cn("mt-0.5 shrink-0", isSelectedSample ? "text-indigo-600" : "text-slate-300 group-hover/sample:text-indigo-400")} />
-                                                                                <div className="flex-1 min-w-0">
-                                                                                    <div className={cn("text-xs font-bold leading-tight truncate", isSelectedSample ? "text-indigo-900" : "text-slate-700")}>
-                                                                                        {sample.name || sample.sample_code}
-                                                                                    </div>
-                                                                                    <div className="flex items-center gap-1.5 mt-0.5">
-                                                                                        {sample.sample_code && (
-                                                                                            <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-md">
-                                                                                                {sample.sample_code}
-                                                                                            </span>
-                                                                                        )}
-                                                                                        {(sample.characterizations?.filter((c: any) => c.type === 'Raman').length ?? 0) > 0 && (
-                                                                                            <span className="text-[9px] font-bold text-slate-400">
-                                                                                                {sample.characterizations.filter((c: any) => c.type === 'Raman').length} Raman
-                                                                                            </span>
-                                                                                        )}
-                                                                                    </div>
-                                                                                </div>
-                                                                            </div>
-                                                                        </button>
-                                                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10" ref={isOverviewOpen ? overviewRef : null}>
-                                                                            <button
-                                                                                onClick={(e) => { e.stopPropagation(); setOpenSampleOverview(prev => prev === sample.id ? null : sample.id); }}
-                                                                                className={cn(
-                                                                                    "p-1.5 rounded-lg transition-all",
-                                                                                    isOverviewOpen ? "bg-indigo-100 text-indigo-600" : "text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 opacity-0 group-hover/sample:opacity-100"
-                                                                                )}
-                                                                                title="Sample Overview"
-                                                                            >
-                                                                                <Info size={12} />
-                                                                            </button>
-                                                                            {isOverviewOpen && (
-                                                                                <SampleOverviewPopover
-                                                                                    sample={sample}
-                                                                                    onClose={() => setOpenSampleOverview(null)}
-                                                                                />
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                            {dbSamples.length === 0 && !loading && (
-                                                                <div className="text-[10px] font-bold text-slate-300 italic py-4">No linked samples</div>
-                                                            )}
-                                                        </div>
-                                                    )}
                                                 </div>
                                             );
                                         })}
@@ -569,15 +561,10 @@ export function VaultExplorerModal({
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <h3 className="text-2xl font-black text-slate-900 tracking-tight">
-                                                {selectedSample ? (selectedSample.name || selectedSample.sample_code) : 'Available Measurements'}
+                                                {selectedDbLogbook ? selectedDbLogbook.name : 'Available Measurements'}
                                             </h3>
-                                            {selectedSample && selectedSample.sample_code && selectedSample.name !== selectedSample.sample_code && (
-                                                <span className="inline-block text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg mb-1">
-                                                    {selectedSample.sample_code}
-                                                </span>
-                                            )}
                                             <p className="text-sm font-bold text-slate-400">
-                                                {selectedSample ? `Scientific maps found for this specimen` : 'Select a project and sample on the left to browse maps'}
+                                                {selectedDbLogbook ? `Scientific maps found for this logbook` : 'Select a project on the left to browse maps'}
                                             </p>
                                         </div>
                                         <div className="flex items-center gap-4">
@@ -604,64 +591,75 @@ export function VaultExplorerModal({
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto px-10 pb-10 custom-scrollbar">
-                                    {selectedSample ? (
-                                        <div className="grid grid-cols-1 gap-3">
-                                            {filteredFiles.map(file => {
-                                                const isSelected = selectedPaths.has(file.h5_relative_path);
-                                                const isInWorkspace = currentSessionFiles.some(f => f.h5_relative_path === file.h5_relative_path);
-                                                
-                                                return (
-                                                    <div 
-                                                        key={file.id}
-                                                        onClick={() => {
-                                                            const next = new Set(selectedPaths);
-                                                            if (next.has(file.h5_relative_path)) next.delete(file.h5_relative_path);
-                                                            else next.add(file.h5_relative_path);
-                                                            setSelectedPaths(next);
-                                                        }}
-                                                        className={cn(
-                                                            "group bg-white border rounded-3xl p-5 flex items-center gap-6 cursor-pointer transition-all",
-                                                            isSelected ? "border-indigo-400 shadow-xl shadow-indigo-500/5 bg-indigo-50/20" : "border-slate-100 hover:border-indigo-300",
-                                                            isInWorkspace && "opacity-70"
-                                                        )}
-                                                    >
-                                                        <div className={cn(
-                                                            "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm",
-                                                            isSelected ? "bg-indigo-600 text-white" : "bg-slate-50 text-slate-400 group-hover:bg-indigo-100 group-hover:text-indigo-600"
-                                                        )}>
-                                                            <Layers size={20} />
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-center gap-3 mb-1">
-                                                                <h4 className="font-black text-slate-900 tracking-tight truncate">{file.name}</h4>
-                                                                {isInWorkspace && <span className="text-[9px] font-black uppercase tracking-widest bg-green-100 text-green-700 px-2 py-0.5 rounded-lg">Already Loaded</span>}
-                                                            </div>
-                                                            <div className="flex items-center gap-4">
-                                                                <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
-                                                                    <Activity size={12} className="text-indigo-400" />
-                                                                    {file.metadata?.laser || 'Raman'}
-                                                                </div>
-                                                                <div className="w-1 h-1 rounded-full bg-slate-200" />
-                                                                <div className="text-[10px] font-bold text-slate-400 uppercase">
-                                                                    {file.map_width}x{file.map_height} Resol.
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-4 shrink-0">
-                                                            <div className="text-right">
-                                                                <div className="text-[10px] font-black text-slate-900">{format(new Date(file.measured_at), 'MMM d, yyyy')}</div>
-                                                                <div className="text-[10px] font-bold text-slate-400 uppercase">{file.metadata?.analyte || 'No Analyte'}</div>
-                                                            </div>
-                                                            <div className={cn(
-                                                                "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
-                                                                isSelected ? "bg-indigo-600 border-indigo-600 shadow-lg shadow-indigo-100" : "border-slate-200"
-                                                            )}>
-                                                                {isSelected && <CheckCircle2 size={12} className="text-white" />}
-                                                            </div>
-                                                        </div>
+                                    {selectedDbLogbook ? (
+                                        <div className="flex flex-col gap-8">
+                                            {Object.entries(groupedFiles).map(([sampleName, sFiles]) => (
+                                                <div key={sampleName} className="space-y-3">
+                                                    <div className="flex items-center gap-2 mb-4 bg-slate-100 p-3 rounded-xl border border-slate-200">
+                                                        <FlaskConical size={16} className="text-slate-400" />
+                                                        <h4 className="text-sm font-black text-slate-800 tracking-widest">{sampleName}</h4>
+                                                        <span className="text-[10px] font-bold text-slate-400 ml-2">{sFiles.length} maps</span>
                                                     </div>
-                                                );
-                                            })}
+                                                    <div className="grid grid-cols-1 gap-3">
+                                                        {sFiles.map(file => {
+                                                            const isSelected = selectedPaths.has(file.h5_relative_path);
+                                                            const isInWorkspace = currentSessionFiles.some(f => f.h5_relative_path === file.h5_relative_path);
+                                                            
+                                                            return (
+                                                                <div 
+                                                                    key={file.id}
+                                                                    onClick={() => {
+                                                                        const next = new Set(selectedPaths);
+                                                                        if (next.has(file.h5_relative_path)) next.delete(file.h5_relative_path);
+                                                                        else next.add(file.h5_relative_path);
+                                                                        setSelectedPaths(next);
+                                                                    }}
+                                                                    className={cn(
+                                                                        "group bg-white border rounded-3xl p-5 flex items-center gap-6 cursor-pointer transition-all",
+                                                                        isSelected ? "border-indigo-400 shadow-xl shadow-indigo-500/5 bg-indigo-50/20" : "border-slate-100 hover:border-indigo-300",
+                                                                        isInWorkspace && "opacity-70"
+                                                                    )}
+                                                                >
+                                                                    <div className={cn(
+                                                                        "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm",
+                                                                        isSelected ? "bg-indigo-600 text-white" : "bg-slate-50 text-slate-400 group-hover:bg-indigo-100 group-hover:text-indigo-600"
+                                                                    )}>
+                                                                        <Layers size={20} />
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <div className="flex items-center gap-3 mb-1">
+                                                                            <h4 className="font-black text-slate-900 tracking-tight truncate">{file.name}</h4>
+                                                                            {isInWorkspace && <span className="text-[9px] font-black uppercase tracking-widest bg-green-100 text-green-700 px-2 py-0.5 rounded-lg">Already Loaded</span>}
+                                                                        </div>
+                                                                        <div className="flex items-center gap-4">
+                                                                            <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+                                                                                <Activity size={12} className="text-indigo-400" />
+                                                                                {file.metadata?.laser || 'Raman'}
+                                                                            </div>
+                                                                            <div className="w-1 h-1 rounded-full bg-slate-200" />
+                                                                            <div className="text-[10px] font-bold text-slate-400 uppercase">
+                                                                                {file.map_width}x{file.map_height} Resol.
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-4 shrink-0">
+                                                                        <div className="text-right">
+                                                                            <div className="text-[10px] font-black text-slate-900">{format(new Date(file.measured_at), 'MMM d, yyyy')}</div>
+                                                                            <div className="text-[10px] font-bold text-slate-400 uppercase">{file.metadata?.analyte || 'No Analyte'}</div>
+                                                                        </div>
+                                                                        <div className={cn(
+                                                                            "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
+                                                                            isSelected ? "bg-indigo-600 border-indigo-600 shadow-lg shadow-indigo-100" : "border-slate-200"
+                                                                        )}>
+                                                                            {isSelected && <CheckCircle2 size={12} className="text-white" />}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ))}
                                             {filteredFiles.length === 0 && (
                                                 <div className="py-20 text-center bg-white border-2 border-dashed border-slate-100 rounded-[2.5rem]">
                                                     <Search size={40} className="text-slate-200 mx-auto mb-4" />
@@ -679,6 +677,43 @@ export function VaultExplorerModal({
                                                 Choose a scientific project from the sidebar to list its Raman characterizations.
                                             </p>
                                         </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Right Sidebar: Current Workspace */}
+                            <div className="w-72 border-l border-slate-200 bg-white flex flex-col shrink-0">
+                                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Layers size={16} className="text-indigo-600" />
+                                        <h3 className="text-sm font-black text-slate-900">Current Workspace</h3>
+                                    </div>
+                                    {currentSessionFiles.length > 0 && (
+                                        <button 
+                                            onClick={() => {
+                                                if (confirm('Are you sure you want to clear your workspace?')) {
+                                                    // Fire an import of an empty array to clear it in parent
+                                                    onLoadWorkspace?.([]);
+                                                }
+                                            }}
+                                            className="text-[10px] font-bold text-red-500 hover:bg-red-50 px-2 py-1 rounded-lg transition-colors flex items-center gap-1"
+                                        >
+                                            <Trash2 size={12} /> Clear
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                                    {currentSessionFiles.length === 0 ? (
+                                        <div className="text-center py-10">
+                                            <p className="text-xs font-bold text-slate-400">Workspace is empty</p>
+                                        </div>
+                                    ) : (
+                                        currentSessionFiles.map((f, i) => (
+                                            <div key={i} className="flex flex-col bg-slate-50 p-3 rounded-xl border border-slate-100 relative group">
+                                                <span className="text-[10px] font-black text-indigo-500 truncate mb-1">{f.sample_name || 'Sample'}</span>
+                                                <span className="text-xs font-bold text-slate-700 truncate">{f.name}</span>
+                                            </div>
+                                        ))
                                     )}
                                 </div>
                             </div>

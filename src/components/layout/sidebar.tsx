@@ -61,7 +61,7 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
 
     const links = [
         { href: `/${groupId}/dashboard`, label: 'Dashboard', icon: Home },
-        { href: `/${groupId}/logbook`, label: 'Bitácora', icon: NotebookPen },
+        { href: `/${groupId}/logbook`, label: 'Logbook', icon: NotebookPen },
         { href: `/${groupId}/drive-reports`, label: 'Drive Reports', icon: FileText },
         { href: `/${groupId}/samples`, label: 'Samples', icon: TestTube },
         { href: `/${groupId}/tasks`, label: 'Tasks', icon: CheckSquare },

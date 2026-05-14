@@ -49,16 +49,28 @@ export function GrapheneCanvasGrid({
         setStepOverride(stepSize);
     }, [mapWidth, mapHeight, stepSize]);
 
-    // Auto-Correct logic
-    const isMismatch = mapWidth !== 0 && (wOverride * hOverride) !== actualN && actualN > 0;
+    // Did the user manually change the inputs from the original props?
+    const isUserOverridden = wOverride !== mapWidth || hOverride !== mapHeight;
+
+    // Is the original metadata wrong?
+    const isMetadataMismatch = mapWidth !== 0 && (mapWidth * mapHeight) !== actualN && actualN > 0;
     const isMissingMetadata = mapWidth === 0 && mapHeight === 0;
     
     const safeN = actualN > 0 ? actualN : 1;
-    const w = Math.max(1, wOverride > 0 && (!isMismatch || isMissingMetadata) ? wOverride : Math.ceil(Math.sqrt(safeN)));
-    const h = Math.max(1, hOverride > 0 && (!isMismatch || isMissingMetadata) ? hOverride : Math.ceil(safeN / w));
+    
+    // If the user manually set a width/height, respect it.
+    // Otherwise, if metadata is valid, use it. If invalid or missing, auto-detect (square root).
+    const w = isUserOverridden 
+        ? Math.max(1, wOverride)
+        : ( (!isMetadataMismatch && !isMissingMetadata && mapWidth > 0) ? mapWidth : Math.ceil(Math.sqrt(safeN)) );
+        
+    const h = isUserOverridden 
+        ? Math.max(1, hOverride)
+        : ( (!isMetadataMismatch && !isMissingMetadata && mapHeight > 0) ? mapHeight : Math.ceil(safeN / w) );
 
     const isAutoDetectedPerfect = isMissingMetadata && (w * h === actualN);
-    const showBanner = (isMismatch || (isMissingMetadata && !isAutoDetectedPerfect)) && !loading && actualN > 0 && !bannerDismissed && !isDismissed;
+    // Only show banner if we auto-corrected a metadata mismatch AND the user hasn't manually overridden yet
+    const showBanner = (isMetadataMismatch || (isMissingMetadata && !isAutoDetectedPerfect)) && !isUserOverridden && !loading && actualN > 0 && !bannerDismissed && !isDismissed;
 
     const loadData = useCallback(async () => {
         if (!vaultRoot || !h5Path) return;
@@ -170,9 +182,9 @@ export function GrapheneCanvasGrid({
                     </span>
                     <span className={cn(
                         "text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase",
-                        isMismatch ? "bg-amber-100 text-amber-700 animate-pulse" : "text-slate-500"
+                        isMetadataMismatch && !isUserOverridden ? "bg-amber-100 text-amber-700 animate-pulse" : "text-slate-500"
                     )}>
-                        ({w} x {h} @ {stepSize}µm)
+                        Grid: {w}×{h} px | {Math.round(w * stepSize)}×{Math.round(h * stepSize)} µm
                     </span>
                 </div>
 
