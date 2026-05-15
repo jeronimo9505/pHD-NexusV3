@@ -199,6 +199,10 @@ export default function LogbookView({ groupId }: { groupId: string }) {
     const [tasks, setTasks] = useState<any[]>([]);
     const [allActiveDates, setAllActiveDates] = useState<string[]>([]);
     const [activeTag, setActiveTag] = useState<string | null>(null);
+    const [viewMode, setViewMode] = useState<'timeline' | 'gallery'>('timeline');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [filterTasks, setFilterTasks] = useState(false);
+    const [mediaFilter, setMediaFilter] = useState<'all' | 'image' | 'video'>('all');
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
     const [hasMoreDown, setHasMoreDown] = useState(false);
@@ -337,7 +341,17 @@ export default function LogbookView({ groupId }: { groupId: string }) {
 
     const visualGroups = useMemo(() => {
         const filtered = entries.filter(e => !e.parent_id)
-            .filter(e => !activeTag || e.content?.includes(activeTag));
+            .filter(e => e.content?.toLowerCase().includes(searchQuery.toLowerCase()))
+            .filter(e => !activeTag || e.content?.includes(activeTag))
+            .filter(e => !filterTasks || e.entry_type === 'task_command')
+            .filter(e => {
+                if (mediaFilter === 'all') return true;
+                const hasMedia = (e.media_files || []).some((m: any) => {
+                    const isVideo = m.type === 'video' || m.mime_type?.startsWith('video/') || m.view_url?.toLowerCase().endsWith('.mp4');
+                    return mediaFilter === 'image' ? !isVideo : isVideo;
+                });
+                return hasMedia;
+            });
         
         const dayGroups: any[] = [];
         filtered.forEach(entry => {
@@ -371,7 +385,24 @@ export default function LogbookView({ groupId }: { groupId: string }) {
         });
         
         return dayGroups;
-    }, [entries, activeTag]);
+    }, [entries, searchQuery, activeTag, filterTasks, mediaFilter]);
+
+    const galleryMedia = useMemo(() => {
+        const allMedia: any[] = [];
+        entries.forEach(e => {
+            if (e.media_files) {
+                e.media_files.forEach((m: any) => {
+                    if (e.content?.toLowerCase().includes(searchQuery.toLowerCase()) || !searchQuery) {
+                        const isVideo = m.type === 'video' || m.mime_type?.startsWith('video/') || m.view_url?.toLowerCase().endsWith('.mp4');
+                        if (mediaFilter === 'all' || (mediaFilter === 'image' && !isVideo) || (mediaFilter === 'video' && isVideo)) {
+                            allMedia.push({ ...m, content: e.content, created_at: e.created_at });
+                        }
+                    }
+                });
+            }
+        });
+        return allMedia.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    }, [entries, searchQuery, mediaFilter]);
 
 
     const comments = entries.filter(e => e.parent_id);
@@ -447,6 +478,40 @@ export default function LogbookView({ groupId }: { groupId: string }) {
                 </div>
                 
                 <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-6">
+                    <div className="space-y-1.5">
+                        <div className="px-2 mb-2 flex items-center gap-2 text-white/20">
+                            <SlidersHorizontal size={12} />
+                            <span className="text-[9px] font-black uppercase tracking-widest">Filters</span>
+                        </div>
+                        <button 
+                            onClick={() => setFilterTasks(!filterTasks)}
+                            className={cn(
+                                "w-full flex items-center gap-3 p-2 rounded-xl transition-all border",
+                                filterTasks 
+                                    ? "bg-orange-500/10 border-orange-500/20 text-orange-400" 
+                                    : "bg-white/[0.02] border-white/5 text-white/30 hover:bg-white/[0.04]"
+                            )}
+                        >
+                            <div className={cn("w-1.5 h-1.5 rounded-full", filterTasks ? "bg-orange-500 animate-pulse" : "bg-white/10")} />
+                            <span className="text-[10px] font-black uppercase tracking-widest">Tasks Only</span>
+                        </button>
+                        <div className="grid grid-cols-3 gap-1">
+                            {(['all', 'image', 'video'] as const).map((f) => (
+                                <button 
+                                    key={f}
+                                    onClick={() => setMediaFilter(f)}
+                                    className={cn(
+                                        "py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all",
+                                        mediaFilter === f 
+                                            ? "bg-blue-600/20 border-blue-500/30 text-blue-400" 
+                                            : "bg-white/[0.01] border-white/5 text-white/20 hover:text-white/40"
+                                    )}
+                                >
+                                    {f}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
 
                     <div className="space-y-1">
                         <div className="px-2 mb-2 flex items-center gap-2 text-white/20">
@@ -525,67 +590,157 @@ export default function LogbookView({ groupId }: { groupId: string }) {
 
             <div className="flex-1 flex flex-col min-w-0 relative">
                 <div className="px-16 py-8 flex items-center justify-between bg-[#0d0d0e]/95 backdrop-blur-2xl z-20 border-b border-white/[0.05]">
-                    <div className="flex items-center gap-4">
-                        <NotebookPen size={18} className="text-blue-500" />
-                        <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-8">
+                        <div className="flex items-center gap-4">
+                            <NotebookPen size={18} className="text-blue-500" />
                             <h1 className="text-[12px] font-black tracking-[0.3em] text-white/40 uppercase">Project Notebook</h1>
+                        </div>
+
+                        <div className="h-8 w-px bg-white/10" />
+
+                        <div className="flex items-center gap-2 p-1 bg-white/[0.03] rounded-xl border border-white/5">
                             <button 
-                                onClick={() => setShowHelp(true)} 
-                                className="p-1 text-white hover:text-blue-500 transition-all hover:scale-110 active:scale-95"
-                                title="View Guide"
+                                onClick={() => setViewMode('timeline')}
+                                className={cn(
+                                    "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                                    viewMode === 'timeline' ? "bg-white/10 text-white shadow-lg" : "text-white/20 hover:text-white/40"
+                                )}
                             >
-                                <HelpCircle size={14} />
+                                Timeline
+                            </button>
+                            <button 
+                                onClick={() => setViewMode('gallery')}
+                                className={cn(
+                                    "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                                    viewMode === 'gallery' ? "bg-white/10 text-white shadow-lg" : "text-white/20 hover:text-white/40"
+                                )}
+                            >
+                                Gallery
                             </button>
                         </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 flex-1 max-w-xl mx-8">
+                        <div className="relative flex-1 group">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-blue-500 transition-colors" size={16} />
+                            <input 
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Search experiments, tags or results..."
+                                className="w-full bg-white/[0.03] border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-[13px] text-white placeholder-white/10 focus:outline-none focus:border-blue-500/30 focus:bg-white/[0.05] transition-all"
+                            />
+                        </div>
+                        <button 
+                            onClick={() => setShowHelp(true)} 
+                            className="p-3 bg-white/[0.03] border border-white/5 text-white/20 hover:text-white hover:bg-white/[0.05] rounded-2xl transition-all"
+                        >
+                            <HelpCircle size={18} />
+                        </button>
                     </div>
                 </div>
 
                 <div className={cn("flex-1 overflow-y-auto px-16 py-8 custom-scroll", !isReady && "invisible")}>
-                    <div className="max-w-6xl mx-auto space-y-12">
-                        {hasMoreDown && (
-                            <div className="flex justify-center py-4">
-                                <button onClick={() => fetchEntries(false, undefined, 'down')} disabled={isLoadingMore} className="px-6 py-2 bg-blue-600/10 border border-blue-500/20 text-blue-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600/20 transition-all disabled:opacity-50">
-                                    {isLoadingMore ? <Loader2 className="animate-spin" size={14} /> : "Load Newer Entries"}
-                                </button>
-                            </div>
-                        )}
+                    {viewMode === 'timeline' ? (
+                        <div className="max-w-6xl mx-auto space-y-12">
+                            {hasMoreDown && (
+                                <div className="flex justify-center py-4">
+                                    <button onClick={() => fetchEntries(false, undefined, 'down')} disabled={isLoadingMore} className="px-6 py-2 bg-blue-600/10 border border-blue-500/20 text-blue-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600/20 transition-all disabled:opacity-50">
+                                        {isLoadingMore ? <Loader2 className="animate-spin" size={14} /> : "Load Newer Entries"}
+                                    </button>
+                                </div>
+                            )}
 
-                        {visualGroups.map((group) => (
-                            <div key={group.date} className="space-y-6">
-                                <div className="sticky top-0 z-10 flex items-center gap-6 py-4 bg-transparent backdrop-blur-sm">
-                                    <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/[0.05]" />
-                                    <h2 className="text-[12px] font-black text-white tracking-[0.4em] uppercase opacity-90 drop-shadow-lg">{formatDateHeader(group.date)}</h2>
-                                    <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/[0.05]" />
+                            {visualGroups.map((group) => (
+                                <div key={group.date} className="space-y-6">
+                                    <div className="sticky top-0 z-10 flex items-center gap-6 py-4 bg-transparent backdrop-blur-sm">
+                                        <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/[0.05]" />
+                                        <h2 className="text-[12px] font-black text-white tracking-[0.4em] uppercase opacity-90 drop-shadow-lg">{formatDateHeader(group.date)}</h2>
+                                        <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/[0.05]" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        {group.blocks.map((block: any) => (
+                                            <LogEntry 
+                                                key={block.id} 
+                                                entry={block} 
+                                                groupId={groupId}
+                                                comments={entries.filter(e => e.parent_id === block.id || block.entries.some((be: any) => e.parent_id === be.id))}
+                                                tasks={tasks}
+                                                onImageClick={(url: string, type: string) => setLightbox({ url, type })}
+                                                onUpdate={handleUpdate}
+                                                onDelete={handleDelete}
+                                                onReply={handleSend}
+                                                onTagClick={(tag: string) => setActiveTag(tag)}
+                                                onToggleTask={handleToggleTask}
+                                            />
+                                        ))}
+                                    </div>
                                 </div>
-                                <div className="space-y-2">
-                                    {group.blocks.map((block: any) => (
-                                        <LogEntry 
-                                            key={block.id} 
-                                            entry={block} 
-                                            groupId={groupId}
-                                            comments={entries.filter(e => e.parent_id === block.id || block.entries.some((be: any) => e.parent_id === be.id))}
-                                            tasks={tasks}
-                                            onImageClick={(url: string, type: string) => setLightbox({ url, type })}
-                                            onUpdate={handleUpdate}
-                                            onDelete={handleDelete}
-                                            onReply={handleSend}
-                                            onTagClick={(tag: string) => setActiveTag(tag)}
-                                            onToggleTask={handleToggleTask}
-                                        />
-                                    ))}
+                            ))}
+                            
+                            {hasMore && (
+                                <div className="flex justify-center py-12">
+                                    <button onClick={() => fetchEntries(false, undefined, 'up')} disabled={isLoadingMore} className="px-8 py-3 bg-white/[0.03] border border-white/10 text-white/30 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-white/[0.05] hover:text-white transition-all disabled:opacity-50 flex items-center gap-3">
+                                        {isLoadingMore ? <Loader2 className="animate-spin" size={16} /> : "Load Previous Scientific Records"}
+                                    </button>
                                 </div>
+                            )}
+                            <div ref={bottomRef} />
+                        </div>
+                    ) : (
+                        <div className="max-w-7xl mx-auto">
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                                {galleryMedia.map((m, i) => (
+                                    <div 
+                                        key={i} 
+                                        className="group relative aspect-square rounded-2xl overflow-hidden border border-white/5 bg-white/[0.02] cursor-pointer hover:border-blue-500/30 transition-all shadow-xl"
+                                        onClick={() => setLightbox({ url: m.telegram_file_id ? `/api/logbook/image?file_id=${m.telegram_file_id}` : m.view_url, type: (m.type === 'video' || m.mime_type?.startsWith('video/') || m.view_url?.toLowerCase().endsWith('.mp4')) ? 'video' : 'image' })}
+                                    >
+                                        {(m.type === 'video' || m.mime_type?.startsWith('video/') || m.view_url?.toLowerCase().endsWith('.mp4')) ? (
+                                            <div className="w-full h-full bg-black/40 flex items-center justify-center relative">
+                                                <video className="w-full h-full object-cover opacity-50"><source src={m.view_url} type="video/mp4" /></video>
+                                                <div className="absolute inset-0 flex items-center justify-center">
+                                                    <Play size={24} className="text-white fill-white opacity-40 group-hover:opacity-100 transition-all" />
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <img 
+                                                src={m.telegram_file_id ? `/api/logbook/image?file_id=${m.telegram_file_id}` : m.view_url} 
+                                                className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500" 
+                                                loading="lazy"
+                                            />
+                                        )}
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-end p-4">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <Clock size={10} className="text-blue-400" />
+                                                <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">{format(parseISO(m.created_at), 'MMM dd, yyyy')}</span>
+                                            </div>
+                                            {m.content && <p className="text-[11px] text-white font-medium line-clamp-2 leading-snug">{m.content}</p>}
+                                        </div>
+                                    </div>
+                                ))}
+                                {galleryMedia.length === 0 && (
+                                    <div className="col-span-full py-40 flex flex-col items-center justify-center text-white/10 gap-6">
+                                        <div className="w-20 h-20 rounded-full bg-white/[0.02] border border-white/5 flex items-center justify-center">
+                                            <ImageIcon size={32} />
+                                        </div>
+                                        <div className="text-center space-y-2">
+                                            <h3 className="text-[14px] font-black uppercase tracking-[0.3em] text-white/20">No media artifacts found</h3>
+                                            <p className="text-[11px] font-medium text-white/5 uppercase tracking-widest">Adjust your filters or search query</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        ))}
-                        
-                        {hasMore && (
-                            <div className="flex justify-center py-12">
-                                <button onClick={() => fetchEntries(false, undefined, 'up')} disabled={isLoadingMore} className="px-8 py-3 bg-white/[0.03] border border-white/10 text-white/30 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-white/[0.05] hover:text-white transition-all disabled:opacity-50 flex items-center gap-3">
-                                    {isLoadingMore ? <Loader2 className="animate-spin" size={16} /> : "Load Previous Scientific Records"}
-                                </button>
-                            </div>
-                        )}
-                        <div ref={bottomRef} />
-                    </div>
+                            
+                            {(hasMore || hasMoreDown) && (
+                                <div className="flex justify-center py-20 border-t border-white/5 mt-20">
+                                    <button onClick={() => fetchEntries(false, undefined, 'up')} disabled={isLoadingMore} className="px-10 py-4 bg-white/[0.02] hover:bg-white/[0.04] border border-white/10 text-white/20 hover:text-white transition-all rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] flex items-center gap-3">
+                                        {isLoadingMore ? <Loader2 className="animate-spin" size={16} /> : "Load More Media Records"}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <div className="absolute bottom-10 left-0 right-0 px-16 pointer-events-none">
