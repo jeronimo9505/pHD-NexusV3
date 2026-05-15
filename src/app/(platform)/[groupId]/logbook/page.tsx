@@ -1,6 +1,6 @@
 import { createClient, getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { LogbookView } from "@/features/logbook/components/LogbookView";
+import LogbookView from "@/features/logbook/components/LogbookView";
 
 interface PageProps {
     params: Promise<{ groupId: string }>;
