@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
         metadata: createdTaskId ? { task_id: createdTaskId } : null
     };
 
-    const { data: entry, error: dbError } = await supabase
+    const { data: entry, error: dbError } = await (supabase as any)
         .from("logbook_entries")
         .insert(insertData)
         .select()
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
         console.error("DB insert error:", dbError);
         // Try one more time without metadata if it failed
         if (insertData.metadata) {
-            const { data: retryEntry, error: retryError } = await supabase
+            const { data: retryEntry, error: retryError } = await (supabase as any)
                 .from("logbook_entries")
                 .insert({ ...insertData, metadata: null })
                 .select()
@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
 
             // If it's a reply, try to link it in Telegram too
             if (parentId) {
-                const { data: parent } = await supabase
+                const { data: parent } = await (supabase as any)
                     .from("logbook_entries")
                     .select("telegram_message_id")
                     .eq("id", parentId)
@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
                 
                 if (telegramMessageId) {
                     // Update our DB with the Telegram message ID so we can reply to it later
-                    await supabase
+                    await (supabase as any)
                         .from("logbook_entries")
                         .update({ telegram_message_id: telegramMessageId })
                         .eq("id", entry.id);
