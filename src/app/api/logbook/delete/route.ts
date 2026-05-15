@@ -1,8 +1,11 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getUser } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
 
 export async function DELETE(req: Request) {
     try {
+        const user = await getUser();
+        if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
         const supabase = await createClient();
         const { id, groupId } = await req.json();
 
@@ -11,14 +14,14 @@ export async function DELETE(req: Request) {
         }
 
         // 1. Get telegram info before deleting
-        const { data: entry } = await supabase
+        const { data: entry } = await (supabase as any)
             .from('logbook_entries')
             .select('telegram_message_id, telegram_chat_id')
             .eq('id', id)
             .single();
 
         // 2. Delete from DB
-        const { error } = await supabase
+        const { error } = await (supabase as any)
             .from('logbook_entries')
             .delete()
             .eq('id', id)
