@@ -338,22 +338,39 @@ export default function LogbookView({ groupId }: { groupId: string }) {
     const visualGroups = useMemo(() => {
         const filtered = entries.filter(e => !e.parent_id)
             .filter(e => !activeTag || e.content?.includes(activeTag));
-            
-        const groups: any[] = [];
-        filtered.forEach((entry) => {
-            const lastGroup = groups[groups.length - 1];
-            const entryMedia = (entry.media_files || []).map((f: any) => ({ ...f, parent_entry_id: entry.id }));
-            const isMediaOnly = !entry.content || entry.content.trim() === '';
-            const shouldGroup = lastGroup && isMediaOnly && differenceInMinutes(parseISO(entry.created_at), parseISO(lastGroup.created_at)) === 0;
+        
+        const dayGroups: any[] = [];
+        filtered.forEach(entry => {
             const date = format(parseISO(entry.created_at), 'yyyy-MM-dd');
-            if (shouldGroup) { 
-                lastGroup.media_files = [...(lastGroup.media_files || []), ...entryMedia]; 
-                lastGroup.entries.push(entry);
-            } else { 
-                groups.push({ date, created_at: entry.created_at, entries: [entry], media_files: entryMedia, isMediaOnly }); 
+            let dayGroup = dayGroups.find(g => g.date === date);
+            
+            if (!dayGroup) {
+                dayGroup = { date, blocks: [] };
+                dayGroups.push(dayGroup);
+            }
+            
+            const lastBlock = dayGroup.blocks[dayGroup.blocks.length - 1];
+            const isMediaOnly = !entry.content || entry.content.trim() === '';
+            const entryMedia = (entry.media_files || []).map((f: any) => ({ ...f, parent_entry_id: entry.id }));
+            
+            if (lastBlock && isMediaOnly && lastBlock.isMediaOnly && differenceInMinutes(parseISO(entry.created_at), parseISO(lastBlock.created_at)) === 0) {
+                lastBlock.entries.push(entry);
+                lastBlock.media_files = [...lastBlock.media_files, ...entryMedia];
+            } else {
+                dayGroup.blocks.push({
+                    id: entry.id,
+                    created_at: entry.created_at,
+                    entries: [entry],
+                    media_files: entryMedia,
+                    isMediaOnly,
+                    content: entry.content,
+                    entry_type: entry.entry_type,
+                    metadata: entry.metadata
+                });
             }
         });
-        return groups;
+        
+        return dayGroups;
     }, [entries, activeTag]);
 
 
@@ -533,20 +550,20 @@ export default function LogbookView({ groupId }: { groupId: string }) {
                             </div>
                         )}
 
-                        {visualGroups.map((group, idx) => (
-                            <div key={`${group.date}-${idx}`} className="space-y-6">
+                        {visualGroups.map((group) => (
+                            <div key={group.date} className="space-y-6">
                                 <div className="sticky top-0 z-10 flex items-center gap-6 py-4 bg-transparent backdrop-blur-sm">
                                     <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/[0.05]" />
                                     <h2 className="text-[12px] font-black text-white tracking-[0.4em] uppercase opacity-90 drop-shadow-lg">{formatDateHeader(group.date)}</h2>
                                     <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/[0.05]" />
                                 </div>
                                 <div className="space-y-2">
-                                    {group.entries.map((entry: any) => (
+                                    {group.blocks.map((block: any) => (
                                         <LogEntry 
-                                            key={entry.id} 
-                                            entry={entry} 
+                                            key={block.id} 
+                                            entry={block} 
                                             groupId={groupId}
-                                            comments={entries.filter(e => e.parent_id === entry.id)}
+                                            comments={entries.filter(e => e.parent_id === block.id || block.entries.some((be: any) => e.parent_id === be.id))}
                                             tasks={tasks}
                                             onImageClick={(url: string, type: string) => setLightbox({ url, type })}
                                             onUpdate={handleUpdate}
