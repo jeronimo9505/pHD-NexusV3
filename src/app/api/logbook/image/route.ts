@@ -17,19 +17,50 @@ export async function GET(req: NextRequest) {
 
         if (!filePath) return new NextResponse('File not found in Telegram', { status: 404 });
 
-        // 2. Download binary from Telegram
-        const imgRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`);
-        const buffer = await imgRes.arrayBuffer();
+        const telegramUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+        
+        // 2. Handle Range requests for Tauri/WebView2 compatibility
+        const range = req.headers.get('range');
+        
+        const fetchOptions: RequestInit = {
+            method: 'GET',
+            headers: range ? { 'Range': range } : {}
+        };
+
+        const mediaRes = await fetch(telegramUrl, fetchOptions);
+        
+        if (!mediaRes.ok && mediaRes.status !== 206) {
+            return new NextResponse('Failed to fetch from Telegram', { status: mediaRes.status });
+        }
+
+        const buffer = await mediaRes.arrayBuffer();
+
+        // 3. Determine content type
+        let contentType = mediaRes.headers.get('content-type') || 'application/octet-stream';
+        if (filePath.toLowerCase().endsWith('.mp4')) contentType = 'video/mp4';
+        else if (filePath.toLowerCase().endsWith('.jpg') || filePath.toLowerCase().endsWith('.jpeg')) contentType = 'image/jpeg';
+        else if (filePath.toLowerCase().endsWith('.png')) contentType = 'image/png';
+
+        // 4. Return with appropriate status and headers for Range support
+        const responseHeaders = new Headers({
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=86400, immutable',
+            'Accept-Ranges': 'bytes',
+        });
+
+        const contentRange = mediaRes.headers.get('content-range');
+        if (contentRange) responseHeaders.set('Content-Range', contentRange);
+        
+        const contentLength = mediaRes.headers.get('content-length');
+        if (contentLength) responseHeaders.set('Content-Length', contentLength);
 
         return new NextResponse(buffer, {
-            headers: {
-                'Content-Type': 'image/jpeg',
-                // Cache heavily since Telegram file_id implies immutable content
-                'Cache-Control': 'public, max-age=86400, immutable'
-            }
+            status: mediaRes.status,
+            headers: responseHeaders
         });
+
     } catch (e) {
         console.error("Telegram proxy error:", e);
-        return new NextResponse('Internal error downloading image', { status: 500 });
+        return new NextResponse('Internal error downloading media', { status: 500 });
     }
 }
