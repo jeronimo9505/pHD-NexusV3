@@ -159,7 +159,7 @@ function LogEntry({ entry, groupId, onImageClick, onUpdate, onDelete, comments, 
                     </div>
                     <div className={cn("flex items-center gap-2 transition-all", isEditing && "hidden")}>
                         <button onClick={() => setIsReplying(!isReplying)} className="p-2 text-white/40 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all" title="Add side note"><MessageSquare size={16} /></button>
-                        <button onClick={() => onDelete(entry.id)} className="p-2 text-white/40 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 size={16} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); onDelete(entry.id); }} className="p-2 text-white/40 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 size={16} /></button>
                     </div>
                 </div>
                 {entry.content && (
@@ -176,7 +176,7 @@ function LogEntry({ entry, groupId, onImageClick, onUpdate, onDelete, comments, 
             <div className="space-y-3">
                 {comments.map((c: any) => (
                     <div key={c.id} className="bg-white/[0.04] border border-white/[0.1] rounded-2xl p-4 shadow-2xl relative group/annot animate-in fade-in slide-in-from-right-4 duration-300">
-                        <div className="text-[10px] font-black text-white/30 uppercase mb-2 flex justify-between tracking-widest"><span>{formatTime(c.created_at)}</span><button onClick={() => onDelete(c.id)} className="opacity-0 group-hover/annot:opacity-100 hover:text-red-400 transition-all"><Trash2 size={12} /></button></div>
+                        <div className="text-[10px] font-black text-white/30 uppercase mb-2 flex justify-between tracking-widest"><span>{formatTime(c.created_at)}</span><button onClick={(e) => { e.stopPropagation(); onDelete(c.id); }} className="opacity-0 group-hover/annot:opacity-100 hover:text-red-400 transition-all"><Trash2 size={12} /></button></div>
                         <div className="text-[16px] text-white/80 leading-relaxed font-normal tracking-tight">
                             <ScientificText text={c.content} onTagClick={onTagClick} />
                         </div>
@@ -194,7 +194,12 @@ function LogEntry({ entry, groupId, onImageClick, onUpdate, onDelete, comments, 
     );
 }
 
-export default function LogbookView({ groupId }: { groupId: string }) {
+export default function LogbookView({ groupId, userId, isPrivate, isOwner }: { 
+    groupId: string;
+    userId?: string;
+    isPrivate?: boolean;
+    isOwner?: boolean;
+}) {
     const [entries, setEntries] = useState<any[]>([]);
     const [tasks, setTasks] = useState<any[]>([]);
     const [allActiveDates, setAllActiveDates] = useState<string[]>([]);
@@ -209,9 +214,12 @@ export default function LogbookView({ groupId }: { groupId: string }) {
     const [isReady, setIsReady] = useState(false);
     const [showHelp, setShowHelp] = useState(false);
     const [lightbox, setLightbox] = useState<{ url: string, type: string } | null>(null);
+    const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
     const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
     const ITEMS_PER_PAGE = 50;
     const bottomRef = useRef<HTMLDivElement>(null);
+    const pendingJumpDateRef = useRef<string | null>(null);
     const supabase = createClient();
 
     useEffect(() => {
@@ -240,7 +248,7 @@ export default function LogbookView({ groupId }: { groupId: string }) {
     }, [groupId]);
 
     const fetchAllActiveDates = async () => {
-        const { data } = await supabase
+        const { data } = await (supabase as any)
             .from('logbook_entries')
             .select('created_at')
             .eq('group_id', groupId)
@@ -248,7 +256,8 @@ export default function LogbookView({ groupId }: { groupId: string }) {
             .order('created_at', { ascending: false });
         
         if (data) {
-            const dates = Array.from(new Set(data.map(e => format(parseISO(e.created_at), 'yyyy-MM-dd'))));
+            const logbookData = data as any[];
+            const dates = Array.from(new Set(logbookData.map(e => format(parseISO(e.created_at), 'yyyy-MM-dd'))));
             setAllActiveDates(dates);
         }
     };
@@ -257,7 +266,7 @@ export default function LogbookView({ groupId }: { groupId: string }) {
         if (!isInitial) setIsLoadingMore(true);
         if (jumpDate) setIsReady(false); // Hide during jump
         
-        let query = supabase
+        let query = (supabase as any)
             .from('logbook_entries')
             .select('*')
             .eq('group_id', groupId)
@@ -280,15 +289,16 @@ export default function LogbookView({ groupId }: { groupId: string }) {
         const { data } = await query;
         
         if (data) {
-            const sortedData = [...data].sort((a, b) => a.created_at.localeCompare(b.created_at));
+            const logbookData = data as any[];
+            const sortedData = [...logbookData].sort((a, b) => a.created_at.localeCompare(b.created_at));
             
             if (isInitial || jumpDate) {
                 setEntries(sortedData);
-                setHasMore(data.length === ITEMS_PER_PAGE);
+                setHasMore(logbookData.length === ITEMS_PER_PAGE);
                 // Check if we need a 'Load Newer' button
                 if (jumpDate) {
-                    const { count } = await supabase.from('logbook_entries').select('*', { count: 'exact', head: true }).eq('group_id', groupId).gt('created_at', data[0]?.created_at || '');
-                    setHasMoreDown(!!count && count > data.length);
+                    const { count } = await (supabase as any).from('logbook_entries').select('*', { count: 'exact', head: true }).eq('group_id', groupId).gt('created_at', logbookData[0]?.created_at || '');
+                    setHasMoreDown(!!count && count > 0);
                 } else {
                     setHasMoreDown(false);
                 }
@@ -298,7 +308,7 @@ export default function LogbookView({ groupId }: { groupId: string }) {
                     const uniqueNew = sortedData.filter(e => !existingIds.has(e.id));
                     return [...uniqueNew, ...prev];
                 });
-                setHasMore(data.length === ITEMS_PER_PAGE);
+                setHasMore(logbookData.length === ITEMS_PER_PAGE);
             } else if (direction === 'down') {
                 setEntries(prev => {
                     const existingIds = new Set(prev.map(e => e.id));
@@ -306,7 +316,7 @@ export default function LogbookView({ groupId }: { groupId: string }) {
                     const newList = [...prev, ...uniqueNew];
                     return newList;
                 });
-                setHasMoreDown(data.length === ITEMS_PER_PAGE);
+                setHasMoreDown(logbookData.length === ITEMS_PER_PAGE);
             }
         }
         
@@ -320,12 +330,22 @@ export default function LogbookView({ groupId }: { groupId: string }) {
 
     // --- AUTO SCROLL TO BOTTOM ---
     useEffect(() => {
+        const pendingJumpDate = pendingJumpDateRef.current;
+        if (pendingJumpDate) {
+            requestAnimationFrame(() => {
+                document.getElementById(`day-${pendingJumpDate}`)?.scrollIntoView({ behavior: 'auto' });
+                pendingJumpDateRef.current = null;
+                setIsReady(true);
+            });
+            return;
+        }
+
         const lastEntryId = entries[entries.length - 1]?.id;
         if (lastEntryId) {
             bottomRef.current?.scrollIntoView({ behavior: 'auto' });
             if (!isReady) setIsReady(true);
         }
-    }, [entries[entries.length - 1]?.id]);
+    }, [entries]);
 
     // --- EXTRACT TAGS FROM ALL ENTRIES ---
     const allTags = useMemo(() => {
@@ -426,7 +446,9 @@ export default function LogbookView({ groupId }: { groupId: string }) {
         const element = document.getElementById(`day-${day}`);
         if (element) {
             element.scrollIntoView({ behavior: 'auto' });
+            setIsReady(true);
         } else {
+            pendingJumpDateRef.current = day;
             await fetchEntries(true, day);
         }
     };
@@ -442,8 +464,37 @@ export default function LogbookView({ groupId }: { groupId: string }) {
     }, [timelineHierarchy]);
 
     const toggleNode = (id: string) => { setExpandedNodes(prev => ({ ...prev, [id]: !prev[id] })); };
-    const handleUpdate = async (id: string, text: string) => { await fetch('/api/logbook/update', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, text, groupId }) }); };
-    const handleDelete = async (id: string) => { if (!window.confirm("Delete?")) return; setEntries(prev => prev.filter(e => e.id !== id)); await fetch('/api/logbook/delete', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, groupId }) }); };
+    const handleUpdate = async (id: string, text: string) => {
+        const res = await fetch('/api/logbook/update', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, text, groupId }) });
+        if (!res.ok) {
+            toast.error('Could not update entry');
+            await fetchEntries(true);
+            return;
+        }
+        const { entry } = await res.json();
+        if (entry) setEntries(prev => prev.map(e => e.id === id ? { ...e, ...entry } : e));
+    };
+    const requestDelete = (id: string) => {
+        setPendingDeleteId(id);
+    };
+    const confirmDelete = async () => {
+        if (!pendingDeleteId || isDeleting) return;
+        const id = pendingDeleteId;
+        setIsDeleting(true);
+        setPendingDeleteId(null);
+        const previousEntries = entries;
+        setEntries(prev => prev.filter(e => e.id !== id));
+        const res = await fetch('/api/logbook/delete', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, groupId }) });
+        if (!res.ok) {
+            toast.error('Could not delete entry');
+            setEntries(previousEntries);
+        }
+        setIsDeleting(false);
+    };
+    const cancelDelete = () => {
+        if (isDeleting) return;
+        setPendingDeleteId(null);
+    };
     const handleSend = async (text: string, parentId?: string) => { 
         if (!text.trim()) return; 
         await fetch('/api/logbook/send', { 
@@ -640,7 +691,7 @@ export default function LogbookView({ groupId }: { groupId: string }) {
                     </div>
                 </div>
 
-                <div className={cn("flex-1 overflow-y-auto px-16 py-8 custom-scroll", !isReady && "invisible")}>
+                <div className={cn("flex-1 overflow-y-auto px-16 pt-8 pb-40 custom-scroll", !isReady && "invisible")}>
                     {viewMode === 'timeline' ? (
                         <div className="max-w-6xl mx-auto space-y-12">
                             {hasMoreDown && (
@@ -652,7 +703,7 @@ export default function LogbookView({ groupId }: { groupId: string }) {
                             )}
 
                             {visualGroups.map((group) => (
-                                <div key={group.date} className="space-y-6">
+                                <div key={group.date} id={`day-${group.date}`} className="space-y-6">
                                     <div className="sticky top-0 z-10 flex items-center gap-6 py-4 bg-transparent backdrop-blur-sm">
                                         <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/[0.05]" />
                                         <h2 className="text-[12px] font-black text-white tracking-[0.4em] uppercase opacity-90 drop-shadow-lg">{formatDateHeader(group.date)}</h2>
@@ -668,7 +719,7 @@ export default function LogbookView({ groupId }: { groupId: string }) {
                                                 tasks={tasks}
                                                 onImageClick={(url: string, type: string) => setLightbox({ url, type })}
                                                 onUpdate={handleUpdate}
-                                                onDelete={handleDelete}
+                                                onDelete={requestDelete}
                                                 onReply={handleSend}
                                                 onTagClick={(tag: string) => setActiveTag(tag)}
                                                 onToggleTask={handleToggleTask}
@@ -780,6 +831,29 @@ export default function LogbookView({ groupId }: { groupId: string }) {
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/98 backdrop-blur-3xl animate-in fade-in" onClick={() => setLightbox(null)}>
                     <button className="absolute top-10 right-10 text-white/40 hover:text-white"><X size={44} /></button>
                     {lightbox.type === 'video' ? <video src={lightbox.url} controls autoPlay className="max-w-[95%] max-h-[90vh] rounded-3xl" onClick={e => e.stopPropagation()} /> : <img src={lightbox.url} className="max-w-[95%] max-h-[90vh] object-contain rounded-3xl" />}
+                </div>
+            )}
+
+            {pendingDeleteId && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-6" onClick={cancelDelete}>
+                    <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-2xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
+                                <Trash2 size={18} />
+                            </div>
+                            <div>
+                                <h3 className="text-[14px] font-black text-white uppercase tracking-widest">Delete Entry</h3>
+                                <p className="text-[12px] text-white/40 mt-1">This action cannot be undone.</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 pt-4">
+                            <button onClick={cancelDelete} disabled={isDeleting} className="px-4 py-2 rounded-xl bg-white/[0.04] text-white/50 hover:text-white hover:bg-white/[0.08] transition-all text-[11px] font-black uppercase tracking-widest disabled:opacity-50">Cancel</button>
+                            <button onClick={confirmDelete} disabled={isDeleting} className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-500 transition-all text-[11px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center gap-2">
+                                {isDeleting && <Loader2 size={14} className="animate-spin" />}
+                                Delete
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 
