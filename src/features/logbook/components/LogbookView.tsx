@@ -1,726 +1,695 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { createBrowserClient } from '@supabase/ssr';
-import {
-    Search, SlidersHorizontal, X, Pin, Image as ImageIcon,
-    FileText, Link2, Tag, Send, ChevronDown, ExternalLink,
-    Loader2, NotebookPen, Maximize2, Hash, CloudUpload, Lock
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { 
+    Search, 
+    Calendar, 
+    MoreHorizontal, 
+    Trash2, 
+    Star, 
+    Image as ImageIcon, 
+    FileText, 
+    CloudUpload, 
+    Loader2, 
+    Maximize2, 
+    X, 
+    SlidersHorizontal,
+    Plus,
+    NotebookPen,
+    ArrowRight,
+    SendHorizontal,
+    ExternalLink,
+    MessageSquare,
+    ChevronRight,
+    MessageCircle,
+    Clock,
+    ChevronDown,
+    Sparkles,
+    Mic,
+    Paperclip,
+    Play,
+    Layers,
+    Tag,
+    FilterX,
+    CheckSquare,
+    Circle,
+    CheckCircle2,
+    HelpCircle
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { format, isToday, isYesterday, parseISO, differenceInMinutes, getYear, getMonth, getWeek } from 'date-fns';
 import { toast } from 'sonner';
-import { initGoogleClient, ensureAuth } from '@/lib/google/auth';
+import { createClient } from '@/lib/supabase/client';
+import { cn } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
+import { ScientificText } from '@/components/ScientificText';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-interface MediaFile {
-    drive_file_id?: string | null;
-    telegram_file_id?: string | null;
-    name: string;
-    thumbnail_url?: string | null;
-    view_url?: string | null;
-    mime_type: string;
-}
+const scrollbarStyles = `
+  .custom-scroll::-webkit-scrollbar { width: 4px; }
+  .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+  .custom-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+  .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+`;
 
-interface EntryLink {
-    type: string;
-    ref: string;
-    label: string;
-}
+const formatTime = (dateStr: string) => format(parseISO(dateStr), 'HH:mm');
 
-interface LogbookEntry {
-    id: string;
-    content: string;
-    entry_type: 'text' | 'image' | 'mixed';
-    media_files: MediaFile[];
-    tags: string[];
-    links: EntryLink[];
-    source: 'telegram' | 'web';
-    pinned: boolean;
-    created_at: string;
-    user_id: string;
-}
-
-interface LogbookViewProps {
-    groupId: string;
-    userId: string;
-    isPrivate?: boolean;
-    isOwner?: boolean;
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function formatTime(iso: string) {
-    return new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatDayHeader(iso: string) {
-    const d = new Date(iso);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 1);
-
-    if (d.toDateString() === today.toDateString()) return 'Hoy';
-    if (d.toDateString() === yesterday.toDateString()) return 'Ayer';
-    return d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-}
-
-function getDateKey(iso: string) {
-    return iso.slice(0, 10);
-}
-
-// Render content with hyperlink chips highlighted
-function renderContent(content: string, links: EntryLink[], groupId: string) {
-    if (!content) return null;
-
-    // Replace [type:ref] patterns with chips
-    const parts: React.ReactNode[] = [];
-    const re = /\[(muestra|tarea|reporte|sample|task|report):[\w-]+\]/gi;
-    let last = 0;
-    let m: RegExpExecArray | null;
-
-    while ((m = re.exec(content)) !== null) {
-        if (m.index > last) parts.push(<span key={last}>{content.slice(last, m.index)}</span>);
-        const matched = m[0];
-        const link = links.find(l => matched.toLowerCase().includes(l.ref.toLowerCase()));
-        const href = link ? `/${groupId}/${link.type}s` : '#';
-        parts.push(
-            <a key={m.index} href={href}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium hover:bg-blue-200 transition-colors mx-0.5">
-                <Link2 size={10} />
-                {link?.label || matched.slice(1, -1)}
-            </a>
-        );
-        last = m.index + matched.length;
-    }
-    if (last < content.length) parts.push(<span key={last}>{content.slice(last)}</span>);
-
-    // Highlight #tags and ==highlights== in the final text spans
-    return parts.map((part, i) => {
-        if (typeof part === 'string' || (part as any)?.props?.children === undefined) return part;
-        const text = (part as any)?.props?.children;
-        if (typeof text !== 'string') return part;
-        
-        // Split by both tags and highlights
-        return <span key={i}>{text.split(/(#[\w\u00C0-\u017F]+|==[^=]+==)/g).map((seg: string, j: number) => {
-            if (seg.startsWith('#')) {
-                return <span key={j} className="text-indigo-600 font-bold">{seg}</span>;
-            }
-            if (seg.startsWith('==') && seg.endsWith('==')) {
-                return <mark key={j} className="bg-yellow-200 px-1 rounded-sm text-slate-900 font-bold">{seg.slice(2, -2)}</mark>;
-            }
-            return seg;
-        })}</span>;
-    });
-}
-
-// ─── Lightbox ─────────────────────────────────────────────────────────────────
-function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-        document.addEventListener('keydown', handler);
-        return () => document.removeEventListener('keydown', handler);
-    }, [onClose]);
-
+// --- Component to render media in a Telegram-style mosaic ---
+function MediaGallery({ files, onImageClick, onDeleteMedia }: { files: any[], onImageClick: any, onDeleteMedia: any }) {
+    if (!files || files.length === 0) return null;
+    const getUrl = (f: any) => f.telegram_file_id ? `/api/logbook/image?file_id=${f.telegram_file_id}` : f.view_url;
     return (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
-            onClick={onClose}>
-            <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors">
-                <X size={24} />
-            </button>
-            <img src={url} alt="Imagen bitácora"
-                className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
-                onClick={e => e.stopPropagation()} />
-        </div>
-    );
-}
-
-// ─── Entry Component (Refactored for Notebook style) ─────────────────────────
-function LogEntry({ entry, groupId, onImageClick, onEdit }: {
-    entry: LogbookEntry;
-    groupId: string;
-    onImageClick: (url: string) => void;
-    onEdit: (entry: LogbookEntry) => void;
-}) {
-    const [isHovered, setIsHovered] = useState(false);
-
-    const formatContent = (text: string) => {
-        if (!text) return null;
-        return renderContent(text, entry.links, groupId);
-    };
-
-    return (
-        <div 
-            className="group relative flex gap-4 py-4 px-2 hover:bg-slate-50/50 transition-colors border-l-2 border-transparent hover:border-indigo-400"
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-        >
-            {/* Time column */}
-            <div className="w-16 flex-shrink-0 flex flex-col items-end pt-0.5">
-                <span className="text-[11px] font-mono text-slate-400">{formatTime(entry.created_at)}</span>
-                {entry.pinned && <Pin size={10} className="text-amber-500 mt-1" />}
-            </div>
-
-            {/* Content column */}
-            <div className="flex-1 flex flex-col gap-3 min-w-0">
-                {/* Images - now stacked vertically */}
-                {entry.media_files?.length > 0 && (
-                    <div className="flex flex-col gap-4 max-w-2xl">
-                        {entry.media_files.map((f, i) => {
-                            const proxyUrl = f.telegram_file_id ? `/api/logbook/image?file_id=${f.telegram_file_id}` : '';
-                            const thumbUrl = proxyUrl || f.thumbnail_url!;
-                            const fullUrl = proxyUrl || f.view_url!;
-
-                            return (
-                                <div key={f.drive_file_id || f.telegram_file_id || i}
-                                    className="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-50 cursor-pointer group/img max-h-[600px] flex items-center justify-center"
-                                    onClick={() => onImageClick(fullUrl)}>
-                                    <img
-                                        src={fullUrl}
-                                        alt="Logbook Media"
-                                        className="max-w-full h-auto object-contain transition-transform group-hover/img:scale-[1.02]"
-                                    />
-                                    <div className="absolute top-3 right-3 p-1.5 bg-black/40 rounded-lg text-white opacity-0 group-hover/img:opacity-100 transition-opacity">
-                                        <Maximize2 size={16} />
+        <div className={cn(
+            "grid gap-1.5 mt-3 rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-black/40",
+            files.length === 1 ? "grid-cols-1 max-w-[450px]" : 
+            files.length === 2 ? "grid-cols-2 max-w-[550px]" : 
+            "grid-cols-3 max-w-[700px]"
+        )}>
+            {files.map((f, i) => {
+                const url = getUrl(f);
+                const isVideo = f.type === 'video' || f.mime_type?.startsWith('video/') || f.view_url?.toLowerCase().endsWith('.mp4');
+                return (
+                    <div key={i} className={cn("relative bg-white/[0.02] cursor-pointer group/media", files.length === 1 ? "aspect-video" : "aspect-square")}>
+                        <div onClick={() => onImageClick(url, isVideo ? 'video' : 'image')} className="w-full h-full">
+                            {isVideo ? (
+                                <div className="w-full h-full bg-black/40 flex items-center justify-center relative">
+                                    <video className="w-full h-full object-cover opacity-50"><source src={url} type="video/mp4" /></video>
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                        <div className="w-10 h-10 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 hover:scale-110 transition-transform"><Play size={18} className="text-white fill-white ml-0.5" /></div>
                                     </div>
                                 </div>
-                            )
-                        })}
+                            ) : (
+                                <img src={url} className="w-full h-full object-cover opacity-90 group-hover/media:opacity-100 transition-all" />
+                            )}
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); onDeleteMedia(f.parent_entry_id); }} className="absolute top-2.5 right-2.5 p-2 bg-black/70 backdrop-blur-md rounded-full text-white/40 hover:text-red-400 opacity-0 group-hover/media:opacity-100 transition-all z-10 border border-white/10"><Trash2 size={12} /></button>
                     </div>
-                )}
-
-                {/* Text content */}
-                {entry.content && (
-                    <div className="text-[15px] text-slate-800 leading-relaxed whitespace-pre-wrap break-words max-w-4xl font-medium">
-                        {formatContent(entry.content)}
-                    </div>
-                )}
-
-                {/* Tags */}
-                {entry.tags?.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                        {entry.tags.map(tag => (
-                            <span key={tag}
-                                className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-bold uppercase tracking-wider border border-slate-200">
-                                {tag}
-                            </span>
-                        ))}
-                    </div>
-                )}
-            </div>
-
-            {/* Action Bar (Only visible on hover) */}
-            <div className={cn(
-                "absolute top-2 right-4 flex items-center gap-1 p-1 bg-white border border-slate-200 shadow-sm rounded-lg transition-all",
-                isHovered ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 pointer-events-none"
-            )}>
-                <button 
-                    onClick={() => onEdit(entry)}
-                    className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
-                    title="Editar entrada"
-                >
-                    <NotebookPen size={14} />
-                </button>
-            </div>
+                );
+            })}
         </div>
     );
 }
 
-// ─── Composer (web input) ─────────────────────────────────────────────────────
-function Composer({ groupId, userId, onSent }: {
-    groupId: string;
-    userId: string;
-    onSent: () => void;
-}) {
-    const [text, setText] = useState('');
-    const [sending, setSending] = useState(false);
+// --- LogEntry Component ---
+function LogEntry({ entry, groupId, onImageClick, onUpdate, onDelete, comments, onReply, onTagClick, tasks = [], onToggleTask }: any) {
+    const [isHovered, setIsHovered] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [isReplying, setIsReplying] = useState(false);
+    const [editValue, setEditValue] = useState(entry.content || '');
+    const [replyValue, setReplyValue] = useState('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    const handleSend = async () => {
-        if (!text.trim() || sending) return;
-        setSending(true);
-
-        const res = await fetch('/api/logbook/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: text.trim(), groupId }),
-        });
-
-        if (res.ok) {
-            setText('');
-            onSent();
-        }
-        setSending(false);
-    };
-
-    const handleKey = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleSend();
-    };
-
-    // Auto-resize textarea
     useEffect(() => {
-        const el = textareaRef.current;
-        if (!el) return;
-        el.style.height = 'auto';
-        el.style.height = Math.min(el.scrollHeight, 160) + 'px';
-    }, [text]);
+        if (isEditing && textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+            textareaRef.current.focus();
+        }
+    }, [isEditing]);
+
+    const handleSave = async () => {
+        if (editValue.trim() === entry.content) { setIsEditing(false); return; }
+        await onUpdate(entry.id, editValue.trim());
+        setIsEditing(false);
+    };
+
+    const handleSendReply = async () => {
+        if (!replyValue.trim()) return;
+        await onReply(replyValue.trim(), entry.id);
+        setReplyValue('');
+        setIsReplying(false);
+    };
+
+    const taskId = entry.metadata?.task_id;
+    const associatedTask = (tasks || []).find((t: any) => t.id === taskId);
+    const taskStatus = associatedTask?.status || 'todo';
+    const isDone = taskStatus === 'done';
 
     return (
-        <div className="bg-slate-50 rounded-2xl border border-slate-100 px-4 py-3 focus-within:border-indigo-200 focus-within:ring-4 focus-within:ring-indigo-500/5 transition-all">
-            <div className="flex items-end gap-3">
-                <textarea
-                    ref={textareaRef}
-                    value={text}
-                    onChange={e => setText(e.target.value)}
-                    onKeyDown={handleKey}
-                    placeholder="Escribe una nota... Usa #tags o ==resaltado=="
-                    rows={1}
-                    className="flex-1 bg-transparent resize-none outline-none text-[15px] text-slate-800 placeholder:text-slate-400 min-h-[24px] max-h-[160px] py-1 font-medium"
-                />
-                <button
-                    onClick={handleSend}
-                    disabled={!text.trim() || sending}
-                    className="flex-shrink-0 w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center hover:bg-slate-800 disabled:opacity-20 disabled:cursor-not-allowed transition-all shadow-lg shadow-slate-200"
-                >
-                    {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-                </button>
+        <div id={`entry-${entry.id}`} 
+            className={cn(
+                "group relative grid grid-cols-[1fr_380px] gap-12 py-5 border-b border-white/[0.05] last:border-0 transition-all -mx-4 px-4 rounded-xl",
+                entry.entry_type === 'task_command' 
+                    ? (isDone 
+                        ? "bg-emerald-500/[0.03] border-l-2 border-l-emerald-500/50 shadow-[inset_10px_0_30px_-15px_rgba(16,185,129,0.1)]" 
+                        : "bg-orange-500/[0.03] border-l-2 border-l-orange-500/50 shadow-[inset_10px_0_30px_-15px_rgba(249,115,22,0.1)]")
+                    : "hover:bg-white/[0.01]"
+            )} 
+            onMouseEnter={() => setIsHovered(true)} 
+            onMouseLeave={() => setIsHovered(false)}
+        >
+            <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        {entry.entry_type === 'task_command' ? (
+                            <button 
+                                onClick={() => onToggleTask(taskId, taskStatus)}
+                                className={cn(
+                                    "flex items-center gap-1.5 px-2 py-0.5 border rounded-md transition-all cursor-pointer hover:scale-105 active:scale-95",
+                                    isDone 
+                                        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.1)]" 
+                                        : "bg-orange-500/10 border-orange-500/20 text-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.1)]"
+                                )}
+                            >
+                                {isDone ? <CheckCircle2 size={12} /> : <Circle size={12} />}
+                                <span className="text-[10px] font-black uppercase tracking-widest">{isDone ? 'Done' : 'Task'}</span>
+                            </button>
+                        ) : (
+                            <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                        )}
+                        <span className="text-[12px] font-black text-white/40 tracking-widest tabular-nums uppercase">{formatTime(entry.created_at)}</span>
+                    </div>
+                    <div className={cn("flex items-center gap-2 transition-all", isEditing && "hidden")}>
+                        <button onClick={() => setIsReplying(!isReplying)} className="p-2 text-white/40 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all" title="Add side note"><MessageSquare size={16} /></button>
+                        <button onClick={() => onDelete(entry.id)} className="p-2 text-white/40 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 size={16} /></button>
+                    </div>
+                </div>
+                {entry.content && (
+                    isEditing ? (
+                        <textarea ref={textareaRef} value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={handleSave} className="w-full bg-transparent border-none outline-none resize-none text-[18px] text-white leading-relaxed p-0 focus:ring-0 font-medium" />
+                    ) : (
+                        <div onClick={() => setIsEditing(true)} className="text-[18px] text-white leading-relaxed whitespace-pre-wrap cursor-text selection:bg-blue-500/40 font-medium tracking-tight">
+                            <ScientificText text={entry.content} onTagClick={onTagClick} />
+                        </div>
+                    )
+                )}
+                <MediaGallery files={entry.media_files} onImageClick={onImageClick} onDeleteMedia={onDelete} />
+            </div>
+            <div className="space-y-3">
+                {comments.map((c: any) => (
+                    <div key={c.id} className="bg-white/[0.04] border border-white/[0.1] rounded-2xl p-4 shadow-2xl relative group/annot animate-in fade-in slide-in-from-right-4 duration-300">
+                        <div className="text-[10px] font-black text-white/30 uppercase mb-2 flex justify-between tracking-widest"><span>{formatTime(c.created_at)}</span><button onClick={() => onDelete(c.id)} className="opacity-0 group-hover/annot:opacity-100 hover:text-red-400 transition-all"><Trash2 size={12} /></button></div>
+                        <div className="text-[16px] text-white/80 leading-relaxed font-normal tracking-tight">
+                            <ScientificText text={c.content} onTagClick={onTagClick} />
+                        </div>
+                    </div>
+                ))}
+                {isReplying && (
+                    <div className="bg-[#1e1f20] border-2 border-blue-500/30 rounded-2xl p-5 shadow-[0_20px_50px_rgba(0,0,0,0.5)] animate-in slide-in-from-right-4 duration-200">
+                        <div className="text-[10px] font-black text-blue-400 uppercase mb-3 tracking-widest">New Annotation</div>
+                        <textarea value={replyValue} onChange={e => setReplyValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }} placeholder="Record side note (#tag, SiO_2)..." autoFocus className="w-full bg-transparent border-none outline-none resize-none text-[15px] text-white placeholder-white/10 leading-relaxed" rows={3} />
+                        <div className="flex justify-end pt-3"><button onClick={handleSendReply} className="px-4 py-1.5 bg-blue-600 rounded-xl text-white text-[11px] font-black uppercase shadow-lg shadow-blue-500/20 hover:bg-blue-500 transition-all">Save Note</button></div>
+                    </div>
+                )}
             </div>
         </div>
     );
 }
 
-// ─── Main View ────────────────────────────────────────────────────────────────
-export function LogbookView({ groupId, userId, isPrivate, isOwner }: LogbookViewProps) {
-    const [entries, setEntries] = useState<LogbookEntry[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [syncing, setSyncing] = useState(false);
-    const [googleReady, setGoogleReady] = useState(false);
-    const [driveSettings, setDriveSettings] = useState<any>(null);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [filterTag, setFilterTag] = useState('');
-    const [filterType, setFilterType] = useState<'' | 'text' | 'image' | 'mixed'>('');
-    const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-    const [showFilters, setShowFilters] = useState(false);
-    const [allTags, setAllTags] = useState<string[]>([]);
-    
-    // Editing state
-    const [editingEntry, setEditingEntry] = useState<LogbookEntry | null>(null);
-    const [editValue, setEditValue] = useState('');
-
+export default function LogbookView({ groupId }: { groupId: string }) {
+    const [entries, setEntries] = useState<any[]>([]);
+    const [tasks, setTasks] = useState<any[]>([]);
+    const [allActiveDates, setAllActiveDates] = useState<string[]>([]);
+    const [activeTag, setActiveTag] = useState<string | null>(null);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+    const [hasMoreDown, setHasMoreDown] = useState(false);
+    const [isReady, setIsReady] = useState(false);
+    const [showHelp, setShowHelp] = useState(false);
+    const [lightbox, setLightbox] = useState<{ url: string, type: string } | null>(null);
+    const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
+    const ITEMS_PER_PAGE = 50;
     const bottomRef = useRef<HTMLDivElement>(null);
-    const supabase = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-
-    // Initialize Google Client on mount
-    useEffect(() => {
-        let mounted = true;
-        supabase.from('groups').select('drive_settings').eq('id', groupId).single().then(async ({ data }) => {
-            if (data?.drive_settings?.apiKey && data?.drive_settings?.clientId && mounted) {
-                setDriveSettings(data.drive_settings);
-                try {
-                    await initGoogleClient(data.drive_settings.apiKey, data.drive_settings.clientId);
-                    if (mounted) setGoogleReady(true);
-                } catch (e) {
-                    console.error("Google Auth init failed:", e);
-                }
-            }
-        });
-        return () => { mounted = false; };
-    }, [groupId, supabase]);
-
-    const handleSyncToDrive = async () => {
-        if (!googleReady) {
-            toast.error('Cargando servicios de Google...');
-            return;
-        }
-        try {
-            const token = await ensureAuth();
-            const pendingEntries = entries.filter(e => e.media_files?.some(m => !m.drive_file_id && m.telegram_file_id));
-            if (pendingEntries.length === 0) {
-                toast.info('No hay imágenes pendientes');
-                return;
-            }
-            if (!driveSettings?.apiKey || !driveSettings?.clientId) {
-                toast.error('Google Drive no configurado para este grupo.');
-                return;
-            }
-
-            setSyncing(true);
-            const folderId = driveSettings.logbookFolderId || driveSettings.folderId; 
-            let totalSynced = 0;
-
-            for (const entry of pendingEntries) {
-                const updatedMedia = [...entry.media_files];
-                let changed = false;
-
-                for (let i = 0; i < updatedMedia.length; i++) {
-                    const m = updatedMedia[i];
-                    if (!m.drive_file_id && m.telegram_file_id) {
-                        toast.loading(`Sincronizando imagen...`, { id: 'sync' });
-                        const proxyUrl = `/api/logbook/image?file_id=${m.telegram_file_id}`;
-                        const res = await fetch(proxyUrl);
-                        if (!res.ok) continue;
-                        const blob = await res.blob();
-
-                        const boundary = "bitacora_boundary";
-                        const meta = JSON.stringify({ name: m.name, parents: folderId ? [folderId] : undefined, mimeType: m.mime_type });
-                        const metaBytes = new TextEncoder().encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n`);
-                        const fileHeader = new TextEncoder().encode(`--${boundary}\r\nContent-Type: ${m.mime_type}\r\n\r\n`);
-                        const closing = new TextEncoder().encode(`\r\n--${boundary}--`);
-                        const fileBytes = new Uint8Array(await blob.arrayBuffer());
-
-                        const body = new Uint8Array(metaBytes.length + fileHeader.length + fileBytes.length + closing.length);
-                        body.set(metaBytes, 0);
-                        body.set(fileHeader, metaBytes.length);
-                        body.set(fileBytes, metaBytes.length + fileHeader.length);
-                        body.set(closing, metaBytes.length + fileHeader.length + fileBytes.length);
-
-                        const uploadRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,thumbnailLink', {
-                            method: 'POST',
-                            headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
-                            body,
-                        });
-
-                        const data = await uploadRes.json();
-                        if (data.id) {
-                            updatedMedia[i] = { ...m, drive_file_id: data.id, thumbnail_url: data.thumbnailLink || null, view_url: data.webViewLink || null };
-                            changed = true;
-                            totalSynced++;
-                        }
-                    }
-                }
-
-                if (changed) {
-                    await supabase.from('logbook_entries' as any).update({ media_files: updatedMedia }).eq('id', entry.id);
-                }
-            }
-            toast.success(`Sincronización completa (${totalSynced} imágenes)`, { id: 'sync' });
-        } catch (e) {
-            console.error("Sync error:", e);
-            toast.error('Error al sincronizar con Drive', { id: 'sync' });
-        } finally {
-            setSyncing(false);
-        }
-    };
-
-    const fetchEntries = useCallback(async () => {
-        setLoading(true);
-        let query = supabase
-            .from('logbook_entries' as any)
-            .select('*')
-            .eq('group_id', groupId)
-            .order('created_at', { ascending: true });
-
-        if (filterType) query = query.eq('entry_type', filterType);
-        if (filterTag) query = query.contains('tags', [filterTag]);
-        if (searchQuery.trim()) query = query.ilike('content', `%${searchQuery.trim()}%`);
-
-        const { data } = await query;
-        if (data) {
-            setEntries(data as LogbookEntry[]);
-            const tags = new Set<string>();
-            data.forEach((e: LogbookEntry) => e.tags?.forEach(t => tags.add(t)));
-            setAllTags([...tags].sort());
-        }
-        setLoading(false);
-    }, [groupId, filterType, filterTag, searchQuery]);
-
-    useEffect(() => { fetchEntries(); }, [fetchEntries]);
+    const supabase = createClient();
 
     useEffect(() => {
-        if (!loading) {
-            setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-        }
-    }, [loading]);
+        fetchEntries(true);
+        fetchTasks();
+        fetchAllActiveDates();
+        
+        const logbookChannel = supabase.channel('logbook_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'logbook_entries', filter: `group_id=eq.${groupId}` }, (payload) => {
+            if (payload.eventType === 'INSERT') {
+                setEntries(prev => {
+                    if (prev.some(e => e.id === payload.new.id)) return prev;
+                    return [...prev, payload.new];
+                });
+                fetchAllActiveDates(); // Update sidebar on new entry
+            } else {
+                fetchEntries(true);
+            }
+        }).subscribe();
 
-    useEffect(() => {
-        const channel = supabase.channel('logbook-realtime')
-            .on('postgres_changes', {
-                event: 'INSERT',
-                schema: 'public',
-                table: 'logbook_entries',
-                filter: `group_id=eq.${groupId}`,
-            }, (payload) => {
-                const newEntry = payload.new as LogbookEntry;
-                setEntries(prev => [...prev, newEntry]);
-                newEntry.tags?.forEach(t => setAllTags(prev => prev.includes(t) ? prev : [...prev, t].sort()));
-                setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-            })
-            .on('postgres_changes', {
-                event: 'UPDATE',
-                schema: 'public',
-                table: 'logbook_entries',
-                filter: `group_id=eq.${groupId}`,
-            }, (payload) => {
-                setEntries(prev => prev.map(e => e.id === payload.new.id ? payload.new as LogbookEntry : e));
-            })
-            .subscribe();
-
-        return () => { supabase.removeChannel(channel); };
+        const taskChannel = supabase.channel('task_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `group_id=eq.${groupId}` }, () => fetchTasks()).subscribe();
+        
+        return () => { 
+            supabase.removeChannel(logbookChannel); 
+            supabase.removeChannel(taskChannel);
+        };
     }, [groupId]);
 
-    const handleUpdateEntry = async () => {
-        if (!editingEntry || !editValue.trim()) return;
+    const fetchAllActiveDates = async () => {
+        const { data } = await supabase
+            .from('logbook_entries')
+            .select('created_at')
+            .eq('group_id', groupId)
+            .is('parent_id', null)
+            .order('created_at', { ascending: false });
         
-        const res = await fetch('/api/logbook/update', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: editingEntry.id, text: editValue.trim(), groupId }),
-        });
-
-        if (res.ok) {
-            toast.success('Entrada actualizada');
-            setEditingEntry(null);
-            fetchEntries();
-        } else {
-            toast.error('Error al actualizar');
+        if (data) {
+            const dates = Array.from(new Set(data.map(e => format(parseISO(e.created_at), 'yyyy-MM-dd'))));
+            setAllActiveDates(dates);
         }
     };
 
-    // Grouping Logic: Day -> Session (Consecutive from same user within 30 min)
-    const groupedByDay = entries.reduce((acc, entry) => {
-        const day = getDateKey(entry.created_at);
-        if (!acc[day]) acc[day] = [];
-        acc[day].push(entry);
-        return acc;
-    }, {} as Record<string, LogbookEntry[]>);
+    const fetchEntries = async (isInitial = true, jumpDate?: string, direction: 'up' | 'down' = 'up') => {
+        if (!isInitial) setIsLoadingMore(true);
+        if (jumpDate) setIsReady(false); // Hide during jump
+        
+        let query = supabase
+            .from('logbook_entries')
+            .select('*')
+            .eq('group_id', groupId)
+            .limit(ITEMS_PER_PAGE);
 
-    const days = Object.keys(groupedByDay).sort();
+        if (jumpDate) {
+            // Fetch entries before the selected jump date
+            query = query.lte('created_at', `${jumpDate}T23:59:59`).order('created_at', { ascending: false });
+        } else if (direction === 'up' && entries.length > 0) {
+            const oldestDate = entries[0].created_at;
+            query = query.lt('created_at', oldestDate).order('created_at', { ascending: false });
+        } else if (direction === 'down' && entries.length > 0) {
+            const newestDate = entries[entries.length - 1].created_at;
+            query = query.gt('created_at', newestDate).order('created_at', { ascending: true });
+        } else {
+            // Default latest entries
+            query = query.order('created_at', { ascending: false });
+        }
 
-    const hasActiveFilters = !!(searchQuery || filterTag || filterType);
-    const pendingCount = entries.filter(e => e.media_files?.some(m => !m.drive_file_id && m.telegram_file_id)).length;
+        const { data } = await query;
+        
+        if (data) {
+            const sortedData = [...data].sort((a, b) => a.created_at.localeCompare(b.created_at));
+            
+            if (isInitial || jumpDate) {
+                setEntries(sortedData);
+                setHasMore(data.length === ITEMS_PER_PAGE);
+                // Check if we need a 'Load Newer' button
+                if (jumpDate) {
+                    const { count } = await supabase.from('logbook_entries').select('*', { count: 'exact', head: true }).eq('group_id', groupId).gt('created_at', data[0]?.created_at || '');
+                    setHasMoreDown(!!count && count > data.length);
+                } else {
+                    setHasMoreDown(false);
+                }
+            } else if (direction === 'up') {
+                setEntries(prev => {
+                    const existingIds = new Set(prev.map(e => e.id));
+                    const uniqueNew = sortedData.filter(e => !existingIds.has(e.id));
+                    return [...uniqueNew, ...prev];
+                });
+                setHasMore(data.length === ITEMS_PER_PAGE);
+            } else if (direction === 'down') {
+                setEntries(prev => {
+                    const existingIds = new Set(prev.map(e => e.id));
+                    const uniqueNew = sortedData.filter(e => !existingIds.has(e.id));
+                    const newList = [...prev, ...uniqueNew];
+                    return newList;
+                });
+                setHasMoreDown(data.length === ITEMS_PER_PAGE);
+            }
+        }
+        
+        setIsLoadingMore(false);
+    };
+
+    const fetchTasks = async () => {
+        const { data } = await supabase.from('tasks').select('id, status').eq('group_id', groupId);
+        setTasks(data || []);
+    };
+
+    // --- AUTO SCROLL TO BOTTOM ---
+    useEffect(() => {
+        const lastEntryId = entries[entries.length - 1]?.id;
+        if (lastEntryId) {
+            bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+            if (!isReady) setIsReady(true);
+        }
+    }, [entries[entries.length - 1]?.id]);
+
+    // --- EXTRACT TAGS FROM ALL ENTRIES ---
+    const allTags = useMemo(() => {
+        const tagsSet = new Set<string>();
+        entries.forEach(e => {
+            if (e.content) {
+                const found = e.content.match(/#[a-zA-Z0-9_áéíóúÁÉÍÓÚ]+/g);
+                if (found) found.forEach((t: string) => tagsSet.add(t));
+            }
+        });
+        return Array.from(tagsSet).sort();
+    }, [entries]);
+
+    const visualGroups = useMemo(() => {
+        const filtered = entries.filter(e => !e.parent_id)
+            .filter(e => !activeTag || e.content?.includes(activeTag));
+            
+        const groups: any[] = [];
+        filtered.forEach((entry) => {
+            const lastGroup = groups[groups.length - 1];
+            const entryMedia = (entry.media_files || []).map((f: any) => ({ ...f, parent_entry_id: entry.id }));
+            const isMediaOnly = !entry.content || entry.content.trim() === '';
+            const shouldGroup = lastGroup && isMediaOnly && differenceInMinutes(parseISO(entry.created_at), parseISO(lastGroup.created_at)) === 0;
+            const date = format(parseISO(entry.created_at), 'yyyy-MM-dd');
+            if (shouldGroup) { 
+                lastGroup.media_files = [...(lastGroup.media_files || []), ...entryMedia]; 
+                lastGroup.entries.push(entry);
+            } else { 
+                groups.push({ date, created_at: entry.created_at, entries: [entry], media_files: entryMedia, isMediaOnly }); 
+            }
+        });
+        return groups;
+    }, [entries, activeTag]);
+
+
+    const comments = entries.filter(e => e.parent_id);
+
+    const timelineHierarchy = useMemo(() => {
+        const hierarchy: any = {};
+        allActiveDates.forEach(dayKey => {
+            const date = parseISO(dayKey);
+            const year = getYear(date);
+            const month = format(date, 'MMMM');
+            const weekNumber = format(date, 'w');
+            if (!hierarchy[year]) hierarchy[year] = { months: {} };
+            if (!hierarchy[year].months[month]) hierarchy[year].months[month] = { weeks: {} };
+            if (!hierarchy[year].months[month].weeks[weekNumber]) hierarchy[year].months[month].weeks[weekNumber] = { days: [] };
+            if (!hierarchy[year].months[month].weeks[weekNumber].days.includes(dayKey)) hierarchy[year].months[month].weeks[weekNumber].days.push(dayKey);
+        });
+        return hierarchy;
+    }, [allActiveDates]);
+
+    const handleTimelineJump = async (day: string) => {
+        const element = document.getElementById(`day-${day}`);
+        if (element) {
+            element.scrollIntoView({ behavior: 'auto' });
+        } else {
+            await fetchEntries(true, day);
+        }
+    };
 
     useEffect(() => {
-        const btn = document.getElementById('sync-drive-btn');
-        if (btn) {
-            btn.onclick = (e) => { e.preventDefault(); handleSyncToDrive(); };
+        if (Object.keys(timelineHierarchy).length > 0 && Object.keys(expandedNodes).length === 0) {
+            const now = new Date();
+            const year = getYear(now);
+            const month = format(now, 'MMMM');
+            const week = format(now, 'w');
+            setExpandedNodes({ [`year-${year}`]: true, [`month-${year}-${month}`]: true, [`week-${year}-${month}-${week}`]: true });
         }
-    }, [googleReady, entries, driveSettings, syncing]);
+    }, [timelineHierarchy]);
 
-    if (isPrivate && !isOwner) {
-        return (
-            <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 p-8 text-center">
-                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4"><Lock size={32} className="text-slate-400" /></div>
-                <h2 className="text-xl font-bold text-slate-900 mb-2">Bitácora Privada</h2>
-                <p className="text-slate-500 max-w-md">Solo el administrador del grupo puede ver las entradas.</p>
-            </div>
-        );
-    }
+    const toggleNode = (id: string) => { setExpandedNodes(prev => ({ ...prev, [id]: !prev[id] })); };
+    const handleUpdate = async (id: string, text: string) => { await fetch('/api/logbook/update', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, text, groupId }) }); };
+    const handleDelete = async (id: string) => { if (!window.confirm("Delete?")) return; setEntries(prev => prev.filter(e => e.id !== id)); await fetch('/api/logbook/delete', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, groupId }) }); };
+    const handleSend = async (text: string, parentId?: string) => { 
+        if (!text.trim()) return; 
+        await fetch('/api/logbook/send', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ text, groupId, parentId }) 
+        });
+        fetchEntries();
+    };
+
+    const handleToggleTask = async (taskId: string, currentStatus: string) => {
+        if (!taskId) return;
+        const newStatus = currentStatus === 'done' ? 'todo' : 'done';
+        const { error } = await supabase.from('tasks').update({ status: newStatus }).eq('id', taskId);
+        if (error) return;
+        fetchTasks();
+    };
+
+    const formatDateHeader = (dateStr: string) => {
+        const d = parseISO(dateStr);
+        return isToday(d) ? 'Today' : format(d, 'MMMM dd, yyyy');
+    };
 
     return (
-        <div className="flex-1 flex flex-col min-h-0 bg-white">
-            {/* Header */}
-            <div className="bg-white border-b border-slate-100 px-8 py-6 flex items-center gap-6 flex-shrink-0 z-10">
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center shadow-lg shadow-slate-200">
-                        <NotebookPen size={20} className="text-white" />
-                    </div>
-                    <div>
-                        <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-none">Lab Notebook</h1>
-                        <p className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-widest">{entries.length} RECORDS</p>
-                    </div>
+        <div className="flex h-full bg-[#0d0d0e] text-[#e3e3e3] overflow-hidden font-sans selection:bg-blue-500/30">
+            <style>{scrollbarStyles}</style>
+
+            <div className="w-[180px] border-r border-white/[0.06] bg-black/40 flex flex-col overflow-hidden">
+                <div className="p-6 border-b border-white/[0.05] flex items-center gap-2">
+                    <Layers size={14} className="text-blue-500" />
+                    <span className="text-[9px] font-black tracking-[0.1em] text-white/30 uppercase">Explorer</span>
                 </div>
-
-                <div className="flex-1" />
-
-                {pendingCount > 0 && (
-                    <button 
-                        id="sync-drive-btn"
-                        disabled={syncing || !googleReady}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-xl text-xs font-bold transition-all border border-indigo-100 disabled:opacity-50">
-                        {syncing ? <Loader2 size={14} className="animate-spin" /> : <CloudUpload size={16} />}
-                        Sync ({pendingCount})
-                    </button>
-                )}
-
-                <div className="flex-1 max-w-sm relative group">
-                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-                    <input
-                        value={searchQuery}
-                        onChange={e => setSearchQuery(e.target.value)}
-                        placeholder="Search logs..."
-                        className="w-full pl-10 pr-4 py-2.5 text-sm bg-slate-50 border border-slate-100 rounded-xl outline-none focus:bg-white focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-400 transition-all font-medium"
-                    />
-                </div>
-
-                <button
-                    onClick={() => setShowFilters(!showFilters)}
-                    className={cn(
-                        "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all border shadow-sm",
-                        hasActiveFilters
-                            ? "bg-slate-900 text-white border-slate-900"
-                            : "text-slate-600 border-slate-200 bg-white hover:bg-slate-50"
-                    )}
-                >
-                    <SlidersHorizontal size={15} />
-                    Filters
-                </button>
-            </div>
-
-            {/* Filter bar */}
-            {showFilters && (
-                <div className="bg-slate-50/50 border-b border-slate-100 px-8 py-4 flex items-center gap-6 flex-wrap animate-in slide-in-from-top-4 duration-300">
-                    <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Type</span>
-                        {(['', 'text', 'image', 'mixed'] as const).map(t => (
-                            <button key={t}
-                                onClick={() => setFilterType(t)}
-                                className={cn(
-                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border uppercase tracking-wide",
-                                    filterType === t
-                                        ? "bg-white text-indigo-600 border-indigo-200 shadow-sm"
-                                        : "text-slate-500 border-transparent hover:bg-slate-100"
-                                )}>
-                                {t === '' ? 'All' : t}
-                            </button>
-                        ))}
-                    </div>
-
-                    <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tags</span>
-                        {filterTag && (
-                            <button onClick={() => setFilterTag('')}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white shadow-md shadow-indigo-100 transition-all">
-                                #{filterTag}
-                                <X size={12} />
-                            </button>
-                        )}
-                        {allTags.filter(t => t !== filterTag).slice(0, 10).map(tag => (
-                            <button key={tag}
-                                onClick={() => setFilterTag(tag)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-all">
-                                #{tag}
-                            </button>
-                        ))}
-                    </div>
-
-                    {hasActiveFilters && (
-                        <button onClick={() => { setFilterTag(''); setFilterType(''); setSearchQuery(''); }}
-                            className="ml-auto text-xs font-bold text-red-500 hover:text-red-600 flex items-center gap-1.5 px-3 py-2 rounded-lg hover:bg-red-50 transition-all">
-                            <X size={14} /> Clear
-                        </button>
-                    )}
-                </div>
-            )}
-
-            {/* Notebook Content area */}
-            <div className="flex-1 overflow-y-auto px-12 py-8 bg-[#fcfcfc] relative">
-                {/* Rule lines pattern */}
-                <div className="absolute inset-0 pointer-events-none opacity-[0.03]" 
-                    style={{ backgroundImage: 'linear-gradient(to bottom, transparent 31px, #000 32px)', backgroundSize: '100% 32px' }} />
                 
-                {loading ? (
-                    <div className="flex flex-col items-center justify-center h-full gap-4">
-                        <Loader2 size={32} className="animate-spin text-indigo-600" />
-                        <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Loading Records...</span>
-                    </div>
-                ) : entries.length === 0 ? (
-                    <div className="flex items-center justify-center h-full">
-                        <div className="text-center max-w-sm">
-                            <div className="w-20 h-20 rounded-3xl bg-slate-50 flex items-center justify-center mx-auto mb-6">
-                                <NotebookPen size={32} className="text-slate-200" />
-                            </div>
-                            <h3 className="text-lg font-bold text-slate-900 mb-2">Notebook Empty</h3>
-                            <p className="text-sm font-medium text-slate-400 leading-relaxed">
-                                No entries match your filters. Start a new record or adjust your search.
-                            </p>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="max-w-6xl mx-auto space-y-16 pb-24 relative">
-                        {days.map(day => (
-                            <section key={day} className="relative">
-                                {/* Day Header (Journal style) */}
-                                <div className="sticky top-0 pb-12 pt-4 bg-transparent z-10">
-                                    <div className="flex items-end gap-4 border-b-2 border-slate-900 pb-2">
-                                        <h2 className="text-4xl font-black text-slate-900 tracking-tight capitalize">
-                                            {formatDayHeader(groupedByDay[day][0].created_at)}
-                                        </h2>
-                                        <div className="flex-1" />
-                                        <div className="text-right">
-                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{day.replace(/-/g, '.')}</span>
-                                        </div>
-                                    </div>
-                                </div>
+                <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-6">
 
-                                {/* Sessions within the day */}
-                                <div className="space-y-12">
-                                    {/* 
-                                        Logic: Iterate entries and group into "sessions"
-                                        For this simplified version, we just render entries directly 
-                                        but styled as a contiguous list.
-                                    */}
-                                    <div className="divide-y divide-slate-100">
-                                        {groupedByDay[day].map(entry => (
-                                            <LogEntry
-                                                key={entry.id}
-                                                entry={entry}
-                                                groupId={groupId}
-                                                onImageClick={setLightboxUrl}
-                                                onEdit={(e) => {
-                                                    setEditingEntry(e);
-                                                    setEditValue(e.content);
-                                                }}
-                                            />
+                    <div className="space-y-1">
+                        <div className="px-2 mb-2 flex items-center gap-2 text-white/20">
+                            <Clock size={12} />
+                            <span className="text-[9px] font-black uppercase tracking-widest">History</span>
+                        </div>
+                        {Object.keys(timelineHierarchy).sort().reverse().map(year => (
+                            <div key={year} className="space-y-0.5">
+                                <button onClick={() => toggleNode(`year-${year}`)} className="w-full flex items-center justify-between p-1.5 hover:bg-white/[0.03] rounded-lg transition-all group">
+                                    <span className="text-[12px] font-black text-white/50 group-hover:text-white uppercase tracking-wider">{year}</span>
+                                    <ChevronRight size={12} className={cn("text-white/10 transition-transform", expandedNodes[`year-${year}`] && "rotate-90")} />
+                                </button>
+                                {expandedNodes[`year-${year}`] && (
+                                    <div className="ml-2 border-l border-white/[0.05] pl-1.5 space-y-0.5">
+                                        {Object.keys(timelineHierarchy[year].months).map(month => (
+                                            <div key={month} className="space-y-0.5">
+                                                <button onClick={() => toggleNode(`month-${year}-${month}`)} className="w-full flex items-center justify-between p-1.5 hover:bg-white/[0.03] rounded-lg transition-all group">
+                                                    <span className="text-[11px] font-bold text-white/30 group-hover:text-white/70">{month}</span>
+                                                    <ChevronRight size={10} className={cn("text-white/5 transition-transform", expandedNodes[`month-${year}-${month}`] && "rotate-90")} />
+                                                </button>
+                                                {expandedNodes[`month-${year}-${month}`] && (
+                                                    <div className="ml-2 border-l border-white/[0.05] pl-1.5 space-y-0.5">
+                                                        {Object.keys(timelineHierarchy[year].months[month].weeks).map(week => (
+                                                            <div key={week} className="space-y-0.5">
+                                                                <button onClick={() => toggleNode(`week-${year}-${month}-${week}`)} className="w-full flex items-center justify-between p-1.5 hover:bg-white/[0.03] rounded-lg transition-all group">
+                                                                    <span className="text-[10px] font-medium text-white/10 group-hover:text-white/40 uppercase">W{week}</span>
+                                                                    <ChevronRight size={8} className={cn("text-white/5 transition-transform", expandedNodes[`week-${year}-${month}-${week}`] && "rotate-90")} />
+                                                                </button>
+                                                                {expandedNodes[`week-${year}-${month}-${week}`] && (
+                                                                    <div className="ml-2 space-y-0.5">
+                                                                        {timelineHierarchy[year].months[month].weeks[week].days.sort().map((day: string) => (
+                                                                            <button key={day} onClick={() => handleTimelineJump(day)} className="w-full flex items-center gap-2 p-1.5 hover:bg-blue-500/10 rounded-lg transition-all group text-left">
+                                                                                <div className={cn("w-1 h-1 rounded-full", isToday(parseISO(day)) ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : "bg-white/10")} />
+                                                                                <span className="text-[10px] font-bold text-white/20 group-hover:text-white transition-colors uppercase tracking-tight">{format(parseISO(day), 'EEE dd')}</span>
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
                                         ))}
                                     </div>
-                                </div>
-                            </section>
+                                )}
+                            </div>
                         ))}
-                        <div ref={bottomRef} className="h-4" />
                     </div>
-                )}
+
+                    <div className="space-y-3">
+                        <div className="px-2 flex items-center gap-2 text-white/20">
+                            <Tag size={12} />
+                            <span className="text-[9px] font-black uppercase tracking-widest">Library Tags</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 px-1">
+                            {allTags.map(tag => (
+                                <button 
+                                    key={tag} 
+                                    onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                                    className={cn(
+                                        "px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-tighter transition-all border",
+                                        activeTag === tag 
+                                            ? "bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.3)]" 
+                                            : "bg-white/[0.03] border-white/5 text-white/30 hover:text-white/60 hover:bg-white/[0.05]"
+                                    )}
+                                >
+                                    {tag}
+                                </button>
+                            ))}
+                            {allTags.length === 0 && <span className="text-[9px] text-white/10 italic px-2">No tags found...</span>}
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            {/* Edit Modal (Simple) */}
-            {editingEntry && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                            <h3 className="font-bold text-slate-900">Edit Record</h3>
-                            <button onClick={() => setEditingEntry(null)}><X size={18} className="text-slate-400" /></button>
-                        </div>
-                        <div className="p-6">
-                            <textarea
-                                value={editValue}
-                                onChange={e => setEditValue(e.target.value)}
-                                className="w-full h-40 p-4 border border-slate-200 rounded-xl outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/5 transition-all text-sm font-medium"
-                            />
-                            <div className="mt-4 flex justify-end gap-3">
-                                <button 
-                                    onClick={() => setEditingEntry(null)}
-                                    className="px-4 py-2 text-sm font-bold text-slate-500 hover:text-slate-700"
-                                >
-                                    Cancel
-                                </button>
-                                <button 
-                                    onClick={handleUpdateEntry}
-                                    className="px-6 py-2 bg-slate-900 text-white rounded-xl text-sm font-bold hover:bg-slate-800 transition-all"
-                                >
-                                    Save Changes
-                                </button>
-                            </div>
+            <div className="flex-1 flex flex-col min-w-0 relative">
+                <div className="px-16 py-8 flex items-center justify-between bg-[#0d0d0e]/95 backdrop-blur-2xl z-20 border-b border-white/[0.05]">
+                    <div className="flex items-center gap-4">
+                        <NotebookPen size={18} className="text-blue-500" />
+                        <div className="flex items-center gap-3">
+                            <h1 className="text-[12px] font-black tracking-[0.3em] text-white/40 uppercase">Project Notebook</h1>
+                            <button 
+                                onClick={() => setShowHelp(true)} 
+                                className="p-1 text-white hover:text-blue-500 transition-all hover:scale-110 active:scale-95"
+                                title="View Guide"
+                            >
+                                <HelpCircle size={14} />
+                            </button>
                         </div>
                     </div>
+                </div>
+
+                <div className={cn("flex-1 overflow-y-auto px-16 py-8 custom-scroll", !isReady && "invisible")}>
+                    <div className="max-w-6xl mx-auto space-y-12">
+                        {hasMoreDown && (
+                            <div className="flex justify-center py-4">
+                                <button onClick={() => fetchEntries(false, undefined, 'down')} disabled={isLoadingMore} className="px-6 py-2 bg-blue-600/10 border border-blue-500/20 text-blue-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600/20 transition-all disabled:opacity-50">
+                                    {isLoadingMore ? <Loader2 className="animate-spin" size={14} /> : "Load Newer Entries"}
+                                </button>
+                            </div>
+                        )}
+
+                        {visualGroups.map((group, idx) => (
+                            <div key={`${group.date}-${idx}`} className="space-y-6">
+                                <div className="sticky top-0 z-10 flex items-center gap-6 py-4 bg-transparent backdrop-blur-sm">
+                                    <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/[0.05]" />
+                                    <h2 className="text-[12px] font-black text-white tracking-[0.4em] uppercase opacity-90 drop-shadow-lg">{formatDateHeader(group.date)}</h2>
+                                    <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/[0.05]" />
+                                </div>
+                                <div className="space-y-2">
+                                    {group.entries.map((entry: any) => (
+                                        <LogEntry 
+                                            key={entry.id} 
+                                            entry={entry} 
+                                            groupId={groupId}
+                                            comments={entries.filter(e => e.parent_id === entry.id)}
+                                            tasks={tasks}
+                                            onImageClick={(url: string, type: string) => setLightbox({ url, type })}
+                                            onUpdate={handleUpdate}
+                                            onDelete={handleDelete}
+                                            onReply={handleSend}
+                                            onTagClick={(tag: string) => setActiveTag(tag)}
+                                            onToggleTask={handleToggleTask}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                        
+                        {hasMore && (
+                            <div className="flex justify-center py-12">
+                                <button onClick={() => fetchEntries(false, undefined, 'up')} disabled={isLoadingMore} className="px-8 py-3 bg-white/[0.03] border border-white/10 text-white/30 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-white/[0.05] hover:text-white transition-all disabled:opacity-50 flex items-center gap-3">
+                                    {isLoadingMore ? <Loader2 className="animate-spin" size={16} /> : "Load Previous Scientific Records"}
+                                </button>
+                            </div>
+                        )}
+                        <div ref={bottomRef} />
+                    </div>
+                </div>
+
+                <div className="absolute bottom-10 left-0 right-0 px-16 pointer-events-none">
+                    <div className="max-w-2xl mx-auto bg-[#1e1f20] border border-white/10 rounded-[40px] p-5 shadow-[0_30px_100px_-20px_rgba(0,0,0,0.8)] pointer-events-auto flex items-center gap-5 group focus-within:border-blue-500/30 transition-all">
+                        <Plus size={24} className="text-white/20 ml-2 hover:text-white transition-colors cursor-pointer" />
+                        <textarea 
+                            onKeyDown={(e) => { 
+                                if (e.key === 'Enter' && !e.shiftKey) { 
+                                    e.preventDefault(); 
+                                    const val = (e.target as any).value;
+                                    handleSend(val); 
+                                    (e.target as any).value = ''; 
+                                } 
+                            }} 
+                            placeholder="Start typing (#tag, SiO_2)..." 
+                            className="flex-1 bg-transparent border-none outline-none resize-none py-3.5 text-[18px] text-white font-medium" 
+                            rows={1} 
+                            id="logbook-main-input"
+                        />
+                        <button 
+                            onClick={() => {
+                                const el = document.getElementById('logbook-main-input') as HTMLTextAreaElement;
+                                if (el) {
+                                    handleSend(el.value);
+                                    el.value = '';
+                                }
+                            }}
+                            className="p-3.5 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-500/20 hover:bg-blue-500 transition-all"
+                        >
+                            <SendHorizontal size={22} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {lightbox && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/98 backdrop-blur-3xl animate-in fade-in" onClick={() => setLightbox(null)}>
+                    <button className="absolute top-10 right-10 text-white/40 hover:text-white"><X size={44} /></button>
+                    {lightbox.type === 'video' ? <video src={lightbox.url} controls autoPlay className="max-w-[95%] max-h-[90vh] rounded-3xl" onClick={e => e.stopPropagation()} /> : <img src={lightbox.url} className="max-w-[95%] max-h-[90vh] object-contain rounded-3xl" />}
                 </div>
             )}
 
-            {/* Composer */}
-            <div className="bg-white border-t border-slate-100 px-8 py-6 flex-shrink-0 shadow-[0_-10px_30px_-15px_rgba(0,0,0,0.05)]">
-                <div className="max-w-6xl mx-auto flex items-end gap-4">
-                    <div className="flex-1 flex flex-col gap-2">
-                        <div className="flex items-center gap-2 mb-1">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 py-0.5 bg-slate-50 rounded">formatting hint</span>
-                            <span className="text-[10px] text-slate-400">Use ==text== to highlight · **bold** · #tags</span>
+            {/* Help Modal */}
+            {showHelp && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/90 backdrop-blur-md" onClick={() => setShowHelp(false)}>
+                    <div className="bg-[#0d0d0e] border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="px-10 py-8 border-b border-white/10 flex items-center justify-between">
+                            <span className="text-[14px] font-black text-white uppercase tracking-[0.3em]">System Guide</span>
+                            <button onClick={() => setShowHelp(false)} className="text-white/40 hover:text-white transition-colors">
+                                <X size={20} />
+                            </button>
                         </div>
-                        <Composer groupId={groupId} userId={userId} onSent={fetchEntries} />
+                        
+                        <div className="p-12 grid grid-cols-3 gap-16">
+                            {/* Column: Input */}
+                            <div className="space-y-10">
+                                <div className="text-[11px] font-black uppercase tracking-widest text-blue-400">Notebook</div>
+                                <div className="space-y-6">
+                                    <div className="flex items-center gap-5">
+                                        <code className="text-blue-400 font-mono text-[13px] bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">..</code>
+                                        <span className="text-[13px] text-white font-medium">Kanban Task</span>
+                                    </div>
+                                    <div className="flex items-center gap-5">
+                                        <code className="text-blue-400 font-mono text-[13px] bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">#</code>
+                                        <span className="text-[13px] text-white font-medium">Library Tag</span>
+                                    </div>
+                                    <div className="flex items-center gap-5">
+                                        <code className="text-blue-400 font-mono text-[13px] bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">$ $</code>
+                                        <span className="text-[13px] text-white font-medium">LaTeX Math</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Column: Interface */}
+                            <div className="space-y-10 border-x border-white/10 px-12">
+                                <div className="text-[11px] font-black uppercase tracking-widest text-white/40">Interface</div>
+                                <div className="space-y-6">
+                                    <div className="flex items-center gap-4">
+                                        <Circle size={12} className="text-white" />
+                                        <span className="text-[13px] text-white font-medium">Check Task</span>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <Clock size={12} className="text-white" />
+                                        <span className="text-[13px] text-white font-medium">Time Jump</span>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <MessageSquare size={12} className="text-white" />
+                                        <span className="text-[13px] text-white font-medium">Thread</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Column: Keyboard */}
+                            <div className="space-y-10">
+                                <div className="text-[11px] font-black uppercase tracking-widest text-white/40">Keyboard</div>
+                                <div className="space-y-6">
+                                    <div className="flex items-center justify-between">
+                                        <kbd className="text-[11px] font-mono text-white bg-white/10 px-3 py-1.5 rounded border border-white/20">ENTER</kbd>
+                                        <span className="text-[13px] text-white font-medium">Send</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex gap-2 items-center">
+                                            <kbd className="text-[11px] font-mono text-white bg-white/10 px-2 py-1.5 rounded border border-white/20">SHIFT</kbd>
+                                            <kbd className="text-[11px] font-mono text-white bg-white/10 px-2 py-1.5 rounded border border-white/20">ENT</kbd>
+                                        </div>
+                                        <span className="text-[13px] text-white font-medium">New Line</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="px-10 py-8 bg-white/[0.02] border-t border-white/10 flex justify-end">
+                            <button 
+                                onClick={() => setShowHelp(false)}
+                                className="px-8 py-3 bg-white/10 hover:bg-white/20 text-white text-[12px] font-black rounded-xl transition-all border border-white/20 uppercase tracking-widest"
+                            >
+                                Dismiss Guide
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
-
-            {/* Lightbox */}
-            {lightboxUrl && (
-                <Lightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
             )}
         </div>
     );
