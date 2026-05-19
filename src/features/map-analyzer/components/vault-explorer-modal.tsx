@@ -172,9 +172,16 @@ export function VaultExplorerModal({
 
     // Legacy Mode
     const [isLegacyMode, setIsLegacyMode] = useState<boolean>(false);
-    const [techniqueFilter, setTechniqueFilter] = useState<string>('all');
     const [openSampleOverview, setOpenSampleOverview] = useState<string | null>(null);
     const overviewRef = useRef<HTMLDivElement>(null);
+
+    // Filters
+    const [techniqueFilter, setTechniqueFilter] = useState<string>('all');
+    const [laserFilter, setLaserFilter] = useState<string>('all');
+    const [statusFilter, setStatusFilter] = useState<'all' | 'loaded' | 'not_loaded'>('all');
+    const [dateFrom, setDateFrom] = useState<string>('');
+    const [dateTo, setDateTo] = useState<string>('');
+    const [showFilters, setShowFilters] = useState(false);
 
     // Load initial data
     useEffect(() => {
@@ -389,21 +396,62 @@ export function VaultExplorerModal({
 
     const filteredFiles = useMemo(() => {
         let result = files;
+
+        // Full-text search: filename, sample name, metadata params, sample description & notes
         if (search) {
-            const lowSearch = search.toLowerCase();
-            result = result.filter(f => 
-                f.name.toLowerCase().includes(lowSearch) || 
-                f.sample_name.toLowerCase().includes(lowSearch)
-            );
+            const q = search.toLowerCase();
+            result = result.filter(f => {
+                const sample = dbSamples.find(s => (s.sample_code || s.name) === f.sample_name);
+                const descText = (sample?.description || '').toLowerCase();
+                const notesText = (sample?.characterizations || [])
+                    .flatMap((c: any) => [c.data?.notes || '', c.data?.equipment || ''])
+                    .join(' ').toLowerCase();
+                const metaText = Object.values(f.metadata || {}).join(' ').toLowerCase();
+                return (
+                    f.name.toLowerCase().includes(q) ||
+                    f.sample_name.toLowerCase().includes(q) ||
+                    metaText.includes(q) ||
+                    descText.includes(q) ||
+                    notesText.includes(q)
+                );
+            });
         }
+
+        // Technique filter
         if (techniqueFilter !== 'all') {
-            result = result.filter(f => f.technique === techniqueFilter);
+            result = result.filter(f => f.technique.toLowerCase() === techniqueFilter.toLowerCase());
         }
-        return [...result].sort((a, b) => 
-            new Date(b.measured_at || b.created_at || 0).getTime() - 
+
+        // Laser filter — matched against metadata.laser token
+        if (laserFilter !== 'all') {
+            result = result.filter(f => {
+                const laser = (f.metadata?.laser || '').toLowerCase();
+                return laser.includes(laserFilter.toLowerCase());
+            });
+        }
+
+        // Status filter
+        if (statusFilter === 'loaded') {
+            result = result.filter(f => currentSessionFiles.some(cf => cf.h5_relative_path === f.h5_relative_path));
+        } else if (statusFilter === 'not_loaded') {
+            result = result.filter(f => !currentSessionFiles.some(cf => cf.h5_relative_path === f.h5_relative_path));
+        }
+
+        // Date range filter
+        if (dateFrom) {
+            const from = new Date(dateFrom).getTime();
+            result = result.filter(f => new Date(f.measured_at || f.created_at || 0).getTime() >= from);
+        }
+        if (dateTo) {
+            const to = new Date(dateTo).getTime() + 86400000; // inclusive of end day
+            result = result.filter(f => new Date(f.measured_at || f.created_at || 0).getTime() <= to);
+        }
+
+        return [...result].sort((a, b) =>
+            new Date(b.measured_at || b.created_at || 0).getTime() -
             new Date(a.measured_at || a.created_at || 0).getTime()
         );
-    }, [files, search, techniqueFilter]);
+    }, [files, search, techniqueFilter, laserFilter, statusFilter, dateFrom, dateTo, currentSessionFiles, dbSamples]);
 
     const groupedFiles = useMemo(() => {
         const groups: Record<string, VaultFile[]> = {};
@@ -557,53 +605,228 @@ export function VaultExplorerModal({
 
                             {/* Main Discovery Panel: File Listing */}
                             <div className="flex-1 flex flex-col overflow-hidden">
-                                <div className="px-10 py-8 flex flex-col gap-6">
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <h3 className="text-2xl font-black text-slate-900 tracking-tight">
+                                {/* Title + Search + Filter Bar */}
+                                <div className="px-10 pt-6 pb-3 flex flex-col gap-3 border-b border-slate-100 shrink-0">
+                                    {/* Row 1: title + search + select all */}
+                                    <div className="flex items-center justify-between gap-4">
+                                        <div className="min-w-0">
+                                            <h3 className="text-xl font-black text-slate-900 tracking-tight leading-tight">
                                                 {selectedDbLogbook ? selectedDbLogbook.name : 'Available Measurements'}
                                             </h3>
-                                            <p className="text-sm font-bold text-slate-400">
-                                                {selectedDbLogbook ? `Scientific maps found for this logbook` : 'Select a project on the left to browse maps'}
+                                            <p className="text-xs font-bold text-slate-400">
+                                                {selectedDbLogbook
+                                                    ? `${filteredFiles.length} map${filteredFiles.length !== 1 ? 's' : ''} found`
+                                                    : 'Select a project on the left to browse maps'}
                                             </p>
                                         </div>
-                                        <div className="flex items-center gap-4">
-                                            <div className="relative group">
-                                                <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                                                <input 
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            {/* Search */}
+                                            <div className="relative">
+                                                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                <input
                                                     value={search}
                                                     onChange={(e) => setSearch(e.target.value)}
-                                                    placeholder="Search maps..."
-                                                    className="w-64 bg-white border border-slate-200 rounded-2xl py-3 pl-12 pr-4 text-xs font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all"
+                                                    placeholder="Search maps, notes..."
+                                                    className="w-56 bg-white border border-slate-200 rounded-xl py-2 pl-9 pr-3 text-xs font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-all placeholder:text-slate-300"
                                                 />
+                                                {search && (
+                                                    <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors">
+                                                        <X size={10} />
+                                                    </button>
+                                                )}
                                             </div>
-                                            <button 
+                                            {/* Filter toggle */}
+                                            <button
+                                                onClick={() => setShowFilters(v => !v)}
+                                                className={cn(
+                                                    "flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-black uppercase tracking-wider transition-all",
+                                                    showFilters || laserFilter !== 'all' || statusFilter !== 'all' || dateFrom || dateTo || techniqueFilter !== 'all'
+                                                        ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                                        : "bg-white border-slate-200 text-slate-500 hover:border-indigo-400 hover:text-indigo-600"
+                                                )}
+                                            >
+                                                <SlidersHorizontal size={12} />
+                                                Filters
+                                                {(laserFilter !== 'all' || statusFilter !== 'all' || dateFrom || dateTo || techniqueFilter !== 'all') && (
+                                                    <span className="ml-0.5 bg-white/30 text-white rounded-full w-3.5 h-3.5 flex items-center justify-center text-[8px] font-black">
+                                                        {[laserFilter !== 'all', statusFilter !== 'all', !!dateFrom, !!dateTo, techniqueFilter !== 'all'].filter(Boolean).length}
+                                                    </span>
+                                                )}
+                                            </button>
+                                            {/* Select All */}
+                                            <button
                                                 onClick={() => {
                                                     const all = new Set(filteredFiles.map(f => f.h5_relative_path));
                                                     setSelectedPaths(prev => prev.size === all.size ? new Set() : all);
                                                 }}
-                                                className="px-6 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-black uppercase tracking-widest hover:border-indigo-500 hover:text-indigo-600 transition-all shadow-sm"
+                                                className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase tracking-widest hover:border-indigo-500 hover:text-indigo-600 transition-all shadow-sm"
                                             >
                                                 Select All
                                             </button>
                                         </div>
                                     </div>
+
+                                    {/* Row 2: Filter chips — shown conditionally */}
+                                    {showFilters && (
+                                        <div className="flex flex-wrap items-center gap-2 py-2">
+                                            {/* Technique */}
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Tech</span>
+                                                {['all', 'Raman', 'SERS'].map(opt => (
+                                                    <button key={opt}
+                                                        onClick={() => setTechniqueFilter(opt)}
+                                                        className={cn(
+                                                            "text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border transition-all",
+                                                            techniqueFilter === opt
+                                                                ? opt === 'SERS' ? 'bg-violet-600 border-violet-600 text-white' : 'bg-indigo-600 border-indigo-600 text-white'
+                                                                : 'bg-white border-slate-200 text-slate-500 hover:border-indigo-300'
+                                                        )}
+                                                    >
+                                                        {opt === 'all' ? 'All' : opt}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            <div className="h-4 w-px bg-slate-200" />
+
+                                            {/* Laser */}
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Laser</span>
+                                                {['all', '532', '633', '638', '785', '1064'].map(nm => (
+                                                    <button key={nm}
+                                                        onClick={() => setLaserFilter(nm)}
+                                                        className={cn(
+                                                            "text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border transition-all",
+                                                            laserFilter === nm
+                                                                ? 'bg-amber-500 border-amber-500 text-white'
+                                                                : 'bg-white border-slate-200 text-slate-500 hover:border-amber-300'
+                                                        )}
+                                                    >
+                                                        {nm === 'all' ? 'All' : `${nm} nm`}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            <div className="h-4 w-px bg-slate-200" />
+
+                                            {/* Status */}
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Status</span>
+                                                {([['all', 'All'], ['loaded', 'Loaded'], ['not_loaded', 'Not Loaded']] as const).map(([val, label]) => (
+                                                    <button key={val}
+                                                        onClick={() => setStatusFilter(val)}
+                                                        className={cn(
+                                                            "text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border transition-all",
+                                                            statusFilter === val
+                                                                ? val === 'loaded' ? 'bg-green-600 border-green-600 text-white' : 'bg-slate-700 border-slate-700 text-white'
+                                                                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-400'
+                                                        )}
+                                                    >
+                                                        {label}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            <div className="h-4 w-px bg-slate-200" />
+
+                                            {/* Date range */}
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">From</span>
+                                                <input
+                                                    type="date"
+                                                    value={dateFrom}
+                                                    onChange={e => setDateFrom(e.target.value)}
+                                                    className="text-[10px] font-bold border border-slate-200 rounded-lg px-2 py-1 outline-none focus:border-indigo-400 bg-white text-slate-600 transition-all"
+                                                />
+                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">To</span>
+                                                <input
+                                                    type="date"
+                                                    value={dateTo}
+                                                    onChange={e => setDateTo(e.target.value)}
+                                                    className="text-[10px] font-bold border border-slate-200 rounded-lg px-2 py-1 outline-none focus:border-indigo-400 bg-white text-slate-600 transition-all"
+                                                />
+                                            </div>
+
+                                            {/* Clear all */}
+                                            {(techniqueFilter !== 'all' || laserFilter !== 'all' || statusFilter !== 'all' || dateFrom || dateTo) && (
+                                                <button
+                                                    onClick={() => { setTechniqueFilter('all'); setLaserFilter('all'); setStatusFilter('all'); setDateFrom(''); setDateTo(''); }}
+                                                    className="ml-auto text-[9px] font-black uppercase tracking-wider text-rose-400 hover:text-rose-600 px-2 py-1 rounded-lg border border-rose-200 hover:border-rose-400 bg-white transition-all flex items-center gap-1"
+                                                >
+                                                    <X size={9} /> Clear all
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto px-10 pb-10 custom-scrollbar">
                                     {selectedDbLogbook ? (
                                         <div className="flex flex-col gap-8">
-                                            {Object.entries(groupedFiles).map(([sampleName, sFiles]) => (
-                                                <div key={sampleName} className="space-y-3">
-                                                    <div className="flex items-center gap-2 mb-4 bg-slate-100 p-3 rounded-xl border border-slate-200">
-                                                        <FlaskConical size={16} className="text-slate-400" />
-                                                        <h4 className="text-sm font-black text-slate-800 tracking-widest">{sampleName}</h4>
-                                                        <span className="text-[10px] font-bold text-slate-400 ml-2">{sFiles.length} maps</span>
-                                                    </div>
-                                                    <div className="grid grid-cols-1 gap-3">
+                                            {Object.entries(groupedFiles).map(([sampleName, sFiles]) => {
+                                                const sample = dbSamples.find(s => (s.sample_code || s.name) === sampleName);
+                                                return (
+                                                    <div key={sampleName} className="space-y-3">
+                                                        <div className="flex items-center justify-between mb-4 bg-slate-100/80 p-3 rounded-2xl border border-slate-200/60 backdrop-blur-sm">
+                                                            <div className="flex items-center gap-4 flex-1 min-w-0">
+                                                                <div className="flex items-center gap-2 shrink-0">
+                                                                    <FlaskConical size={16} className="text-slate-500" />
+                                                                    <h4 className="text-sm font-black text-slate-800 tracking-widest">{sampleName}</h4>
+                                                                    <span className="text-[10px] font-bold text-slate-400 bg-slate-200/60 px-2 py-0.5 rounded-lg">{sFiles.length} {sFiles.length === 1 ? 'map' : 'maps'}</span>
+                                                                </div>
+
+                                                                {/* Composition List */}
+                                                                {sample?.composition && sample.composition.length > 0 && (
+                                                                    <div className="flex flex-wrap items-center gap-1.5 shrink-0 border-l border-slate-200 pl-4">
+                                                                        {sample.composition.map((layer: any, i: number) => (
+                                                                            <div key={i} className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-0.5 shadow-sm" title={layer.category}>
+                                                                                <span className="text-[9px] font-extrabold text-indigo-600 uppercase">{layer.code}</span>
+                                                                                <span className="text-[10px] text-slate-500 font-medium">{layer.value}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+
+                                                                {/* Comments / Description */}
+                                                                {sample?.description && (
+                                                                    <div className="flex-1 min-w-0 border-l border-slate-200 pl-4 flex items-center gap-1.5">
+                                                                        <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider shrink-0">Notes:</span>
+                                                                        <p className="text-[11px] text-slate-500 font-medium truncate" title={sample.description}>
+                                                                            {sample.description}
+                                                                        </p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        {/* Compact Table Header */}
+                                                        <div className="grid items-center gap-x-3 px-3 mb-1" style={{gridTemplateColumns: '20px 90px 60px 1fr 80px 80px 70px 80px 20px'}}>
+                                                            <div />
+                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">ID</span>
+                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Tech.</span>
+                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Parameters</span>
+                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Spot</span>
+                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Spectra</span>
+                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Status</span>
+                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 text-right">Date</span>
+                                                            <div />
+                                                        </div>
+                                                        <div className="flex flex-col gap-px">
                                                         {sFiles.map(file => {
                                                             const isSelected = selectedPaths.has(file.h5_relative_path);
                                                             const isInWorkspace = currentSessionFiles.some(f => f.h5_relative_path === file.h5_relative_path);
+                                                            
+                                                            // Parse filename tokens: SampleCode_TECHNIQUE_param1_param2..._SpotN.h5
+                                                            const stem = file.name.replace(/\.h5$/i, '');
+                                                            const parts = stem.split('_');
+                                                            const spotIdx = parts.findLastIndex((p: string) => /^spot\d+$/i.test(p));
+                                                            const spotToken = spotIdx >= 0 ? parts[spotIdx] : null;
+                                                            const techIdx = parts.findIndex((p: string) => /^(raman|sers|tem|xrd|afm|sem|xps|ftir)$/i.test(p));
+                                                            const techToken = techIdx >= 0 ? parts[techIdx] : file.technique;
+                                                            const idToken = parts[0] || file.sample_name;
+                                                            const paramTokens = parts.slice(
+                                                                Math.max(1, techIdx >= 0 ? techIdx + 1 : 1),
+                                                                spotIdx >= 0 ? spotIdx : undefined
+                                                            ).filter((p: string) => p.length > 0);
                                                             
                                                             return (
                                                                 <div 
@@ -614,52 +837,105 @@ export function VaultExplorerModal({
                                                                         else next.add(file.h5_relative_path);
                                                                         setSelectedPaths(next);
                                                                     }}
+                                                                    title={file.name}
                                                                     className={cn(
-                                                                        "group bg-white border rounded-3xl p-5 flex items-center gap-6 cursor-pointer transition-all",
-                                                                        isSelected ? "border-indigo-400 shadow-xl shadow-indigo-500/5 bg-indigo-50/20" : "border-slate-100 hover:border-indigo-300",
-                                                                        isInWorkspace && "opacity-70"
+                                                                        "group grid items-center gap-x-3 px-3 py-2 rounded-xl cursor-pointer transition-all duration-150",
+                                                                        isSelected
+                                                                            ? "bg-indigo-50 border border-indigo-200 shadow-sm"
+                                                                            : "border border-transparent hover:bg-slate-50 hover:border-slate-200",
+                                                                        isInWorkspace && "opacity-60"
                                                                     )}
+                                                                    style={{gridTemplateColumns: '20px 90px 60px 1fr 80px 80px 70px 80px 20px'}}
                                                                 >
+                                                                    {/* Checkbox col */}
                                                                     <div className={cn(
-                                                                        "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm",
-                                                                        isSelected ? "bg-indigo-600 text-white" : "bg-slate-50 text-slate-400 group-hover:bg-indigo-100 group-hover:text-indigo-600"
+                                                                        "w-4 h-4 rounded border-2 flex items-center justify-center transition-all shrink-0",
+                                                                        isSelected ? "bg-indigo-600 border-indigo-600" : "border-slate-300 group-hover:border-indigo-400"
                                                                     )}>
-                                                                        <Layers size={20} />
+                                                                        {isSelected && <CheckCircle2 size={9} className="text-white" />}
                                                                     </div>
-                                                                    <div className="flex-1 min-w-0">
-                                                                        <div className="flex items-center gap-3 mb-1">
-                                                                            <h4 className="font-black text-slate-900 tracking-tight truncate">{file.name}</h4>
-                                                                            {isInWorkspace && <span className="text-[9px] font-black uppercase tracking-widest bg-green-100 text-green-700 px-2 py-0.5 rounded-lg">Already Loaded</span>}
-                                                                        </div>
-                                                                        <div className="flex items-center gap-4">
-                                                                            <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
-                                                                                <Activity size={12} className="text-indigo-400" />
-                                                                                {file.metadata?.laser || 'Raman'}
-                                                                            </div>
-                                                                            <div className="w-1 h-1 rounded-full bg-slate-200" />
-                                                                            <div className="text-[10px] font-bold text-slate-400 uppercase">
-                                                                                {file.map_width}x{file.map_height} Resol.
-                                                                            </div>
+
+                                                                    {/* Sample ID col */}
+                                                                    <span className="text-[10px] font-black text-slate-800 truncate" title={idToken}>
+                                                                        {idToken}
+                                                                    </span>
+
+                                                                    {/* Technique col */}
+                                                                    <span className={cn(
+                                                                        "text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md w-fit",
+                                                                        /sers/i.test(techToken || '')
+                                                                            ? "bg-violet-100 text-violet-700"
+                                                                            : "bg-indigo-100 text-indigo-700"
+                                                                    )}>
+                                                                        {techToken}
+                                                                    </span>
+
+                                                                    {/* Parameters col */}
+                                                                    <div className="flex items-center gap-1 flex-wrap min-w-0">
+                                                                        {paramTokens.slice(0, 6).map((p: string, i: number) => (
+                                                                            <span
+                                                                                key={i}
+                                                                                className={cn(
+                                                                                    "text-[9px] font-semibold px-1.5 py-0.5 rounded-md whitespace-nowrap",
+                                                                                    // Color-code by token type
+                                                                                    /^\d+nm$/i.test(p) ? "bg-amber-50 text-amber-700 border border-amber-200" :      // laser wavelength
+                                                                                    /^\d+[uμm]W$/i.test(p) ? "bg-rose-50 text-rose-700 border border-rose-200" :      // power
+                                                                                    /^\d+[sx]$/i.test(p) || /^\d+s$/i.test(p) ? "bg-sky-50 text-sky-700 border border-sky-200" :  // time
+                                                                                    /^\d+ac$/i.test(p) ? "bg-sky-50 text-sky-700 border border-sky-200" :             // accumulations
+                                                                                    /^\d+x\d+[uμ]m$/i.test(p) ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : // area
+                                                                                    /^\d+x\d+[ij]$/i.test(p) ? "bg-teal-50 text-teal-700 border border-teal-200" :    // grid
+                                                                                    /^RG?\d+/i.test(p) ? "bg-orange-50 text-orange-700 border border-orange-200" :    // grating
+                                                                                    "bg-slate-100 text-slate-600 border border-slate-200"
+                                                                                )}
+                                                                            >
+                                                                                {p}
+                                                                            </span>
+                                                                        ))}
+                                                                        {paramTokens.length > 6 && (
+                                                                            <span className="text-[9px] text-slate-400 font-bold">+{paramTokens.length - 6}</span>
+                                                                        )}
+                                                                    </div>
+
+                                                                    {/* Spot col */}
+                                                                    <span className={cn(
+                                                                        "text-[10px] font-black truncate",
+                                                                        spotToken ? "text-slate-700" : "text-slate-300"
+                                                                    )}>
+                                                                        {spotToken || '—'}
+                                                                    </span>
+
+                                                                    {/* Spectra col */}
+                                                                    <span className="text-[10px] font-bold text-slate-500">
+                                                                        {file.n_spectra > 0 ? `${file.n_spectra} sp.` : `${file.map_width}×${file.map_height}`}
+                                                                    </span>
+
+                                                                    {/* Status col */}
+                                                                    {isInWorkspace ? (
+                                                                        <span className="text-[8px] font-black uppercase tracking-wider bg-green-100 text-green-700 px-1.5 py-0.5 rounded-md w-fit">
+                                                                            Loaded
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="text-[8px] font-black uppercase tracking-wider bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded-md w-fit">
+                                                                            .h5
+                                                                        </span>
+                                                                    )}
+
+                                                                    {/* Date col */}
+                                                                    <div className="text-right">
+                                                                        <div className="text-[9px] font-black text-slate-500">
+                                                                            {(() => { try { return format(new Date(file.measured_at), 'MMM d, yy'); } catch { return '—'; } })()}
                                                                         </div>
                                                                     </div>
-                                                                    <div className="flex items-center gap-4 shrink-0">
-                                                                        <div className="text-right">
-                                                                            <div className="text-[10px] font-black text-slate-900">{format(new Date(file.measured_at), 'MMM d, yyyy')}</div>
-                                                                            <div className="text-[10px] font-bold text-slate-400 uppercase">{file.metadata?.analyte || 'No Analyte'}</div>
-                                                                        </div>
-                                                                        <div className={cn(
-                                                                            "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
-                                                                            isSelected ? "bg-indigo-600 border-indigo-600 shadow-lg shadow-indigo-100" : "border-slate-200"
-                                                                        )}>
-                                                                            {isSelected && <CheckCircle2 size={12} className="text-white" />}
-                                                                        </div>
-                                                                    </div>
+
+                                                                    {/* End spacer */}
+                                                                    <div />
                                                                 </div>
                                                             );
                                                         })}
                                                     </div>
                                                 </div>
-                                            ))}
+                                            );
+                                            })}
                                             {filteredFiles.length === 0 && (
                                                 <div className="py-20 text-center bg-white border-2 border-dashed border-slate-100 rounded-[2.5rem]">
                                                     <Search size={40} className="text-slate-200 mx-auto mb-4" />

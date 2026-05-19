@@ -76,6 +76,20 @@ class RepresentativeSpectrumResponse(BaseModel):
     message: str
 
 
+class SaveImageRequest(BaseModel):
+    image_base64: str            # base64 data of the image
+    vault_root: str              # User-configured local vault root path
+    filename: Optional[str] = None
+    metadata: dict               # contains group_id, sample_id, sample_code, sample_name, logbook_name, technique
+
+class SaveImageResponse(BaseModel):
+    success: bool
+    relative_path: str
+    filename: str
+    message: str
+
+
+
 @app.get("/health")
 def health():
     """Check if the engine is running."""
@@ -268,6 +282,76 @@ def api_get_representative_spectrum(request: RepresentativeSpectrumRequest):
     
     out_data = [{"x": float(x_val), "y": float(y_val)} for x_val, y_val in zip(common_x, median_y)]
     return RepresentativeSpectrumResponse(success=True, message="Calculated median spectrum", data=out_data)
+
+
+@app.post("/api/save-image", response_model=SaveImageResponse)
+async def save_image(request: SaveImageRequest):
+    """
+    Saves a base64 image file into the vault folder structure.
+    """
+    import base64
+    import re
+    from processor import _build_vault_subpath
+
+    try:
+        # Clean base64 header if present
+        base64_data = request.image_base64
+        if "," in base64_data:
+            base64_data = base64_data.split(",")[1]
+
+        img_data = base64.b64decode(base64_data)
+
+        # Determine vault subpath
+        subpath = _build_vault_subpath(request.metadata)
+        abs_dir = Path(request.vault_root) / subpath
+        abs_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build filename
+        fn = request.filename or f"Pasted_Image_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+
+        # Safely clean out invalid characters
+        fn = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', fn)
+        if not fn.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+            fn += ".png"
+
+        target_path = abs_dir / fn
+
+        # Handle duplicates
+        if target_path.exists():
+            stem = Path(fn).stem
+            ext = Path(fn).suffix
+            counter = 1
+            while target_path.exists():
+                target_path = abs_dir / f"{stem}_{counter}{ext}"
+                counter += 1
+
+        with open(target_path, "wb") as f:
+            f.write(img_data)
+
+        relative_path = target_path.relative_to(Path(request.vault_root)).as_posix()
+
+        return SaveImageResponse(
+            success=True,
+            relative_path=relative_path,
+            filename=target_path.name,
+            message=f"Saved image to {relative_path}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save image: {str(e)}")
+
+
+@app.get("/api/vault-file")
+def get_vault_file(path: str, vault_root: str):
+    """
+    Serves any file from the vault folder.
+    Used to render images or read files in the frontend UI.
+    """
+    from fastapi.responses import FileResponse
+    abs_path = Path(vault_root) / path
+    if not abs_path.exists() or not abs_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found in vault")
+    return FileResponse(abs_path)
+
 
 
 @app.get("/api/vault-logbooks")
@@ -804,6 +888,200 @@ def delete_map_file(request: DeleteMapRequest):
         return {"success": True, "message": "File deleted successfully"}
     except Exception as e:
         return {"success": False, "message": f"Failed to delete file: {str(e)}"}
+
+
+class RenameRequest(BaseModel):
+    vault_root: str
+    h5_relative_paths: list[str]
+    metadata: dict
+
+class RenameResponse(BaseModel):
+    success: bool
+    renamed_paths: dict[str, str]
+    message: str
+
+@app.post("/api/map/rename", response_model=RenameResponse)
+def rename_map_files(request: RenameRequest):
+    """
+    Renames physical H5 files when parameters are updated,
+    strictly retaining the original spot counter.
+    """
+    import re
+    import shutil
+    from processor import _build_vault_subpath
+    
+    vault_root = Path(request.vault_root)
+    renamed_paths = {}
+    
+    try:
+        for rel_path in request.h5_relative_paths:
+            old_abs_path = vault_root / rel_path
+            if not old_abs_path.exists():
+                print(f"Rename warning: file not found at {old_abs_path}")
+                continue
+                
+            # 1. Read existing H5 attributes to preserve and merge
+            existing_attrs = {}
+            try:
+                with h5py.File(old_abs_path, "r") as f:
+                    for k in f.attrs.keys():
+                        existing_attrs[k] = f.attrs[k]
+            except Exception as e:
+                print(f"Error reading attributes from {rel_path}: {e}")
+                
+            # Decode existing attributes if they are bytes/strings
+            def decode_val(val):
+                if isinstance(val, bytes):
+                    return val.decode("utf-8", "ignore")
+                return val
+                
+            existing_attrs = {k: decode_val(v) for k, v in existing_attrs.items()}
+            
+            # Merge existing attributes with new metadata
+            merged_metadata = {**existing_attrs, **request.metadata}
+            
+            # 2. Extract spot number from the old filename
+            old_name = old_abs_path.name
+            match = re.search(r'Spot(\d+)', old_name, re.IGNORECASE)
+            spot_str = f"Spot{match.group(1)}" if match else "Spot1"
+            
+            # 3. Build new filename
+            parts = []
+            sample = (
+                merged_metadata.get("sample_code") or
+                merged_metadata.get("sample_name") or
+                merged_metadata.get("sample_id") or "unknown"
+            )
+            # Sanitise: µ → u, strip anything not filename-safe, cap at 25 chars
+            def sanitise(val: str, maxlen: int = 25) -> str:
+                val = str(val).replace("µ", "u").replace("μ", "u")
+                val = re.sub(r'[^a-zA-Z0-9\-\.]', '', val)
+                return val[:maxlen]
+
+            def is_junk_value(val: str) -> bool:
+                """Return True for values that should NOT appear in the filename."""
+                v = str(val)
+                if len(v) > 60:                                  # too long → skip
+                    return True
+                if re.search(r'\.(txt|csv|mat|h5|hdf5)$', v, re.IGNORECASE):  # raw filename
+                    return True
+                if re.search(r'\d{4}-\d{2}-\d{2}', v):          # contains a date
+                    return True
+                if re.match(r'^\d+\.\d+\.\d+', v):               # version string x.y.z
+                    return True
+                if re.match(r'^\d+\.\d+$', v) and float(v) < 0.01:  # tiny float artifact
+                    return True
+                if '\\' in v or '/' in v:                         # filesystem path
+                    return True
+                return False
+
+            parts.append(sanitise(sample, 20))
+
+            technique = merged_metadata.get("technique", "raman")
+            parts.append(sanitise(technique.upper(), 10))
+
+            # Extract ordered custom keys
+            ordered_keys = merged_metadata.get("__order__", [])
+            if isinstance(ordered_keys, str):
+                import json
+                try:
+                    ordered_keys = json.loads(ordered_keys)
+                except Exception:
+                    ordered_keys = []
+
+            system_keys = {
+                'equipment', 'notes', '__order__', 'file_origin', 'drive_file_link',
+                'local_h5_paths', 'original_files', 'local_h5_path', 'original_file',
+                'raman_spectrum_file_id', '__bulk_id__', 'file_metadata', 'attached_images',
+                'attached_image', 'group_id', 'sample_id', 'sample_code', 'sample_name',
+                'logbook_name', 'technique', 'performed_at', 'created_at', 'updated_at',
+                'points', 'spectra', 'range', 'start_time', 'end_time',
+            }
+
+            params = {}
+            for k in ordered_keys:
+                if k in merged_metadata and k.lower() not in system_keys:
+                    params[k] = merged_metadata[k]
+
+            # Add any remaining non-system keys not already captured
+            for k, v in merged_metadata.items():
+                if k.lower() not in system_keys and k not in params:
+                    params[k] = v
+
+            # Append clean, short tokens — skip junk values
+            for k, v in params.items():
+                if not v:
+                    continue
+                raw = str(v)
+                if is_junk_value(raw):
+                    continue
+                clean_v = sanitise(raw, 20)
+                if clean_v:
+                    parts.append(clean_v)
+
+            parts.append(spot_str)
+
+            # Build filename and hard-cap at 150 chars stem to stay well under MAX_PATH
+            stem = "_".join(parts)
+            if len(stem) > 150:
+                # Keep sample id + technique + spot, truncate the middle
+                core = f"{parts[0]}_{parts[1]}"
+                tail = f"_{spot_str}"
+                budget = 150 - len(core) - len(tail)
+                middle = "_".join(parts[2:-1])[:max(0, budget)]
+                stem = f"{core}_{middle}{tail}" if middle else f"{core}{tail}"
+
+            new_filename = stem + ".h5"
+            
+            # 4. Determine new directory subpath
+            new_subpath = _build_vault_subpath(merged_metadata)
+            new_dir = vault_root / new_subpath
+            new_dir.mkdir(parents=True, exist_ok=True)
+            
+            new_abs_path = new_dir / new_filename
+            
+            # Ensure no overwrite if file with new name already exists
+            if new_abs_path.exists() and new_abs_path != old_abs_path:
+                stem = new_abs_path.stem
+                ext = new_abs_path.suffix
+                counter = 1
+                while new_abs_path.exists():
+                    new_abs_path = new_dir / f"{stem}_{counter}{ext}"
+                    counter += 1
+            
+            # 5. Physically rename / move the file
+            if old_abs_path != new_abs_path:
+                shutil.move(str(old_abs_path), str(new_abs_path))
+                
+            # 6. Open the new file in r+ mode and update all attributes
+            try:
+                with h5py.File(new_abs_path, "r+") as f:
+                    for k, v in merged_metadata.items():
+                        if v is not None:
+                            try:
+                                if isinstance(v, (dict, list)):
+                                    import json
+                                    f.attrs[k] = json.dumps(v)
+                                else:
+                                    f.attrs[k] = str(v)
+                            except Exception:
+                                pass
+            except Exception as e:
+                print(f"Error updating new H5 attributes for {new_abs_path}: {e}")
+                
+            # Keep track of renamed path
+            new_rel_path = new_abs_path.relative_to(vault_root).as_posix()
+            renamed_paths[rel_path] = new_rel_path
+            
+        return RenameResponse(
+            success=True,
+            renamed_paths=renamed_paths,
+            message="Successfully renamed and updated local HDF5 files."
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"File renaming failed: {str(e)}")
 
 
 

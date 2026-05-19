@@ -17,7 +17,7 @@ export function CharacterizationSearch({ samples, search, typeFilter, onSelectSa
     // Summary generator for high density
     const getSentenceSummary = (data: any) => {
         const priority = ['analyte', 'laser', 'power', 'objective', 'acquisition_time', 'accumulation', 'acc'];
-        const ignore = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', '__bulk_id__', 'manual_date']);
+        const ignore = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', '__bulk_id__', 'manual_date', 'attached_images', 'attached_image']);
 
         const parts: string[] = [];
 

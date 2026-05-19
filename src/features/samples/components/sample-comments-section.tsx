@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { cn } from '@/lib/utils';
 import { MessageSquare, Send, Trash2, User as UserIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { ScientificText } from "@/components/ScientificText";
 
 interface SampleCommentsSectionProps {
     sampleId: string;
@@ -163,7 +164,9 @@ export function SampleCommentsSection({ sampleId, groupId }: SampleCommentsSecti
                                         {formatTimeAgo(comment.created_at)}
                                     </span>
                                 </div>
-                                <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">{comment.content}</p>
+                                <div className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
+                                    <ScientificText text={comment.content} />
+                                </div>
 
                                 {/* Delete Button (Only for author) */}
                                 {comment.author_id === currentUserId && (

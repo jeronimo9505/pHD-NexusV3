@@ -253,3 +253,45 @@ export async function fetchGrapheneAnalytics(request: {
     }
     return res.json();
 }
+
+/**
+ * Send a request to the Python science engine to save a base64 image in the vault sample folder.
+ */
+export async function savePastedImage(request: {
+    image_base64: string;
+    vault_root: string;
+    filename?: string;
+    metadata: Record<string, any>;
+}): Promise<{ success: boolean; relative_path: string; filename: string; message: string }> {
+    const res = await fetch(`${SCIENCE_ENGINE_URL}/api/save-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Could not save image");
+    }
+    return res.json();
+}
+
+/**
+ * Request the Python engine to rename and update the metadata of local HDF5 files.
+ */
+export async function renameVaultFiles(request: {
+    vault_root: string;
+    h5_relative_paths: string[];
+    metadata: Record<string, any>;
+}): Promise<{ success: boolean; renamed_paths: Record<string, string>; message: string }> {
+    const res = await fetch(`${SCIENCE_ENGINE_URL}/api/map/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Renaming failed");
+    }
+    return res.json();
+}
+
