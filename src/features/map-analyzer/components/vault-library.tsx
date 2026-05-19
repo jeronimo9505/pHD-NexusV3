@@ -556,6 +556,62 @@ export function VaultLibrary({
     );
 }
 
+// ─── Filename → parameter chips parser ─────────────────────────────────────
+type ChipType = 'analyte' | 'laser' | 'power' | 'objective' | 'time' | 'acc' | 'map' | 'misc';
+interface Chip { label: string; type: ChipType; }
+
+function parseFileChips(name: string): { chips: Chip[]; spot: string | null } {
+    // Strip .h5 and _preprocessed(_N)? suffix
+    let stem = name.replace(/\.h5$/i, '').replace(/_preprocessed(_\d+)?$/, '');
+
+    // Split into tokens
+    const raw = stem.split('_').filter(Boolean);
+
+    // Skip leading sample-code token(s): tokens that look like "A12-B2-B1" (letters+digits+hyphen, no units)
+    // and skip technique tokens: RAMAN, SERS, TERS, FTIR...
+    const TECHNIQUES = new Set(['RAMAN', 'SERS', 'TERS', 'FTIR', 'PL', 'XRD', 'XPS', 'AFM']);
+    let i = 0;
+    // skip sample code (first token)
+    i = 1;
+    // skip technique
+    if (i < raw.length && TECHNIQUES.has(raw[i].toUpperCase())) i++;
+
+    const paramTokens = raw.slice(i);
+
+    // Extract spot (last token matching SpotN)
+    const spotIdx = paramTokens.findLastIndex((t: string) => /^Spot\d+$/i.test(t));
+    const spot = spotIdx >= 0 ? paramTokens[spotIdx] : null;
+    const tokens = spotIdx >= 0 ? paramTokens.slice(0, spotIdx) : paramTokens;
+
+    const chips: Chip[] = [];
+    let usedIndices = new Set<number>();
+
+    tokens.forEach((t: string, idx: number) => {
+        if (usedIndices.has(idx)) return;
+        if (/^\d+nm$/i.test(t))                           chips.push({ label: t, type: 'laser' });
+        else if (/^\d+[µu]W$/i.test(t) || /^\d+mW$/i.test(t)) chips.push({ label: t.replace('µ','µ'), type: 'power' });
+        else if (/^\d+x$/i.test(t) && parseInt(t) <= 200) chips.push({ label: t, type: 'objective' });
+        else if (/^\d+s$/i.test(t))                       chips.push({ label: t, type: 'time' });
+        else if (/^\d+ac$/i.test(t))                      chips.push({ label: t.replace('ac','acc'), type: 'acc' });
+        else if (/^\d+$/.test(t) && parseInt(t) <= 500)   chips.push({ label: t + 'x', type: 'acc' });
+        else if (/\d+x\d+/i.test(t) || /µm$/i.test(t))   { /* skip map size tokens */ }
+        else if (t.length <= 30)                           chips.push({ label: t, type: 'analyte' });
+    });
+
+    return { chips, spot };
+}
+
+const CHIP_STYLES: Record<ChipType, string> = {
+    analyte:   'bg-rose-50   text-rose-700   border border-rose-200',
+    laser:     'bg-blue-50   text-blue-700   border border-blue-200',
+    power:     'bg-amber-50  text-amber-700  border border-amber-200',
+    objective: 'bg-violet-50 text-violet-700 border border-violet-200',
+    time:      'bg-emerald-50 text-emerald-700 border border-emerald-200',
+    acc:       'bg-slate-100 text-slate-600  border border-slate-200',
+    map:       'bg-cyan-50   text-cyan-700   border border-cyan-200',
+    misc:      'bg-slate-50  text-slate-500  border border-slate-200',
+};
+
 // Subcomponent for cleaner code
 function PipelineStepsModal({ name, history, onClose }: { name: string, history: PipelineStep[], onClose: () => void }) {
     const STEP_LABELS: Record<string, string> = {
@@ -628,10 +684,9 @@ function FileItem({
     onRemove: (path: string) => void, 
     onDeleteFile?: (f: VaultFile) => void, 
     isNested?: boolean,
-    isChild?: boolean,      // true = pipeline child, rendered under its parent
-    hasChildren?: boolean   // true = original that has pipeline children below it
+    isChild?: boolean,
+    hasChildren?: boolean
 }) {
-    const isMap = file.n_spectra > 1;
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [showPipelineInfo, setShowPipelineInfo] = useState(false);
 
@@ -640,32 +695,27 @@ function FileItem({
         try { return JSON.parse(file.pipeline_history); } catch { return []; }
     })();
 
-    const meta = (() => {
-        const prefixCode = file.name.split('_')[0];
-        let shortName = file.name;
-        if (shortName.startsWith(prefixCode)) {
-            shortName = shortName.substring(prefixCode.length);
-            if (shortName.startsWith('_')) shortName = shortName.substring(1);
-        }
-        if (shortName.endsWith('.h5')) shortName = shortName.substring(0, shortName.length - 3);
-        if (shortName.length > 25) shortName = shortName.substring(0, 22) + '...';
-        return { prefixCode, shortName };
-    })();
-    
+    // Parse filename into parameter chips
+    const { chips, spot } = parseFileChips(file.name);
+    const MAX_CHIPS = 5;
+    const visibleChips = chips.slice(0, MAX_CHIPS);
+    const hiddenCount = chips.length - MAX_CHIPS;
+
     return (
-        <div 
+        <div
             role="button"
             tabIndex={0}
             onClick={() => onSelect(file)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(file); }}
             className={cn(
-                "flex items-center text-[11px] border-b border-slate-50 transition-all cursor-pointer group/row",
-                isSelected ? "bg-indigo-50/30" : "hover:bg-slate-50/80"
+                "flex items-center text-[11px] border-b border-slate-50 transition-all cursor-pointer group/row min-h-[36px]",
+                isSelected ? "bg-indigo-50/50" : "hover:bg-slate-50/80",
+                isChild && "bg-slate-50/30"
             )}
         >
-            {/* Column 1: Checkbox (Fixed) */}
-            <div className="w-10 border-r border-slate-100 py-2 flex items-center justify-center shrink-0 relative group/icon">
-                <div 
+            {/* Col 1: Checkbox */}
+            <div className="w-10 border-r border-slate-100 py-2 flex items-center justify-center shrink-0">
+                <div
                     className={cn(
                         "w-3.5 h-3.5 rounded border flex items-center justify-center transition-all bg-white shadow-sm cursor-pointer",
                         isCompared ? "border-orange-500 text-orange-500 bg-orange-50/30" : "border-slate-300 text-transparent"
@@ -676,67 +726,89 @@ function FileItem({
                 </div>
             </div>
 
-            {/* Column 2: Code with Tree Connector */}
-            <div className="w-24 border-r border-slate-100 px-3 py-2 flex items-center gap-1 shrink-0">
-                {isChild ? (
-                    // Pipeline child: deeper indent + different connector
-                    <>
-                        <span className="text-slate-100 text-[10px] font-light ml-3">└</span>
-                        <span className="text-[10px] font-bold text-slate-300 truncate">
-                            {meta.prefixCode}
-                        </span>
-                    </>
-                ) : (
-                    // Original file
-                    <>
-                        <span className="text-slate-300 text-[10px] font-light">└</span>
-                        <span className="text-[10px] font-bold text-slate-400 truncate">
-                            {meta.prefixCode}
-                        </span>
-                    </>
-                )}
-            </div>
-
-            {/* Column 3: Name */}
+            {/* Col 2: Tree connector only — no repeated sample code */}
             <div className={cn(
-                "flex-1 px-3 py-2 flex items-center justify-between min-w-0",
-                isChild && "bg-slate-50/40 border-l-2 border-orange-100"
+                "border-r border-slate-100 py-2 flex items-center justify-center shrink-0",
+                isChild ? "w-8" : "w-6"
             )}>
                 <span className={cn(
-                    "truncate transition-colors",
-                    file.pipeline_applied
-                        ? "text-indigo-600 font-bold italic"
-                        : isSelected ? "text-indigo-900 font-bold" : "text-slate-600 font-medium"
-                )}>
-                    {file.pipeline_applied && file.pipeline_name ? file.pipeline_name : meta.shortName}
-                </span>
-                
-                {file.pipeline_applied && (
-                    <div className="relative shrink-0">
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setShowPipelineInfo(v => !v); }}
-                            className="w-4 h-4 rounded bg-orange-100 text-orange-600 flex items-center justify-center hover:bg-orange-200 transition-colors"
-                        >
-                            <Zap size={8} />
-                        </button>
-                        {showPipelineInfo && (
-                            <PipelineStepsModal
-                                name={file.pipeline_name || 'Processed'}
-                                history={pipelineSteps}
-                                onClose={() => setShowPipelineInfo(false)}
-                            />
+                    "text-[10px] font-light",
+                    isChild ? "text-orange-200 ml-2" : "text-slate-300"
+                )}>└</span>
+            </div>
+
+            {/* Col 3: Pipeline badge OR parameter chips + spot */}
+            <div className={cn(
+                "flex-1 px-2 py-1.5 flex items-center gap-1.5 min-w-0 overflow-hidden",
+                isChild && "border-l-2 border-orange-100"
+            )}>
+                {file.pipeline_applied ? (
+                    // Pipeline file — show its name as a styled badge
+                    <>
+                        <span className="text-[10px] font-black text-indigo-600 italic truncate">
+                            {file.pipeline_name || 'Preprocessed'}
+                        </span>
+                        <div className="relative shrink-0">
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setShowPipelineInfo(v => !v); }}
+                                className="w-4 h-4 rounded bg-orange-100 text-orange-600 flex items-center justify-center hover:bg-orange-200 transition-colors"
+                            >
+                                <Zap size={8} />
+                            </button>
+                            {showPipelineInfo && (
+                                <PipelineStepsModal
+                                    name={file.pipeline_name || 'Processed'}
+                                    history={pipelineSteps}
+                                    onClose={() => setShowPipelineInfo(false)}
+                                />
+                            )}
+                        </div>
+                        {spot && (
+                            <span className="ml-auto shrink-0 text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">
+                                {spot}
+                            </span>
                         )}
-                    </div>
+                    </>
+                ) : (
+                    // Original file — show parameter chips
+                    <>
+                        <div className="flex items-center gap-1 flex-wrap overflow-hidden max-h-[22px]">
+                            {visibleChips.map((chip, i) => (
+                                <span
+                                    key={i}
+                                    className={cn(
+                                        "inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-bold shrink-0",
+                                        CHIP_STYLES[chip.type]
+                                    )}
+                                >
+                                    {chip.label}
+                                </span>
+                            ))}
+                            {hiddenCount > 0 && (
+                                <span className="text-[9px] font-bold text-slate-400">+{hiddenCount}</span>
+                            )}
+                        </div>
+                        {spot && (
+                            <span className="ml-auto shrink-0 text-[9px] font-bold text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100">
+                                {spot}
+                            </span>
+                        )}
+                        {file.n_spectra > 1 && (
+                            <span className="shrink-0 text-[9px] text-slate-400 font-medium">
+                                {file.n_spectra} sp.
+                            </span>
+                        )}
+                    </>
                 )}
             </div>
 
-            {/* Column 4: Actions */}
-            <div className="w-10 border-l border-slate-100 py-2 flex items-center justify-center shrink-0 opacity-0 group-hover/row:opacity-100 transition-all">
+            {/* Col 4: Actions */}
+            <div className="w-8 border-l border-slate-100 py-2 flex items-center justify-center shrink-0 opacity-0 group-hover/row:opacity-100 transition-all">
                 {!confirmDelete ? (
-                    <button 
-                        onClick={(e) => { 
-                            e.stopPropagation(); 
-                            setConfirmDelete(true); 
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDelete(true);
                         }}
                         className={cn(
                             "p-1 transition-colors",
@@ -744,13 +816,13 @@ function FileItem({
                         )}
                         title={file.pipeline_applied ? "Eliminar ficha y archivo" : "Quitar del espacio de trabajo"}
                     >
-                        {file.pipeline_applied ? <Trash2 size={12} /> : <X size={12} />}
+                        {file.pipeline_applied ? <Trash2 size={11} /> : <X size={11} />}
                     </button>
                 ) : (
-                    <button 
+                    <button
                         onMouseLeave={() => setConfirmDelete(false)}
-                        onClick={(e) => { 
-                            e.stopPropagation(); 
+                        onClick={(e) => {
+                            e.stopPropagation();
                             if (file.pipeline_applied) {
                                 onDeleteFile?.(file);
                             } else {
