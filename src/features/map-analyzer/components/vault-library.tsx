@@ -772,12 +772,12 @@ function FileItem({
                 ) : (
                     // Original file — show parameter chips
                     <>
-                        <div className="flex items-center gap-0.5 flex-wrap">
+                        <div className="flex items-center gap-1 flex-wrap">
                             {visibleChips.map((chip, i) => (
                                 <span
                                     key={i}
                                     className={cn(
-                                        "inline-flex items-center px-1 py-0 rounded text-[8px] font-bold shrink-0 leading-4",
+                                        "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0",
                                         CHIP_STYLES[chip.type]
                                     )}
                                 >
