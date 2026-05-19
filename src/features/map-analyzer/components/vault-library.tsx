@@ -421,17 +421,24 @@ export function VaultLibrary({
                         </div>
                         
                         <div className="flex-1 overflow-y-auto custom-scrollbar">
-                            {groupedData.map(group => (
-                                <div key={group.name} className="flex flex-col">
+                            {groupedData.map((group, groupIdx) => (
+                                <div
+                                    key={group.name}
+                                    className={cn(
+                                        "flex flex-col rounded-lg overflow-hidden shadow-sm",
+                                        groupIdx > 0 ? "mt-2" : "mt-0",
+                                        "border border-slate-200"
+                                    )}
+                                >
                                     {/* Sample Header Row */}
-                                    <div 
-                                        className="flex items-center text-[11px] border-b border-slate-100 hover:bg-slate-50/50 group/row cursor-pointer"
+                                    <div
+                                        className="flex items-center text-[11px] bg-slate-50 hover:bg-indigo-50/40 group/row cursor-pointer border-b border-slate-200"
                                         onClick={() => toggleSample(group.name)}
                                     >
-                                        <div className="w-10 border-r border-slate-100 py-2.5 flex items-center justify-center shrink-0">
+                                        <div className="w-10 border-r border-slate-200 py-2.5 flex items-center justify-center shrink-0">
                                             <div className="w-3.5 h-3.5 rounded border border-slate-300 bg-white" />
                                         </div>
-                                        <div className="w-24 border-r border-slate-100 px-3 py-2.5 font-black text-indigo-600 shrink-0">
+                                        <div className="w-24 border-r border-slate-200 px-3 py-2.5 font-black text-indigo-600 shrink-0">
                                             {group.sampleCode || group.name}
                                         </div>
                                         <div className="flex-1 px-3 py-2.5 flex items-center gap-2 min-w-0">
@@ -439,7 +446,7 @@ export function VaultLibrary({
                                                 {expandedSamples[group.name] !== false ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                                             </div>
                                             <span className="font-bold text-slate-700 truncate">{group.displayName || group.name}</span>
-                                            
+
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
@@ -451,20 +458,25 @@ export function VaultLibrary({
                                             >
                                                 <Info size={12} />
                                             </button>
-                                            
+
                                             {openOverview === group.name && (
                                                 <SampleOverviewPopover group={group} position={overviewPosition} onClose={() => setOpenOverview(null)} />
                                             )}
                                         </div>
 
-                                        <div className="w-10 border-l border-slate-100 py-2.5 shrink-0 text-center text-[9px] font-bold text-slate-300">
+                                        <div className="w-10 border-l border-slate-200 py-2.5 shrink-0 text-center text-[9px] font-bold text-slate-300">
                                             {group.files.length}
                                         </div>
                                     </div>
 
                                     {/* Child File Rows: original + its pipeline children together */}
-                                    {expandedSamples[group.name] !== false && group.fileNodes.map(node => (
-                                        <div key={node.file.id}>
+                                    {expandedSamples[group.name] !== false && group.fileNodes.map((node, nodeIdx) => (
+                                        <div
+                                            key={node.file.id}
+                                            className={cn(
+                                                nodeIdx > 0 && "border-t border-slate-100"
+                                            )}
+                                        >
                                             {/* Original file */}
                                             <FileItem
                                                 file={node.file}
@@ -478,22 +490,26 @@ export function VaultLibrary({
                                                 isChild={false}
                                                 hasChildren={node.children.length > 0}
                                             />
-                                            {/* Pipeline children — directly below their parent */}
-                                            {node.children.map(child => (
-                                                <FileItem
-                                                    key={child.id}
-                                                    file={child}
-                                                    isSelected={selectedH5 === child.h5_relative_path}
-                                                    isCompared={compareFiles?.some(f => f.id === child.id) || false}
-                                                    onToggleCompare={onToggleCompare}
-                                                    onSelect={onSelect}
-                                                    onRemove={onRemove}
-                                                    onDeleteFile={onDeleteFile}
-                                                    isNested={true}
-                                                    isChild={true}
-                                                    hasChildren={false}
-                                                />
-                                            ))}
+                                            {/* Pipeline children — inset with accent */}
+                                            {node.children.length > 0 && (
+                                                <div className="bg-slate-50/70 border-t border-slate-100">
+                                                    {node.children.map(child => (
+                                                        <FileItem
+                                                            key={child.id}
+                                                            file={child}
+                                                            isSelected={selectedH5 === child.h5_relative_path}
+                                                            isCompared={compareFiles?.some(f => f.id === child.id) || false}
+                                                            onToggleCompare={onToggleCompare}
+                                                            onSelect={onSelect}
+                                                            onRemove={onRemove}
+                                                            onDeleteFile={onDeleteFile}
+                                                            isNested={true}
+                                                            isChild={true}
+                                                            hasChildren={false}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
