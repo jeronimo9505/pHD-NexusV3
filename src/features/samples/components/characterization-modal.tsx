@@ -4,13 +4,14 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Sample, SampleCharacterization } from '../types';
 import { createCharacterizationAction, updateCharacterizationAction, getGroupCharacterizationTypesAction } from '../actions';
 import { toast } from 'sonner';
-import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity, HardDrive, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity, HardDrive, CheckCircle2, AlertCircle, Clipboard, Image } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { uploadFileToDrive } from '@/lib/google/upload';
 import { ensureAuth } from '@/lib/google/auth';
-import { isDesktop, ingestFile, checkEngineHealth, SCIENCE_ENGINE_URL, fetchRepresentativeSpectrum } from '@/lib/desktop';
+import { isDesktop, ingestFile, checkEngineHealth, SCIENCE_ENGINE_URL, fetchRepresentativeSpectrum, savePastedImage, renameVaultFiles } from '@/lib/desktop';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+
 
 interface CharacterizationModalProps {
     groupId: string;
@@ -65,6 +66,151 @@ export function CharacterizationModal({
     const [fileMetadata, setFileMetadata] = useState<Record<string, { range?: [number, number], points?: number, spectra?: number }>>({});
     const [spectrumPreviewB64, setSpectrumPreviewB64] = useState('');
     const [engineOnline, setEngineOnline] = useState(false);
+
+    // Pasted images state (additional data)
+    const [pastedImages, setPastedImages] = useState<Array<{ id: string; base64?: string; name: string; relativePath?: string }>>([]);
+    const [isDragging, setIsDragging] = useState(false);
+    const imageInputRef = useRef<HTMLInputElement>(null);
+
+    const triggerFileSelect = () => {
+        imageInputRef.current?.click();
+    };
+
+    const handlePaste = (e: React.ClipboardEvent) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.type.indexOf('image') !== -1) {
+                const blob = item.getAsFile();
+                if (blob) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const base64 = event.target?.result as string;
+                        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                        const newImg = {
+                            id: `paste-${Date.now()}-${Math.random()}`,
+                            base64,
+                            name: `Pasted_Image_${timestamp.split('T')[0]}_${timestamp.split('T')[1].slice(0, 8).replace(/-/g, '')}.png`
+                        };
+                        setPastedImages(prev => [...prev, newImg]);
+                        toast.success("Image pasted from clipboard!");
+                    };
+                    reader.readAsDataURL(blob);
+                }
+            }
+        }
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(false);
+        const files = e.dataTransfer?.files;
+        if (!files) return;
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            if (file.type.indexOf('image') !== -1) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const base64 = event.target?.result as string;
+                    const newImg = {
+                        id: `drop-${Date.now()}-${Math.random()}`,
+                        base64,
+                        name: file.name
+                    };
+                    setPastedImages(prev => [...prev, newImg]);
+                    toast.success(`Loaded image: ${file.name}`);
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+    };
+
+    const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files) return;
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const base64 = event.target?.result as string;
+                const newImg = {
+                    id: `file-${Date.now()}-${Math.random()}`,
+                    base64,
+                    name: file.name
+                };
+                setPastedImages(prev => [...prev, newImg]);
+                toast.success(`Loaded image: ${file.name}`);
+            };
+            reader.readAsDataURL(file);
+        }
+        e.target.value = '';
+    };
+
+    const currentVaultRoot = typeof window !== 'undefined' ? localStorage.getItem('phdnexus_vault_root') : null;
+
+    const renderAttachedImagesList = () => {
+        if (pastedImages.length === 0) return null;
+
+        return (
+            <div className="space-y-2 mt-4">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
+                    Attached Images & Bitmaps ({pastedImages.length})
+                </label>
+                <div className="grid grid-cols-2 gap-3 max-h-[300px] overflow-y-auto p-1.5 bg-slate-100/50 rounded-lg border border-slate-200/50">
+                    {pastedImages.map((img) => {
+                        let src = '';
+                        if (img.base64) {
+                            src = img.base64;
+                        } else if (img.relativePath && currentVaultRoot) {
+                            src = `${SCIENCE_ENGINE_URL}/api/vault-file?path=${encodeURIComponent(img.relativePath)}&vault_root=${encodeURIComponent(currentVaultRoot)}`;
+                        }
+
+                        return (
+                            <div key={img.id} className="relative group border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm hover:shadow transition-all aspect-video">
+                                {src ? (
+                                    <img src={src} alt={img.name} className="w-full h-full object-cover" />
+                                ) : (
+                                    <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">
+                                        <Image size={24} />
+                                    </div>
+                                )}
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col justify-between p-2">
+                                    <span className="text-[9px] text-white font-semibold truncate bg-black/60 px-1.5 py-0.5 rounded self-start max-w-full">
+                                        {img.name}
+                                    </span>
+                                    <div className="flex gap-2 justify-end">
+                                        {img.relativePath && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleOpenFileDirectly(img.name, img.relativePath)}
+                                                className="p-1 bg-white/95 hover:bg-white text-slate-700 rounded transition-colors"
+                                                title="Open physically"
+                                            >
+                                                <ExternalLink size={10} />
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => setPastedImages(prev => prev.filter(item => item.id !== img.id))}
+                                            className="p-1 bg-red-600/90 hover:bg-red-600 text-white rounded transition-colors"
+                                            title="Remove image"
+                                        >
+                                            <Trash2 size={10} />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    };
+
     
     // Dynamic Types
     const [availableTypes, setAvailableTypes] = useState<string[]>(DEFAULT_CHAR_TYPES);
@@ -286,6 +432,18 @@ export function CharacterizationModal({
                 const meta = initialData.data.file_metadata || {};
                 setFileMetadata(meta);
 
+                const attached = initialData.data.attached_images || [];
+                const loadedImages = attached.map((path: string, idx: number) => {
+                    const filename = path.split('/').pop() || `Attached Image ${idx + 1}`;
+                    return {
+                        id: `saved-${idx}-${Date.now()}`,
+                        name: filename,
+                        relativePath: path
+                    };
+                });
+                setPastedImages(loadedImages);
+
+
                 const fields: { key: string; value: string; unit: string }[] = [];
                 const data = initialData.data;
                 const order = data.__order__ as string[] || []; // Prefer saved order in record
@@ -311,7 +469,7 @@ export function CharacterizationModal({
 
                 // 2. Process Remaining Keys
                 Object.entries(data).forEach(([k, v]) => {
-                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', '__bulk_id__', 'file_metadata'];
+                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image'];
                     if (!processedKeys.has(k) && !systemKeys.includes(k)) {
                         const { v: val, u: unit } = separateUnit(String(v));
                         fields.push({ key: k, value: val, unit: unit });
@@ -333,9 +491,11 @@ export function CharacterizationModal({
                 setRamanSpectrum('');
                 setH5RelativePaths([]);
                 setLocalFilePaths([]);
+                setPastedImages([]);
                 setSpectrumPreviewB64('');
                 setIngestStatus('idle');
                 setFileMetadata({});
+
 
                 // Set type (default Raman or keep last? typically default to first)
                 // Actually if we just opened, we can default to Raman.
@@ -356,39 +516,61 @@ export function CharacterizationModal({
         setIsAddingCustomType(false);
         setType(newType);
 
-        // Load defaults for this type if creating new
+        // Load defaults or cached fields for this type if creating new
         if (!initialData) {
-            const defaults: Record<string, string[]> = {
-                'Raman': ['Analyte', 'Laser', 'Power', 'Objective', 'Acquisition Time', 'Measurement Type']
-            };
-
-            const defaultKeys = defaults[newType] || [];
-
-            // Check global order preference
-            const savedOrder = parameterOrder[newType];
-            let finalKeys = [...defaultKeys];
-
-            if (savedOrder && savedOrder.length > 0) {
-                // Merge stored order with defaults to ensure we don't lose standard fields but respect user sort
-                const uniqueSaved = Array.from(new Set(savedOrder));
-                const standardSet = new Set(defaultKeys);
-
-                // Items in saved order (whether standard or custom)
-                const savedExisting = uniqueSaved;
-
-                // Standard items completely missing from saved order (new features?)
-                const missingStandard = defaultKeys.filter(k => !uniqueSaved.includes(k));
-
-                finalKeys = [...savedExisting, ...missingStandard];
+            let loadedFromCache = false;
+            if (typeof window !== 'undefined') {
+                const lastParamsJson = localStorage.getItem(`phdnexus_last_params_${newType}`);
+                if (lastParamsJson) {
+                    try {
+                        const cachedFields = JSON.parse(lastParamsJson);
+                        if (Array.isArray(cachedFields) && cachedFields.length > 0) {
+                            const newFields = cachedFields.map(f => ({
+                                key: f.key,
+                                value: '',
+                                unit: f.unit || lastUnits[f.key] || ''
+                            }));
+                            setDataFields(newFields);
+                            loadedFromCache = true;
+                        }
+                    } catch (e) {
+                        console.error('Error loading cached default fields structure', e);
+                    }
+                }
             }
 
-            const newFields = finalKeys.map(key => ({
-                key,
-                value: '',
-                unit: lastUnits[key] || ''
-            }));
+            if (!loadedFromCache) {
+                const defaults: Record<string, string[]> = {
+                    'Raman': ['Analyte', 'Laser', 'Power', 'Objective', 'Acquisition Time', 'Measurement Type']
+                };
 
-            setDataFields(newFields.length > 0 ? newFields : [{ key: '', value: '', unit: '' }]);
+                const defaultKeys = defaults[newType] || [];
+
+                // Check global order preference
+                const savedOrder = parameterOrder[newType];
+                let finalKeys = [...defaultKeys];
+
+                if (savedOrder && savedOrder.length > 0) {
+                    // Merge stored order with defaults to ensure we don't lose standard fields but respect user sort
+                    const uniqueSaved = Array.from(new Set(savedOrder));
+
+                    // Items in saved order (whether standard or custom)
+                    const savedExisting = uniqueSaved;
+
+                    // Standard items completely missing from saved order (new features?)
+                    const missingStandard = defaultKeys.filter(k => !uniqueSaved.includes(k));
+
+                    finalKeys = [...savedExisting, ...missingStandard];
+                }
+
+                const newFields = finalKeys.map(key => ({
+                    key,
+                    value: '',
+                    unit: lastUnits[key] || ''
+                }));
+
+                setDataFields(newFields.length > 0 ? newFields : [{ key: '', value: '', unit: '' }]);
+            }
         }
     };
 
@@ -566,12 +748,93 @@ export function CharacterizationModal({
             }
         }
 
+        // Desktop: save pasted base64 images physically inside the sample folder
+        const finalAttachedImages: string[] = [];
+        if (isDesktop && pastedImages.length > 0) {
+            const currentVaultRoot = typeof window !== 'undefined' ? localStorage.getItem('phdnexus_vault_root') : null;
+            if (currentVaultRoot) {
+                for (const img of pastedImages) {
+                    if (img.relativePath) {
+                        // Image already exists in vault, keep it
+                        finalAttachedImages.push(img.relativePath);
+                    } else if (img.base64) {
+                        try {
+                            const saveRes = await savePastedImage({
+                                image_base64: img.base64,
+                                vault_root: currentVaultRoot,
+                                filename: img.name,
+                                metadata: {
+                                    group_id: groupId,
+                                    sample_id: sample.id,
+                                    sample_code: sample.sample_code,
+                                    sample_name: sample.name,
+                                    logbook_name: logbookName,
+                                    technique: finalType
+                                }
+                            });
+                            if (saveRes.success && saveRes.relative_path) {
+                                finalAttachedImages.push(saveRes.relative_path);
+                            }
+                        } catch (err: any) {
+                            console.error("Failed to save image", img.name, err);
+                            toast.error(`Failed to save image ${img.name}: ${err.message}`);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (finalAttachedImages.length > 0) {
+            cleanData['attached_images'] = finalAttachedImages;
+        }
+
+
         // Critical: Save the order
         cleanData['__order__'] = orderedKeys;
 
         // Also update global preference if we have valid keys
         if (orderedKeys.length > 0) {
             setParameterOrder(prev => ({ ...prev, [type]: orderedKeys }));
+        }
+
+        // Desktop: physical file renaming on parameter edit
+        if (isDesktop && initialData?.id && h5RelativePaths.length > 0) {
+            const vaultRoot = typeof window !== 'undefined' ? localStorage.getItem('phdnexus_vault_root') : null;
+            if (vaultRoot) {
+                try {
+                    const renameRes = await renameVaultFiles({
+                        vault_root: vaultRoot,
+                        h5_relative_paths: h5RelativePaths,
+                        metadata: {
+                            ...cleanData,
+                            sample_code: sample.sample_code,
+                            sample_name: sample.name,
+                            logbook_name: logbookName,
+                            technique: finalType
+                        }
+                    });
+
+                    if (renameRes.success && renameRes.renamed_paths) {
+                        const updatedPaths = h5RelativePaths.map(p => renameRes.renamed_paths[p] || p);
+                        
+                        // Update cleanData with the new renamed paths
+                        cleanData['local_h5_paths'] = updatedPaths;
+                        if (cleanData['local_h5_path']) {
+                            cleanData['local_h5_path'] = updatedPaths[0] || '';
+                        }
+                        if (cleanData['original_file']) {
+                            cleanData['original_file'] = updatedPaths[0] || '';
+                        }
+                        
+                        // Update state so the modal stays in sync
+                        setH5RelativePaths(updatedPaths);
+                        toast.success("Local files renamed successfully!");
+                    }
+                } catch (renameErr: any) {
+                    console.error("Failed to rename local files:", renameErr);
+                    toast.error(`Could not rename physical files on disk: ${renameErr.message}`);
+                }
+            }
         }
 
         let res;
@@ -599,6 +862,17 @@ export function CharacterizationModal({
         if (res.error) {
             toast.error(res.error);
         } else {
+            // Save current parameter keys, units and values to localStorage for next autofill & load structure
+            if (typeof window !== 'undefined') {
+                const paramsToSave = dataFields
+                    .filter(f => f.key.trim() !== '' && f.key.trim() !== 'attached_images' && f.key.trim() !== 'attached_image')
+                    .map(f => ({
+                        key: f.key.trim(),
+                        value: f.value.trim(),
+                        unit: f.unit.trim()
+                    }));
+                localStorage.setItem(`phdnexus_last_params_${finalType}`, JSON.stringify(paramsToSave));
+            }
             toast.success(initialData?.id ? 'Updated' : 'Created');
             onClose();
         }
@@ -895,23 +1169,41 @@ export function CharacterizationModal({
                                         <button
                                             type="button"
                                             onClick={() => {
-                                                if (type === 'Raman') {
-                                                    setDataFields([
-                                                        { key: 'Analyte', value: 'R6G', unit: '10-6' },
-                                                        { key: 'Laser', value: '633', unit: 'nm' },
-                                                        { key: 'Power', value: '70', unit: 'µW' },
-                                                        { key: 'Objective', value: '50', unit: 'x' },
-                                                        { key: 'Acquisition Time', value: '1', unit: 's' },
-                                                        { key: 'Accumulations', value: '10', unit: '' }
-                                                    ]);
-                                                } else if (type === 'AFM') {
-                                                    setDataFields([
-                                                        { key: 'Scan Size', value: '5', unit: 'µm' },
-                                                        { key: 'Scan Rate', value: '1', unit: 'Hz' },
-                                                        { key: 'Tip Type', value: 'Silicon', unit: '' }
-                                                    ]);
-                                                } else {
-                                                    toast.info('No auto-fill template available for this technique yet.');
+                                                let filledFromCache = false;
+                                                if (typeof window !== 'undefined') {
+                                                    const lastParamsJson = localStorage.getItem(`phdnexus_last_params_${type}`);
+                                                    if (lastParamsJson) {
+                                                        try {
+                                                            const cachedFields = JSON.parse(lastParamsJson);
+                                                            if (Array.isArray(cachedFields) && cachedFields.length > 0) {
+                                                                setDataFields(cachedFields);
+                                                                filledFromCache = true;
+                                                            }
+                                                        } catch (err) {
+                                                            console.error('Error parsing cached autofill params', err);
+                                                        }
+                                                    }
+                                                }
+
+                                                if (!filledFromCache) {
+                                                    if (type === 'Raman') {
+                                                        setDataFields([
+                                                            { key: 'Analyte', value: 'R6G', unit: '10-6' },
+                                                            { key: 'Laser', value: '633', unit: 'nm' },
+                                                            { key: 'Power', value: '70', unit: 'µW' },
+                                                            { key: 'Objective', value: '50', unit: 'x' },
+                                                            { key: 'Acquisition Time', value: '1', unit: 's' },
+                                                            { key: 'Accumulations', value: '10', unit: '' }
+                                                        ]);
+                                                    } else if (type === 'AFM') {
+                                                        setDataFields([
+                                                            { key: 'Scan Size', value: '5', unit: 'µm' },
+                                                            { key: 'Scan Rate', value: '1', unit: 'Hz' },
+                                                            { key: 'Tip Type', value: 'Silicon', unit: '' }
+                                                        ]);
+                                                    } else {
+                                                        toast.info('No auto-fill template available for this technique yet.');
+                                                    }
                                                 }
                                                 // Auto-fill equipment if previously saved
                                                 if (typeof window !== 'undefined') {
@@ -1189,7 +1481,43 @@ export function CharacterizationModal({
                                                     <span className="text-[10px] text-red-600">Processing failed. Check that the file path is correct and the engine is running.</span>
                                                 </div>
                                             )}
+
+                                            {/* Attached Images/Bitmaps Paste Zone */}
+                                            <div className="mt-4 pt-4 border-t border-purple-100/50 space-y-3">
+                                                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">Attached Microscope Images & Bitmaps</label>
+                                                <div
+                                                    onPaste={handlePaste}
+                                                    onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                                                    onDragLeave={() => setIsDragging(false)}
+                                                    onDrop={handleDrop}
+                                                    onClick={triggerFileSelect}
+                                                    className={cn(
+                                                        "border border-dashed rounded-lg p-4 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all duration-200 bg-white",
+                                                        isDragging 
+                                                            ? "border-purple-500 bg-purple-50/30" 
+                                                            : "border-slate-200 hover:border-purple-300 hover:bg-slate-50/30"
+                                                    )}
+                                                >
+                                                    <Clipboard className={cn("w-5 h-5 text-slate-400", isDragging && "text-purple-500 animate-bounce")} />
+                                                    <p className="text-xs font-semibold text-slate-700 text-center">
+                                                        Paste Image or Screenshot (Ctrl+V)
+                                                    </p>
+                                                    <p className="text-[9px] text-slate-400 text-center">
+                                                        Or drag & drop, or click to browse
+                                                    </p>
+                                                    <input 
+                                                        ref={imageInputRef}
+                                                        type="file"
+                                                        accept="image/*"
+                                                        multiple
+                                                        onChange={handleImageFileChange}
+                                                        className="hidden"
+                                                    />
+                                                </div>
+                                                {renderAttachedImagesList()}
+                                            </div>
                                         </div>
+
                                     ) : (
                                         /* ─── WEB: Paste XY textarea (unchanged) ─── */
                                         <div className="space-y-2">

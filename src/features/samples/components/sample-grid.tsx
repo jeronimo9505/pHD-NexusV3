@@ -34,6 +34,7 @@ import { SampleDetailSheet } from './sample-detail-sheet';
 import { ActivityLogDrawer } from './activity-log-drawer';
 import { CharacterizationSearch } from './characterization-search';
 import { RamanWorkspace } from './raman-workspace';
+import { ScientificText } from '@/components/ScientificText';
 
 interface SampleGridProps {
     groupId: string;
@@ -537,11 +538,10 @@ export function SampleGrid({
                                             {formatDate(row.created_at)}
                                         </td>
 
-                                        {/* Description / Comments */}
                                         <td className="px-4 py-2 border-r border-slate-100 max-w-[200px]">
                                             {row.description ? (
-                                                <div className="truncate text-xs text-slate-600" title={row.description}>
-                                                    {row.description}
+                                                <div className="line-clamp-2 text-xs text-slate-600" title={row.description}>
+                                                    <ScientificText text={row.description} />
                                                 </div>
                                             ) : (
                                                 <span className="text-slate-300 text-xs">-</span>

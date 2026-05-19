@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Sample, SampleFieldConfig, SampleCharacterization } from '../types';
 import { getCharacterizationsAction, deleteCharacterizationAction, updateSampleAction, updateCharacterizationAction, createCharacterizationAction, getBulkSamplesAction } from '../actions';
-import { X, Calendar, User, FlaskConical, FileText, Plus, ExternalLink, Microscope, Settings, Edit, MessageSquareText, Trash2, Pencil, Check, StickyNote, ArrowLeft, Edit2, ChevronDown, ChevronUp, Loader2, Save, History, Clock, Copy, Database } from 'lucide-react';
+import { X, Calendar, User, FlaskConical, FileText, Plus, ExternalLink, Microscope, Settings, Edit, MessageSquareText, Trash2, Pencil, Check, StickyNote, ArrowLeft, Edit2, ChevronDown, ChevronUp, Loader2, Save, History, Clock, Copy, Database, Image } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { formatCellValue } from '../utils';
@@ -11,8 +11,9 @@ import { CharacterizationModal } from './characterization-modal';
 import { format } from 'date-fns';
 import { SampleCommentsSection } from './sample-comments-section';
 import { SpectrumGraph } from './spectrum-graph';
-import { isDesktop } from '@/lib/desktop';
+import { isDesktop, SCIENCE_ENGINE_URL } from '@/lib/desktop';
 import { FolderOpen } from 'lucide-react';
+import { ScientificText } from '@/components/ScientificText';
 
 interface SampleDetailSheetProps {
     sample: Sample | null;
@@ -148,7 +149,7 @@ export function SampleDetailSheet({
 
     const getSummaryString = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -173,7 +174,7 @@ export function SampleDetailSheet({
 
     const getParameterRows = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -534,6 +535,48 @@ export function SampleDetailSheet({
                                         </div>
                                     )}
 
+                                    {/* Attached Microscope Images & Bitmaps */}
+                                    {expandedChar!.data.attached_images && expandedChar!.data.attached_images.length > 0 && (
+                                        <div>
+                                            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                                                <Image size={12} className="text-purple-500" /> Attached Microscope Images
+                                            </h4>
+                                            <div className="grid grid-cols-2 gap-3 bg-slate-50 border border-slate-100 p-3 rounded-lg max-h-64 overflow-y-auto scrollbar-thin">
+                                                {(() => {
+                                                    const vaultRoot = localStorage.getItem('phdnexus_vault_root');
+                                                    return expandedChar!.data.attached_images.map((path: string, i: number) => {
+                                                        const filename = path.split('/').pop() || `Attached Image ${i + 1}`;
+                                                        const src = vaultRoot 
+                                                            ? `${SCIENCE_ENGINE_URL}/api/vault-file?path=${encodeURIComponent(path)}&vault_root=${encodeURIComponent(vaultRoot)}`
+                                                            : '';
+                                                        return (
+                                                            <div 
+                                                                key={i} 
+                                                                onClick={() => handleOpenFile(path)}
+                                                                className="group relative border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm hover:shadow hover:border-purple-300 transition-all aspect-video cursor-pointer"
+                                                                title="Click to open image physically"
+                                                            >
+                                                                {src ? (
+                                                                    <img src={src} alt={filename} className="w-full h-full object-cover" />
+                                                                ) : (
+                                                                    <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">
+                                                                        <Image size={16} />
+                                                                    </div>
+                                                                )}
+                                                                <div className="absolute inset-x-0 bottom-0 bg-black/60 p-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                                                    <p className="text-[9px] text-white truncate text-center font-medium">
+                                                                        {filename}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    });
+                                                })()}
+                                            </div>
+                                        </div>
+                                    )}
+
+
                                     {/* Notes & Observations */}
                                     <div>
                                         <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
@@ -594,7 +637,7 @@ export function SampleDetailSheet({
                                 <span>{sample.name}</span>
                                 {sample.description && (
                                     <span className="text-[11px] font-medium text-slate-500 italic line-clamp-2" title={sample.description}>
-                                        — {sample.description}
+                                        — <ScientificText text={sample.description} />
                                     </span>
                                 )}
                             </h2>
@@ -681,7 +724,9 @@ export function SampleDetailSheet({
                                         className="group relative bg-slate-50 rounded-lg p-3 border border-slate-100 hover:border-slate-300 transition-colors cursor-pointer min-h-[40px]"
                                     >
                                         {sample.description ? (
-                                            <p className="text-sm text-slate-700 whitespace-pre-wrap">{sample.description}</p>
+                                            <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                                                <ScientificText text={sample.description} />
+                                            </p>
                                         ) : (
                                             <p className="text-xs text-slate-400 italic">Click to add notes...</p>
                                         )}
@@ -730,7 +775,9 @@ export function SampleDetailSheet({
                                                     ) : c.notes && (
                                                         <div onClick={() => startEdit(i, c.notes || '')} className="mt-1 pl-7 text-xs text-slate-600 flex items-start gap-1.5 cursor-pointer hover:text-slate-900" title="Click to edit">
                                                             <FileText size={10} className="mt-0.5 text-slate-400 shrink-0" />
-                                                            <span className="italic leading-tight">{c.notes}</span>
+                                                            <span className="italic leading-tight">
+                                                                <ScientificText text={c.notes} />
+                                                            </span>
                                                         </div>
                                                     )}
                                                 </div>
@@ -816,7 +863,9 @@ export function SampleDetailSheet({
                                                     {char.type}
                                                 </span>
                                                 <div className="flex flex-col min-w-0">
-                                                    <span className="text-xs font-medium text-slate-800 truncate group-hover:text-blue-700 transition-colors">{getSummaryString(char) || 'No params'}</span>
+                                                    <span className="text-xs font-medium text-slate-800 truncate group-hover:text-blue-700 transition-colors">
+                                                        <ScientificText text={getSummaryString(char) || 'No params'} />
+                                                    </span>
                                                     <div className="flex items-center gap-2 mt-0.5">
                                                         <span className="text-[10px] text-slate-400 flex items-center gap-1">
                                                             <Clock size={10} />
