@@ -854,3 +854,31 @@ export async function getActivityLogAction(groupId: string) {
 
     return { data: consolidated };
 }
+
+/**
+ * Fetches the parameter structure of the last characterization of a given type
+ * across the whole group. Used as cross-platform autofill fallback so that
+ * parameters created on Desktop are also available in the Web app.
+ */
+export async function getLastCharacterizationParamsAction(groupId: string, charType: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+        .from('sample_characterizations')
+        .select(`
+            data,
+            performed_at,
+            created_at,
+            sample:sample_id(group_id)
+        `)
+        .eq('type', charType)
+        .order('created_at', { ascending: false })
+        .limit(50); // fetch a batch and filter in JS since we can't join-filter in one step easily
+
+    if (error) return { error: error.message };
+
+    // Filter to only records belonging to this group
+    const match = (data || []).find((c: any) => c.sample?.group_id === groupId);
+    if (!match) return { data: null };
+
+    return { data: match.data as Record<string, any> };
+}

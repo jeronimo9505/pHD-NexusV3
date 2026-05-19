@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Sample, SampleCharacterization } from '../types';
-import { createCharacterizationAction, updateCharacterizationAction, getGroupCharacterizationTypesAction } from '../actions';
+import { createCharacterizationAction, updateCharacterizationAction, getGroupCharacterizationTypesAction, getLastCharacterizationParamsAction } from '../actions';
 import { toast } from 'sonner';
 import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity, HardDrive, CheckCircle2, AlertCircle, Clipboard, Image } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -540,36 +540,71 @@ export function CharacterizationModal({
             }
 
             if (!loadedFromCache) {
-                const defaults: Record<string, string[]> = {
-                    'Raman': ['Analyte', 'Laser', 'Power', 'Objective', 'Acquisition Time', 'Measurement Type']
-                };
+                // ── Supabase cross-platform fallback ──
+                // Fetch the last saved record of this type from the DB so that
+                // parameters added on Desktop show up in the Web app too.
+                getLastCharacterizationParamsAction(groupId, newType).then(res => {
+                    if (res.data) {
+                        const data = res.data;
+                        const order: string[] = Array.isArray(data.__order__) ? data.__order__ : [];
+                        const systemKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link',
+                            'local_h5_paths', 'original_files', 'local_h5_path', 'original_file',
+                            'raman_spectrum_file_id', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
 
-                const defaultKeys = defaults[newType] || [];
+                        const separateUnit = (val: string): { v: string; u: string } => {
+                            const match = val.match(/^([\d\.]+)\s*([a-zA-Z%μµ°Ω]+)$/);
+                            if (match) return { v: match[1], u: match[2] };
+                            if (val.match(/^x\d+$/)) return { v: val.replace('x', ''), u: 'x' };
+                            return { v: val, u: '' };
+                        };
 
-                // Check global order preference
-                const savedOrder = parameterOrder[newType];
-                let finalKeys = [...defaultKeys];
+                        const seen = new Set<string>();
+                        const fields: { key: string; value: string; unit: string }[] = [];
 
-                if (savedOrder && savedOrder.length > 0) {
-                    // Merge stored order with defaults to ensure we don't lose standard fields but respect user sort
-                    const uniqueSaved = Array.from(new Set(savedOrder));
+                        // 1. Ordered keys first
+                        order.forEach(k => {
+                            if (!systemKeys.has(k) && data[k] !== undefined && !seen.has(k)) {
+                                const { u } = separateUnit(String(data[k]));
+                                fields.push({ key: k, value: '', unit: lastUnits[k] || u });
+                                seen.add(k);
+                            }
+                        });
 
-                    // Items in saved order (whether standard or custom)
-                    const savedExisting = uniqueSaved;
+                        // 2. Any remaining non-system keys
+                        Object.keys(data).forEach(k => {
+                            if (!systemKeys.has(k) && !seen.has(k)) {
+                                const { u } = separateUnit(String(data[k]));
+                                fields.push({ key: k, value: '', unit: lastUnits[k] || u });
+                                seen.add(k);
+                            }
+                        });
 
-                    // Standard items completely missing from saved order (new features?)
-                    const missingStandard = defaultKeys.filter(k => !uniqueSaved.includes(k));
+                        if (fields.length > 0) {
+                            setDataFields(fields);
+                            // Persist to localStorage so next time it's instant
+                            if (typeof window !== 'undefined') {
+                                localStorage.setItem(`phdnexus_last_params_${newType}`,
+                                    JSON.stringify(fields.map(f => ({ key: f.key, value: '', unit: f.unit }))));
+                            }
+                            return; // Skip hardcoded defaults below
+                        }
+                    }
 
-                    finalKeys = [...savedExisting, ...missingStandard];
-                }
-
-                const newFields = finalKeys.map(key => ({
-                    key,
-                    value: '',
-                    unit: lastUnits[key] || ''
-                }));
-
-                setDataFields(newFields.length > 0 ? newFields : [{ key: '', value: '', unit: '' }]);
+                    // ── Hardcoded fallback when no DB record exists yet ──
+                    const defaults: Record<string, string[]> = {
+                        'Raman': ['Analyte', 'Laser', 'Power', 'Objective', 'Acquisition Time', 'Measurement Type']
+                    };
+                    const defaultKeys = defaults[newType] || [];
+                    const savedOrder = parameterOrder[newType];
+                    let finalKeys = [...defaultKeys];
+                    if (savedOrder && savedOrder.length > 0) {
+                        const uniqueSaved = Array.from(new Set(savedOrder));
+                        const missingStandard = defaultKeys.filter(k => !uniqueSaved.includes(k));
+                        finalKeys = [...uniqueSaved, ...missingStandard];
+                    }
+                    const newFields = finalKeys.map(key => ({ key, value: '', unit: lastUnits[key] || '' }));
+                    setDataFields(newFields.length > 0 ? newFields : [{ key: '', value: '', unit: '' }]);
+                });
             }
         }
     };
@@ -1168,8 +1203,10 @@ export function CharacterizationModal({
                                     <div className="flex items-center gap-2">
                                         <button
                                             type="button"
-                                            onClick={() => {
+                                            onClick={async () => {
                                                 let filledFromCache = false;
+
+                                                // 1. Try localStorage first (fastest)
                                                 if (typeof window !== 'undefined') {
                                                     const lastParamsJson = localStorage.getItem(`phdnexus_last_params_${type}`);
                                                     if (lastParamsJson) {
@@ -1185,6 +1222,49 @@ export function CharacterizationModal({
                                                     }
                                                 }
 
+                                                // 2. Cross-platform fallback: Supabase last record
+                                                if (!filledFromCache) {
+                                                    const res = await getLastCharacterizationParamsAction(groupId, type);
+                                                    if (res.data) {
+                                                        const data = res.data;
+                                                        const order: string[] = Array.isArray(data.__order__) ? data.__order__ : [];
+                                                        const systemKeys = new Set(['equipment', 'notes', '__order__', 'file_origin',
+                                                            'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path',
+                                                            'original_file', 'raman_spectrum_file_id', '__bulk_id__', 'file_metadata',
+                                                            'attached_images', 'attached_image']);
+                                                        const separateUnit = (val: string): { v: string; u: string } => {
+                                                            const m = val.match(/^([\d\.]+)\s*([a-zA-Z%μµ°Ω]+)$/);
+                                                            return m ? { v: m[1], u: m[2] } : { v: val, u: '' };
+                                                        };
+                                                        const seen = new Set<string>();
+                                                        const fields: { key: string; value: string; unit: string }[] = [];
+                                                        order.forEach(k => {
+                                                            if (!systemKeys.has(k) && data[k] !== undefined && !seen.has(k)) {
+                                                                const { v, u } = separateUnit(String(data[k]));
+                                                                fields.push({ key: k, value: v, unit: lastUnits[k] || u });
+                                                                seen.add(k);
+                                                            }
+                                                        });
+                                                        Object.keys(data).forEach(k => {
+                                                            if (!systemKeys.has(k) && !seen.has(k)) {
+                                                                const { v, u } = separateUnit(String(data[k]));
+                                                                fields.push({ key: k, value: v, unit: lastUnits[k] || u });
+                                                                seen.add(k);
+                                                            }
+                                                        });
+                                                        if (fields.length > 0) {
+                                                            setDataFields(fields);
+                                                            filledFromCache = true;
+                                                            // Warm localStorage for next time
+                                                            if (typeof window !== 'undefined') {
+                                                                localStorage.setItem(`phdnexus_last_params_${type}`,
+                                                                    JSON.stringify(fields.map(f => ({ key: f.key, value: f.value, unit: f.unit }))));
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                // 3. Hardcoded defaults as last resort
                                                 if (!filledFromCache) {
                                                     if (type === 'Raman') {
                                                         setDataFields([
@@ -1205,12 +1285,11 @@ export function CharacterizationModal({
                                                         toast.info('No auto-fill template available for this technique yet.');
                                                     }
                                                 }
+
                                                 // Auto-fill equipment if previously saved
                                                 if (typeof window !== 'undefined') {
                                                     const lastEq = localStorage.getItem(`phdnexus_last_equipment_${type}`);
-                                                    if (lastEq && !equipment) {
-                                                        setEquipment(lastEq);
-                                                    }
+                                                    if (lastEq && !equipment) setEquipment(lastEq);
                                                 }
                                                 toast.success('Fields auto-filled!');
                                             }}
