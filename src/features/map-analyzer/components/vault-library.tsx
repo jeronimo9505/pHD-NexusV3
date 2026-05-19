@@ -697,7 +697,7 @@ function FileItem({
 
     // Parse filename into parameter chips
     const { chips, spot } = parseFileChips(file.name);
-    const MAX_CHIPS = 5;
+    const MAX_CHIPS = 8;
     const visibleChips = chips.slice(0, MAX_CHIPS);
     const hiddenCount = chips.length - MAX_CHIPS;
 
