@@ -1,10 +1,9 @@
 /**
  * Environment detection utility.
- * Returns true only when the app is running inside a Tauri desktop window.
- * Use this to conditionally show/hide desktop-exclusive features.
+ * Returns true ONLY when the app is running inside a Tauri desktop window.
+ * NOTE: Do NOT use localhost/127.0.0.1 as a proxy — those match web dev servers too.
  */
-export const isDesktop = typeof window !== "undefined" && 
-    ("__TAURI__" in window || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+export const isDesktop = typeof window !== "undefined" && "__TAURI__" in window;
 
 /** 
  * URL of the local Python science engine sidecar.
@@ -16,6 +15,7 @@ export const SCIENCE_ENGINE_URL = "http://127.0.0.1:8888";
  * Check if the Python science engine is online.
  */
 export async function checkEngineHealth(): Promise<boolean> {
+    if (!isDesktop) return false;
     try {
         const res = await fetch(`${SCIENCE_ENGINE_URL}/health`, { signal: AbortSignal.timeout(2000) });
         return res.ok;
@@ -78,7 +78,6 @@ export async function fetchSpectrum(h5AbsPath: string): Promise<{
 }> {
     const url = new URL(`${SCIENCE_ENGINE_URL}/api/spectrum`);
     url.searchParams.set("h5_path", h5AbsPath);
-
     const res = await fetch(url.toString());
     if (!res.ok) {
         const err = await res.json();
@@ -103,17 +102,16 @@ export async function fetchRepresentativeSpectrum(
             h5_relative_paths: h5RelativePaths,
         }),
     });
-    
     if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || "Could not fetch representative spectrum");
     }
-    
     return res.json();
 }
 
 /**
  * Fetch list of all folders (logbooks) in the Vault root.
+ * Returns empty list gracefully when not on desktop.
  */
 export async function fetchVaultLogbooks(vaultRoot: string): Promise<{
     success: boolean;
@@ -123,16 +121,21 @@ export async function fetchVaultLogbooks(vaultRoot: string): Promise<{
         path: string;
     }>;
 }> {
-    const url = new URL(`${SCIENCE_ENGINE_URL}/api/vault-logbooks`);
-    url.searchParams.set("vault_root", vaultRoot);
-
-    const res = await fetch(url.toString());
-    if (!res.ok) throw new Error("Could not fetch logbooks");
-    return res.json();
+    if (!isDesktop) return { success: false, logbooks: [] };
+    try {
+        const url = new URL(`${SCIENCE_ENGINE_URL}/api/vault-logbooks`);
+        url.searchParams.set("vault_root", vaultRoot);
+        const res = await fetch(url.toString());
+        if (!res.ok) throw new Error("Could not fetch logbooks");
+        return res.json();
+    } catch {
+        return { success: false, logbooks: [] };
+    }
 }
 
 /**
  * Fetch list of all .h5 files from the local Vault.
+ * Returns empty list gracefully when not on desktop.
  */
 export async function fetchVaultFiles(vaultRoot: string, groupId?: string): Promise<{
     success: boolean;
@@ -149,13 +152,17 @@ export async function fetchVaultFiles(vaultRoot: string, groupId?: string): Prom
         map_height: number;
     }>;
 }> {
-    const url = new URL(`${SCIENCE_ENGINE_URL}/api/vault-files`);
-    url.searchParams.set("vault_root", vaultRoot);
-    if (groupId) url.searchParams.set("group_id", groupId);
-
-    const res = await fetch(url.toString());
-    if (!res.ok) throw new Error("Could not fetch vault files");
-    return res.json();
+    if (!isDesktop) return { success: false, files: [] };
+    try {
+        const url = new URL(`${SCIENCE_ENGINE_URL}/api/vault-files`);
+        url.searchParams.set("vault_root", vaultRoot);
+        if (groupId) url.searchParams.set("group_id", groupId);
+        const res = await fetch(url.toString());
+        if (!res.ok) throw new Error("Could not fetch vault files");
+        return res.json();
+    } catch {
+        return { success: false, files: [] };
+    }
 }
 
 /**
@@ -283,15 +290,22 @@ export async function renameVaultFiles(request: {
     h5_relative_paths: string[];
     metadata: Record<string, any>;
 }): Promise<{ success: boolean; renamed_paths: Record<string, string>; message: string }> {
-    const res = await fetch(`${SCIENCE_ENGINE_URL}/api/map/rename`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-    });
-    if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || "Renaming failed");
+    try {
+        const res = await fetch(`${SCIENCE_ENGINE_URL}/api/map/rename`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(request),
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || "Renaming failed");
+        }
+        return res.json();
+    } catch (err: any) {
+        if (err?.message === 'Failed to fetch' || err?.name === 'TypeError') {
+            throw new Error('Python engine not running. Start it with: python .\\start.py');
+        }
+        throw err;
     }
-    return res.json();
 }
 
