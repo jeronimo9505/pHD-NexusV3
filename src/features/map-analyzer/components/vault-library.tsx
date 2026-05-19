@@ -426,7 +426,7 @@ export function VaultLibrary({
                                     key={group.name}
                                     className={cn(
                                         "flex flex-col",
-                                        groupIdx > 0 && "border-t border-indigo-200"
+                                        groupIdx > 0 && "border-t-2 border-indigo-300"
                                     )}
                                 >
                                     {/* Sample Header Row */}
