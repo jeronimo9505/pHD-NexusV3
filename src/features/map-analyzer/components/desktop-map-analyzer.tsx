@@ -262,7 +262,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     return (
         <div className="flex h-full w-full bg-slate-50 text-slate-900 font-sans">
             {/* Sidebar Library (Light) */}
-            <div className="w-96 border-r border-slate-200 flex flex-col bg-white relative z-50 shrink-0 shadow-sm">
+            <div className="w-[420px] border-r border-slate-200 flex flex-col bg-white relative z-50 shrink-0 shadow-sm">
                 <VaultLibrary 
                     vaultRoot={vaultRoot} 
                     groupId={groupId}
