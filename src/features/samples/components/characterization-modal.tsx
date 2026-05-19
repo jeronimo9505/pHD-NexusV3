@@ -524,14 +524,21 @@ export function CharacterizationModal({
                 if (lastParamsJson) {
                     try {
                         const cachedFields = JSON.parse(lastParamsJson);
-                        if (Array.isArray(cachedFields) && cachedFields.length > 0) {
-                            const newFields = cachedFields.map(f => ({
+                        // Only trust this cache if it has at least one non-empty value
+                        // (guards against the old bug that stored all values as '')
+                        const hasRealValues = Array.isArray(cachedFields) &&
+                            cachedFields.some((f: any) => f.value && f.value.trim() !== '');
+                        if (hasRealValues) {
+                            const newFields = cachedFields.map((f: any) => ({
                                 key: f.key,
-                                value: '',
+                                value: '',       // start clean in UI
                                 unit: f.unit || lastUnits[f.key] || ''
                             }));
                             setDataFields(newFields);
                             loadedFromCache = true;
+                        } else {
+                            // Stale cache — clear it and re-fetch from Supabase
+                            localStorage.removeItem(`phdnexus_last_params_${newType}`);
                         }
                     } catch (e) {
                         console.error('Error loading cached default fields structure', e);
@@ -559,13 +566,18 @@ export function CharacterizationModal({
                         };
 
                         const seen = new Set<string>();
-                        const fields: { key: string; value: string; unit: string }[] = [];
+                        // cacheFields: with real values → stored in localStorage for Auto-Fill
+                        // displayFields: empty values → shown in UI so user starts fresh
+                        const cacheFields: { key: string; value: string; unit: string }[] = [];
+                        const displayFields: { key: string; value: string; unit: string }[] = [];
 
                         // 1. Ordered keys first
                         order.forEach(k => {
                             if (!systemKeys.has(k) && data[k] !== undefined && !seen.has(k)) {
-                                const { u } = separateUnit(String(data[k]));
-                                fields.push({ key: k, value: '', unit: lastUnits[k] || u });
+                                const { v, u } = separateUnit(String(data[k]));
+                                const unit = lastUnits[k] || u;
+                                cacheFields.push({ key: k, value: v, unit });
+                                displayFields.push({ key: k, value: '', unit });
                                 seen.add(k);
                             }
                         });
@@ -573,18 +585,20 @@ export function CharacterizationModal({
                         // 2. Any remaining non-system keys
                         Object.keys(data).forEach(k => {
                             if (!systemKeys.has(k) && !seen.has(k)) {
-                                const { u } = separateUnit(String(data[k]));
-                                fields.push({ key: k, value: '', unit: lastUnits[k] || u });
+                                const { v, u } = separateUnit(String(data[k]));
+                                const unit = lastUnits[k] || u;
+                                cacheFields.push({ key: k, value: v, unit });
+                                displayFields.push({ key: k, value: '', unit });
                                 seen.add(k);
                             }
                         });
 
-                        if (fields.length > 0) {
-                            setDataFields(fields);
-                            // Persist to localStorage so next time it's instant
+                        if (displayFields.length > 0) {
+                            setDataFields(displayFields);
+                            // Persist WITH real values so Auto-Fill works cross-platform
                             if (typeof window !== 'undefined') {
                                 localStorage.setItem(`phdnexus_last_params_${newType}`,
-                                    JSON.stringify(fields.map(f => ({ key: f.key, value: '', unit: f.unit }))));
+                                    JSON.stringify(cacheFields));
                             }
                             return; // Skip hardcoded defaults below
                         }
