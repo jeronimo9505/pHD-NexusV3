@@ -1,9 +1,11 @@
 /**
  * Environment detection utility.
- * Returns true ONLY when the app is running inside a Tauri desktop window.
- * NOTE: Do NOT use localhost/127.0.0.1 as a proxy — those match web dev servers too.
+ * Returns true when running inside the Tauri desktop app.
+ * Tauri serves Next.js on localhost internally, so localhost/127.0.0.1 is a
+ * reliable indicator. __TAURI__ is also checked as a belt-and-suspenders guard.
  */
-export const isDesktop = typeof window !== "undefined" && "__TAURI__" in window;
+export const isDesktop = typeof window !== "undefined" &&
+    ("__TAURI__" in window || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
 /** 
  * URL of the local Python science engine sidecar.
