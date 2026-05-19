@@ -33,6 +33,11 @@ interface VaultFile {
     pipeline_history?: string; // JSON string of steps
 }
 
+interface FileNode {
+    file: VaultFile;
+    children: VaultFile[];
+}
+
 interface SampleGroup {
     name: string;
     displayName: string;
@@ -43,6 +48,7 @@ interface SampleGroup {
     attributes?: Record<string, any>;
     latestDate: string;
     files: VaultFile[];
+    fileNodes: FileNode[];
 }
 
 import { createPortal } from 'react-dom';
@@ -219,62 +225,109 @@ export function VaultLibrary({
     };
 
     const groupedData = useMemo(() => {
-        // 1. Group all files first to maintain hierarchy
+        // ── helpers ──────────────────────────────────────────────────────────
+        const getStem = (f: VaultFile) => f.name.replace(/\.h5$/i, '');
+
+        // A file is a pipeline derivative if it has pipeline_applied OR
+        // its stem ends with _preprocessed or _preprocessed_N
+        const isPipelineFile = (f: VaultFile) =>
+            f.pipeline_applied === true ||
+            /_preprocessed(_\d+)?$/.test(getStem(f));
+
+        // Strip _preprocessed(_N)? to find the parent's stem
+        const getParentStem = (f: VaultFile) =>
+            getStem(f).replace(/_preprocessed(_\d+)?$/, '');
+
+        // ── group by sample ──────────────────────────────────────────────────
         const groups = sessionFiles.reduce((acc, file) => {
             const rawSName = (file.sample_name || 'Uncategorized').trim();
-            
-            const dbMatch = dbSamples.find(s => s.sample_code === rawSName) || 
-                            dbSamples.find(s => file.name.includes(s.sample_code)) || 
-                            dbSamples.find(s => s.name === rawSName);
-            
+            const dbMatch =
+                dbSamples.find(s => s.sample_code === rawSName) ||
+                dbSamples.find(s => file.name.includes(s.sample_code)) ||
+                dbSamples.find(s => s.name === rawSName);
             const sName = dbMatch ? dbMatch.sample_code : rawSName;
-            
+
             if (!acc[sName]) {
-                acc[sName] = { 
-                    name: sName, 
+                acc[sName] = {
+                    name: sName,
                     displayName: dbMatch?.name || sName,
                     sampleCode: dbMatch?.sample_code,
                     composition: dbMatch?.composition || [],
                     description: dbMatch?.description || '',
                     status: dbMatch?.status,
                     attributes: dbMatch?.attributes || {},
-                    files: [], 
+                    files: [],
+                    fileNodes: [],
                     latestDate: file.measured_at || file.created_at || ''
                 };
             }
             acc[sName].files.push(file);
-            
-            if (!file.pipeline_applied) {
+            if (!isPipelineFile(file)) {
                 const fileDate = file.measured_at || file.created_at || '';
-                if (fileDate > acc[sName].latestDate) {
-                    acc[sName].latestDate = fileDate;
-                }
+                if (fileDate > acc[sName].latestDate) acc[sName].latestDate = fileDate;
             }
             return acc;
         }, {} as Record<string, SampleGroup>);
 
-        // 2. Filter groups based on sample info or file names (including pipeline names)
+        // ── build parent → children tree per group ───────────────────────────
+        Object.values(groups).forEach(group => {
+            const originals = group.files.filter(f => !isPipelineFile(f));
+            const pipelines  = group.files.filter(f =>  isPipelineFile(f));
+
+            // Record: original stem → FileNode
+            const nodeRecord: Record<string, FileNode> = {};
+            originals.forEach(f => { nodeRecord[getStem(f)] = { file: f, children: [] }; });
+
+            // Attach each pipeline to its parent; orphans become root nodes
+            const orphanNodes: FileNode[] = [];
+            pipelines.forEach(pf => {
+                const parentStem = getParentStem(pf);
+                const parentNode = nodeRecord[parentStem];
+                if (parentNode) {
+                    parentNode.children.push(pf);
+                } else {
+                    orphanNodes.push({ file: pf, children: [] });
+                }
+            });
+
+            // Sort children by date (oldest first — preserves pipeline creation order)
+            Object.values(nodeRecord).forEach((node: FileNode) =>
+                node.children.sort((a: VaultFile, b: VaultFile) =>
+                    (a.measured_at || a.created_at || '').localeCompare(
+                        b.measured_at || b.created_at || '')
+                )
+            );
+
+            // Root nodes: originals sorted by date desc, orphan pipelines at end
+            const rootNodes: FileNode[] = [
+                ...Object.values(nodeRecord).sort((a: FileNode, b: FileNode) =>
+                    (b.file.measured_at || b.file.created_at || '').localeCompare(
+                        a.file.measured_at || a.file.created_at || '')
+                ),
+                ...orphanNodes
+            ];
+
+            group.fileNodes = rootNodes;
+        });
+
+        // ── filter + sort groups ─────────────────────────────────────────────
         const searchLower = search.toLowerCase();
-        if (!searchLower) {
-            return Object.values(groups).sort((a, b) => b.latestDate.localeCompare(a.latestDate));
-        }
+        const allGroups = Object.values(groups).sort((a, b) =>
+            b.latestDate.localeCompare(a.latestDate));
 
-        const filteredGroups = Object.values(groups).filter(group => {
-            // Match in sample metadata
-            const groupMatch = group.name.toLowerCase().includes(searchLower) || 
-                               group.displayName.toLowerCase().includes(searchLower) ||
-                               (group.sampleCode && group.sampleCode.toLowerCase().includes(searchLower));
-            
+        if (!searchLower) return allGroups;
+
+        return allGroups.filter(group => {
+            const groupMatch =
+                group.name.toLowerCase().includes(searchLower) ||
+                group.displayName.toLowerCase().includes(searchLower) ||
+                (group.sampleCode && group.sampleCode.toLowerCase().includes(searchLower));
             if (groupMatch) return true;
-
-            // Match in any of the files
-            return group.files.some(f => 
-                f.name.toLowerCase().includes(searchLower) || 
+            return group.files.some(f =>
+                f.name.toLowerCase().includes(searchLower) ||
                 (f.pipeline_name && f.pipeline_name.toLowerCase().includes(searchLower))
             );
         });
-
-        return filteredGroups.sort((a, b) => b.latestDate.localeCompare(a.latestDate));
     }, [sessionFiles, search, dbSamples]);
 
     return (
@@ -409,19 +462,39 @@ export function VaultLibrary({
                                         </div>
                                     </div>
 
-                                    {/* Child File Rows */}
-                                    {expandedSamples[group.name] !== false && group.files.map(file => (
-                                        <FileItem 
-                                            key={file.id} 
-                                            file={file} 
-                                            isSelected={selectedH5 === file.h5_relative_path} 
-                                            isCompared={compareFiles?.some(f => f.id === file.id) || false} 
-                                            onToggleCompare={onToggleCompare} 
-                                            onSelect={onSelect} 
-                                            onRemove={onRemove} 
-                                            onDeleteFile={onDeleteFile}
-                                            isNested={true}
-                                        />
+                                    {/* Child File Rows: original + its pipeline children together */}
+                                    {expandedSamples[group.name] !== false && group.fileNodes.map(node => (
+                                        <div key={node.file.id}>
+                                            {/* Original file */}
+                                            <FileItem
+                                                file={node.file}
+                                                isSelected={selectedH5 === node.file.h5_relative_path}
+                                                isCompared={compareFiles?.some(f => f.id === node.file.id) || false}
+                                                onToggleCompare={onToggleCompare}
+                                                onSelect={onSelect}
+                                                onRemove={onRemove}
+                                                onDeleteFile={onDeleteFile}
+                                                isNested={true}
+                                                isChild={false}
+                                                hasChildren={node.children.length > 0}
+                                            />
+                                            {/* Pipeline children — directly below their parent */}
+                                            {node.children.map(child => (
+                                                <FileItem
+                                                    key={child.id}
+                                                    file={child}
+                                                    isSelected={selectedH5 === child.h5_relative_path}
+                                                    isCompared={compareFiles?.some(f => f.id === child.id) || false}
+                                                    onToggleCompare={onToggleCompare}
+                                                    onSelect={onSelect}
+                                                    onRemove={onRemove}
+                                                    onDeleteFile={onDeleteFile}
+                                                    isNested={true}
+                                                    isChild={true}
+                                                    hasChildren={false}
+                                                />
+                                            ))}
+                                        </div>
                                     ))}
                                 </div>
                             ))}
@@ -545,7 +618,19 @@ function PipelineStepsModal({ name, history, onClose }: { name: string, history:
     );
 }
 
-function FileItem({ file, isSelected, isCompared, onToggleCompare, onSelect, onRemove, onDeleteFile, isNested = false }: { file: VaultFile, isSelected: boolean, isCompared?: boolean, onToggleCompare?: (f: VaultFile) => void, onSelect: (f: VaultFile) => void, onRemove: (path: string) => void, onDeleteFile?: (f: VaultFile) => void, isNested?: boolean }) {
+function FileItem({ 
+    file, isSelected, isCompared, onToggleCompare, onSelect, onRemove, onDeleteFile, 
+    isNested = false, isChild = false, hasChildren = false 
+}: { 
+    file: VaultFile, isSelected: boolean, isCompared?: boolean, 
+    onToggleCompare?: (f: VaultFile) => void, 
+    onSelect: (f: VaultFile) => void, 
+    onRemove: (path: string) => void, 
+    onDeleteFile?: (f: VaultFile) => void, 
+    isNested?: boolean,
+    isChild?: boolean,      // true = pipeline child, rendered under its parent
+    hasChildren?: boolean   // true = original that has pipeline children below it
+}) {
     const isMap = file.n_spectra > 1;
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [showPipelineInfo, setShowPipelineInfo] = useState(false);
@@ -592,18 +677,36 @@ function FileItem({ file, isSelected, isCompared, onToggleCompare, onSelect, onR
             </div>
 
             {/* Column 2: Code with Tree Connector */}
-            <div className="w-24 border-r border-slate-100 px-3 py-2 flex items-center gap-2 shrink-0">
-                <span className="text-slate-300 text-[10px] font-light">└</span>
-                <span className="text-[10px] font-bold text-slate-400 truncate">
-                    {meta.prefixCode}
-                </span>
+            <div className="w-24 border-r border-slate-100 px-3 py-2 flex items-center gap-1 shrink-0">
+                {isChild ? (
+                    // Pipeline child: deeper indent + different connector
+                    <>
+                        <span className="text-slate-100 text-[10px] font-light ml-3">└</span>
+                        <span className="text-[10px] font-bold text-slate-300 truncate">
+                            {meta.prefixCode}
+                        </span>
+                    </>
+                ) : (
+                    // Original file
+                    <>
+                        <span className="text-slate-300 text-[10px] font-light">└</span>
+                        <span className="text-[10px] font-bold text-slate-400 truncate">
+                            {meta.prefixCode}
+                        </span>
+                    </>
+                )}
             </div>
 
             {/* Column 3: Name */}
-            <div className="flex-1 px-3 py-2 flex items-center justify-between min-w-0">
+            <div className={cn(
+                "flex-1 px-3 py-2 flex items-center justify-between min-w-0",
+                isChild && "bg-slate-50/40 border-l-2 border-orange-100"
+            )}>
                 <span className={cn(
                     "truncate transition-colors",
-                    file.pipeline_applied ? "text-indigo-600 font-bold italic" : (isSelected ? "text-indigo-900 font-bold" : "text-slate-600 font-medium")
+                    file.pipeline_applied
+                        ? "text-indigo-600 font-bold italic"
+                        : isSelected ? "text-indigo-900 font-bold" : "text-slate-600 font-medium"
                 )}>
                     {file.pipeline_applied && file.pipeline_name ? file.pipeline_name : meta.shortName}
                 </span>
