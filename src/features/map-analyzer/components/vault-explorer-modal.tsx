@@ -175,13 +175,14 @@ export function VaultExplorerModal({
     const [openSampleOverview, setOpenSampleOverview] = useState<string | null>(null);
     const overviewRef = useRef<HTMLDivElement>(null);
 
-    // Filters
-    const [techniqueFilter, setTechniqueFilter] = useState<string>('all');
-    const [laserFilter, setLaserFilter] = useState<string>('all');
+    // Filters — dynamic facet system
+    const [facetFilters, setFacetFilters] = useState<Record<string, Set<string>>>({});
     const [statusFilter, setStatusFilter] = useState<'all' | 'loaded' | 'not_loaded'>('all');
     const [dateFrom, setDateFrom] = useState<string>('');
     const [dateTo, setDateTo] = useState<string>('');
     const [showFilters, setShowFilters] = useState(false);
+    const [openFacet, setOpenFacet] = useState<string | null>(null);
+    const facetRef = useRef<HTMLDivElement>(null);
 
     // Load initial data
     useEffect(() => {
@@ -394,10 +395,42 @@ export function VaultExplorerModal({
         setStep(1);
     };
 
+    // Compute available facets from real metadata values in loaded files
+    const availableFacets = useMemo(() => {
+        const facets: Record<string, Map<string, number>> = {}; // key -> {value -> count}
+        files.forEach(f => {
+            const meta = f.metadata || {};
+            Object.entries(meta).forEach(([k, v]) => {
+                if (!v || typeof v !== 'string') return;
+                const val = v.trim();
+                if (!val || val.length > 40) return;
+                // Skip system-like keys
+                if (['notes', 'equipment', 'file_origin', 'local_h5_path', 'original_file'].includes(k)) return;
+                if (!facets[k]) facets[k] = new Map();
+                facets[k].set(val, (facets[k].get(val) || 0) + 1);
+            });
+            // Technique is always a facet
+            if (f.technique) {
+                if (!facets['technique']) facets['technique'] = new Map();
+                facets['technique'].set(f.technique, (facets['technique'].get(f.technique) || 0) + 1);
+            }
+        });
+        // Sort facets by number of unique values (fewer = more useful filter), max 6 facets
+        return Object.entries(facets)
+            .filter(([, m]) => m.size >= 1 && m.size <= 20)
+            .sort((a, b) => a[1].size - b[1].size)
+            .slice(0, 6)
+            .map(([key, valMap]) => ({
+                key,
+                label: key.replace(/_/g, ' '),
+                values: Array.from(valMap.entries()).sort((a, b) => b[1] - a[1]) // sort by count desc
+            }));
+    }, [files]);
+
     const filteredFiles = useMemo(() => {
         let result = files;
 
-        // Full-text search: filename, sample name, metadata params, sample description & notes
+        // Full-text search
         if (search) {
             const q = search.toLowerCase();
             result = result.filter(f => {
@@ -417,18 +450,16 @@ export function VaultExplorerModal({
             });
         }
 
-        // Technique filter
-        if (techniqueFilter !== 'all') {
-            result = result.filter(f => f.technique.toLowerCase() === techniqueFilter.toLowerCase());
-        }
-
-        // Laser filter — matched against metadata.laser token
-        if (laserFilter !== 'all') {
+        // Dynamic facet filters — AND across facets, OR within each facet
+        Object.entries(facetFilters).forEach(([key, selectedVals]) => {
+            if (!selectedVals || selectedVals.size === 0) return;
             result = result.filter(f => {
-                const laser = (f.metadata?.laser || '').toLowerCase();
-                return laser.includes(laserFilter.toLowerCase());
+                const val = key === 'technique'
+                    ? (f.technique || '')
+                    : ((f.metadata || {})[key] || '');
+                return selectedVals.has(String(val).trim());
             });
-        }
+        });
 
         // Status filter
         if (statusFilter === 'loaded') {
@@ -443,7 +474,7 @@ export function VaultExplorerModal({
             result = result.filter(f => new Date(f.measured_at || f.created_at || 0).getTime() >= from);
         }
         if (dateTo) {
-            const to = new Date(dateTo).getTime() + 86400000; // inclusive of end day
+            const to = new Date(dateTo).getTime() + 86400000;
             result = result.filter(f => new Date(f.measured_at || f.created_at || 0).getTime() <= to);
         }
 
@@ -451,7 +482,7 @@ export function VaultExplorerModal({
             new Date(b.measured_at || b.created_at || 0).getTime() -
             new Date(a.measured_at || a.created_at || 0).getTime()
         );
-    }, [files, search, techniqueFilter, laserFilter, statusFilter, dateFrom, dateTo, currentSessionFiles, dbSamples]);
+    }, [files, search, facetFilters, statusFilter, dateFrom, dateTo, currentSessionFiles, dbSamples]);
 
     const groupedFiles = useMemo(() => {
         const groups: Record<string, VaultFile[]> = {};
@@ -640,16 +671,16 @@ export function VaultExplorerModal({
                                                 onClick={() => setShowFilters(v => !v)}
                                                 className={cn(
                                                     "flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-black uppercase tracking-wider transition-all",
-                                                    showFilters || laserFilter !== 'all' || statusFilter !== 'all' || dateFrom || dateTo || techniqueFilter !== 'all'
+                                                    showFilters || Object.values(facetFilters).some(s => s.size > 0) || statusFilter !== 'all' || dateFrom || dateTo
                                                         ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
                                                         : "bg-white border-slate-200 text-slate-500 hover:border-indigo-400 hover:text-indigo-600"
                                                 )}
                                             >
                                                 <SlidersHorizontal size={12} />
                                                 Filters
-                                                {(laserFilter !== 'all' || statusFilter !== 'all' || dateFrom || dateTo || techniqueFilter !== 'all') && (
+                                                {(Object.values(facetFilters).some(s => s.size > 0) || statusFilter !== 'all' || !!dateFrom || !!dateTo) && (
                                                     <span className="ml-0.5 bg-white/30 text-white rounded-full w-3.5 h-3.5 flex items-center justify-center text-[8px] font-black">
-                                                        {[laserFilter !== 'all', statusFilter !== 'all', !!dateFrom, !!dateTo, techniqueFilter !== 'all'].filter(Boolean).length}
+                                                        {Object.values(facetFilters).filter(s => s.size > 0).length + (statusFilter !== 'all' ? 1 : 0) + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0)}
                                                     </span>
                                                 )}
                                             </button>
@@ -666,50 +697,83 @@ export function VaultExplorerModal({
                                         </div>
                                     </div>
 
-                                    {/* Row 2: Filter chips — shown conditionally */}
+                                    {/* Row 2: Dynamic facet filter bar */}
                                     {showFilters && (
-                                        <div className="flex flex-wrap items-center gap-2 py-2">
-                                            {/* Technique */}
-                                            <div className="flex items-center gap-1">
-                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Tech</span>
-                                                {['all', 'Raman', 'SERS'].map(opt => (
-                                                    <button key={opt}
-                                                        onClick={() => setTechniqueFilter(opt)}
-                                                        className={cn(
-                                                            "text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border transition-all",
-                                                            techniqueFilter === opt
-                                                                ? opt === 'SERS' ? 'bg-violet-600 border-violet-600 text-white' : 'bg-indigo-600 border-indigo-600 text-white'
-                                                                : 'bg-white border-slate-200 text-slate-500 hover:border-indigo-300'
+                                        <div className="flex flex-wrap items-center gap-2 py-2" ref={facetRef}>
+
+                                            {/* Dynamic facet dropdowns — values come from real file metadata */}
+                                            {availableFacets.map(facet => {
+                                                const active = facetFilters[facet.key];
+                                                const hasActive = active && active.size > 0;
+                                                const isOpen = openFacet === facet.key;
+                                                return (
+                                                    <div key={facet.key} className="relative">
+                                                        <button
+                                                            onClick={() => setOpenFacet(isOpen ? null : facet.key)}
+                                                            className={cn(
+                                                                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-wider transition-all",
+                                                                hasActive
+                                                                    ? "bg-indigo-50 border-indigo-400 text-indigo-700"
+                                                                    : "bg-white border-slate-200 text-slate-500 hover:border-indigo-300 hover:text-indigo-600"
+                                                            )}
+                                                        >
+                                                            <span className="capitalize">{facet.label}</span>
+                                                            {hasActive && (
+                                                                <span className="bg-indigo-600 text-white rounded-full px-1.5 text-[8px] font-black">
+                                                                    {active.size}
+                                                                </span>
+                                                            )}
+                                                            <ChevronDown size={9} className={cn("transition-transform", isOpen && "rotate-180")} />
+                                                        </button>
+
+                                                        {/* Dropdown: Excel-style checklist */}
+                                                        {isOpen && (
+                                                            <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-xl min-w-[160px] max-w-[220px] overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150">
+                                                                <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
+                                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 capitalize">{facet.label}</span>
+                                                                    {hasActive && (
+                                                                        <button
+                                                                            onClick={() => setFacetFilters(prev => { const n = {...prev}; delete n[facet.key]; return n; })}
+                                                                            className="text-[9px] text-rose-400 hover:text-rose-600 font-black uppercase"
+                                                                        >Clear</button>
+                                                                    )}
+                                                                </div>
+                                                                <div className="max-h-48 overflow-y-auto py-1">
+                                                                    {facet.values.map(([val, count]) => {
+                                                                        const checked = active?.has(val) ?? false;
+                                                                        return (
+                                                                            <button
+                                                                                key={val}
+                                                                                onClick={() => {
+                                                                                    setFacetFilters(prev => {
+                                                                                        const cur = new Set(prev[facet.key] || []);
+                                                                                        if (cur.has(val)) cur.delete(val); else cur.add(val);
+                                                                                        return { ...prev, [facet.key]: cur };
+                                                                                    });
+                                                                                }}
+                                                                                className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-indigo-50 transition-colors text-left group"
+                                                                            >
+                                                                                <div className={cn(
+                                                                                    "w-3.5 h-3.5 rounded border-2 flex items-center justify-center shrink-0 transition-all",
+                                                                                    checked ? "bg-indigo-600 border-indigo-600" : "border-slate-300 group-hover:border-indigo-400"
+                                                                                )}>
+                                                                                    {checked && <span className="text-white text-[7px] font-black">✓</span>}
+                                                                                </div>
+                                                                                <span className="flex-1 text-[11px] font-medium text-slate-700 truncate">{val}</span>
+                                                                                <span className="text-[9px] text-slate-400 font-bold shrink-0">{count}</span>
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
                                                         )}
-                                                    >
-                                                        {opt === 'all' ? 'All' : opt}
-                                                    </button>
-                                                ))}
-                                            </div>
+                                                    </div>
+                                                );
+                                            })}
 
-                                            <div className="h-4 w-px bg-slate-200" />
+                                            {availableFacets.length > 0 && <div className="h-4 w-px bg-slate-200" />}
 
-                                            {/* Laser */}
-                                            <div className="flex items-center gap-1">
-                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Laser</span>
-                                                {['all', '532', '633', '638', '785', '1064'].map(nm => (
-                                                    <button key={nm}
-                                                        onClick={() => setLaserFilter(nm)}
-                                                        className={cn(
-                                                            "text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border transition-all",
-                                                            laserFilter === nm
-                                                                ? 'bg-amber-500 border-amber-500 text-white'
-                                                                : 'bg-white border-slate-200 text-slate-500 hover:border-amber-300'
-                                                        )}
-                                                    >
-                                                        {nm === 'all' ? 'All' : `${nm} nm`}
-                                                    </button>
-                                                ))}
-                                            </div>
-
-                                            <div className="h-4 w-px bg-slate-200" />
-
-                                            {/* Status */}
+                                            {/* Status — always valid */}
                                             <div className="flex items-center gap-1">
                                                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Status</span>
                                                 {([['all', 'All'], ['loaded', 'Loaded'], ['not_loaded', 'Not Loaded']] as const).map(([val, label]) => (
@@ -721,9 +785,7 @@ export function VaultExplorerModal({
                                                                 ? val === 'loaded' ? 'bg-green-600 border-green-600 text-white' : 'bg-slate-700 border-slate-700 text-white'
                                                                 : 'bg-white border-slate-200 text-slate-500 hover:border-slate-400'
                                                         )}
-                                                    >
-                                                        {label}
-                                                    </button>
+                                                    >{label}</button>
                                                 ))}
                                             </div>
 
@@ -732,29 +794,46 @@ export function VaultExplorerModal({
                                             {/* Date range */}
                                             <div className="flex items-center gap-1.5">
                                                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">From</span>
-                                                <input
-                                                    type="date"
-                                                    value={dateFrom}
-                                                    onChange={e => setDateFrom(e.target.value)}
-                                                    className="text-[10px] font-bold border border-slate-200 rounded-lg px-2 py-1 outline-none focus:border-indigo-400 bg-white text-slate-600 transition-all"
-                                                />
+                                                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                                                    className="text-[10px] font-bold border border-slate-200 rounded-lg px-2 py-1 outline-none focus:border-indigo-400 bg-white text-slate-600 transition-all" />
                                                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">To</span>
-                                                <input
-                                                    type="date"
-                                                    value={dateTo}
-                                                    onChange={e => setDateTo(e.target.value)}
-                                                    className="text-[10px] font-bold border border-slate-200 rounded-lg px-2 py-1 outline-none focus:border-indigo-400 bg-white text-slate-600 transition-all"
-                                                />
+                                                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                                                    className="text-[10px] font-bold border border-slate-200 rounded-lg px-2 py-1 outline-none focus:border-indigo-400 bg-white text-slate-600 transition-all" />
                                             </div>
 
                                             {/* Clear all */}
-                                            {(techniqueFilter !== 'all' || laserFilter !== 'all' || statusFilter !== 'all' || dateFrom || dateTo) && (
+                                            {(Object.values(facetFilters).some(s => s.size > 0) || statusFilter !== 'all' || dateFrom || dateTo) && (
                                                 <button
-                                                    onClick={() => { setTechniqueFilter('all'); setLaserFilter('all'); setStatusFilter('all'); setDateFrom(''); setDateTo(''); }}
+                                                    onClick={() => { setFacetFilters({}); setStatusFilter('all'); setDateFrom(''); setDateTo(''); }}
                                                     className="ml-auto text-[9px] font-black uppercase tracking-wider text-rose-400 hover:text-rose-600 px-2 py-1 rounded-lg border border-rose-200 hover:border-rose-400 bg-white transition-all flex items-center gap-1"
                                                 >
                                                     <X size={9} /> Clear all
                                                 </button>
+                                            )}
+
+                                            {/* Active filter chips */}
+                                            {Object.entries(facetFilters).some(([, s]) => s.size > 0) && (
+                                                <div className="w-full flex flex-wrap gap-1 pt-1">
+                                                    {Object.entries(facetFilters).flatMap(([key, vals]) =>
+                                                        Array.from(vals).map(val => (
+                                                            <span key={`${key}:${val}`}
+                                                                className="inline-flex items-center gap-1 text-[9px] font-black bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200"
+                                                            >
+                                                                <span className="capitalize opacity-60">{key}:</span> {val}
+                                                                <button
+                                                                    onClick={() => setFacetFilters(prev => {
+                                                                        const cur = new Set(prev[key]);
+                                                                        cur.delete(val);
+                                                                        const n = { ...prev };
+                                                                        if (cur.size === 0) delete n[key]; else n[key] = cur;
+                                                                        return n;
+                                                                    })}
+                                                                    className="ml-0.5 hover:text-rose-600 transition-colors"
+                                                                ><X size={8} /></button>
+                                                            </span>
+                                                        ))
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
                                     )}
