@@ -426,7 +426,7 @@ export function VaultLibrary({
                                     key={group.name}
                                     className={cn(
                                         "flex flex-col",
-                                        groupIdx > 0 && "border-t-2 border-indigo-200"
+                                        groupIdx > 0 && "border-t border-indigo-200"
                                     )}
                                 >
                                     {/* Sample Header Row */}
@@ -472,7 +472,7 @@ export function VaultLibrary({
                                     {expandedSamples[group.name] !== false && group.fileNodes.map((node, nodeIdx) => (
                                         <div
                                             key={node.file.id}
-                                            className={cn(nodeIdx > 0 && "border-t border-slate-200")}
+                                            className={cn(nodeIdx > 0 && "border-t border-dashed border-slate-300")}
                                         >
                                             {/* Original file */}
                                             <FileItem
