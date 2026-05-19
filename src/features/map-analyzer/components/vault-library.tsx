@@ -588,12 +588,12 @@ function parseFileChips(name: string): { chips: Chip[]; spot: string | null } {
 
     tokens.forEach((t: string, idx: number) => {
         if (usedIndices.has(idx)) return;
-        if (/^\d+nm$/i.test(t))                           chips.push({ label: t, type: 'laser' });
-        else if (/^\d+[µu]W$/i.test(t) || /^\d+mW$/i.test(t)) chips.push({ label: t.replace('µ','µ'), type: 'power' });
-        else if (/^\d+x$/i.test(t) && parseInt(t) <= 200) chips.push({ label: t, type: 'objective' });
-        else if (/^\d+s$/i.test(t))                       chips.push({ label: t, type: 'time' });
-        else if (/^\d+ac$/i.test(t))                      chips.push({ label: t.replace('ac','acc'), type: 'acc' });
-        else if (/^\d+$/.test(t) && parseInt(t) <= 500)   chips.push({ label: t + 'x', type: 'acc' });
+        if (/^\d+nm$/i.test(t))                                chips.push({ label: t, type: 'laser' });
+        else if (/^\d+[µu]W$/i.test(t) || /^\d+mW$/i.test(t)) chips.push({ label: t, type: 'power' });
+        else if (/^\d+x$/i.test(t) && parseInt(t) <= 200)     chips.push({ label: t, type: 'objective' });
+        else if (/^\d+s$/i.test(t))                            chips.push({ label: t, type: 'time' });
+        else if (/^\d+ac$/i.test(t))                           chips.push({ label: t, type: 'acc' });
+        else if (/^\d+$/.test(t) && parseInt(t) <= 500)        chips.push({ label: t + 'ac', type: 'acc' });
         else if (/\d+x\d+/i.test(t) || /µm$/i.test(t))   { /* skip map size tokens */ }
         else if (t.length <= 30)                           chips.push({ label: t, type: 'analyte' });
     });
