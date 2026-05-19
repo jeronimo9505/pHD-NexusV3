@@ -1048,11 +1048,35 @@ def rename_map_files(request: RenameRequest):
                 while new_abs_path.exists():
                     new_abs_path = new_dir / f"{stem}_{counter}{ext}"
                     counter += 1
-            
             # 5. Physically rename / move the file
             if old_abs_path != new_abs_path:
                 shutil.move(str(old_abs_path), str(new_abs_path))
-                
+
+            # 5b. Cascade rename: find pipeline children (_preprocessed*.h5) and
+            #     rename them to use the new stem, preserving the _preprocessed suffix.
+            old_stem = old_abs_path.stem  # e.g. "A12-B2-B1_RAMAN_..._Spot3"
+            new_stem = new_abs_path.stem  # e.g. "A12-B2-B1_RAMAN_..._Spot3" (new params)
+            if old_stem != new_stem:
+                # Search in the OLD directory for any sibling preprocessed files.
+                # They may still live in the old dir if the dir changed too.
+                search_dirs = {old_abs_path.parent, new_abs_path.parent}
+                for search_dir in search_dirs:
+                    if not search_dir.exists():
+                        continue
+                    for child_path in list(search_dir.glob(f"{re.escape(old_stem)}_preprocessed*.h5")):
+                        # Build new child name: replace old_stem prefix with new_stem
+                        child_suffix = child_path.name[len(old_stem):]  # e.g. "_preprocessed_1.h5"
+                        new_child_name = new_stem + child_suffix
+                        new_child_path = new_abs_path.parent / new_child_name
+                        try:
+                            shutil.move(str(child_path), str(new_child_path))
+                            child_rel = child_path.relative_to(vault_root).as_posix()
+                            new_child_rel = new_child_path.relative_to(vault_root).as_posix()
+                            renamed_paths[child_rel] = new_child_rel
+                            print(f"Cascade rename: {child_path.name} → {new_child_name}")
+                        except Exception as ce:
+                            print(f"Warning: could not cascade-rename {child_path}: {ce}")
+
             # 6. Open the new file in r+ mode and update all attributes
             try:
                 with h5py.File(new_abs_path, "r+") as f:
@@ -1082,8 +1106,6 @@ def rename_map_files(request: RenameRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"File renaming failed: {str(e)}")
-
-
 
 
 # =============================================================================
