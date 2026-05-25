@@ -14,11 +14,12 @@ import { VaultExplorerModal } from './vault-explorer-modal';
 import { PipelineEditor } from './pipeline-editor';
 import { ComparisonView } from './comparison-view';
 import { DeconvolutionView } from './deconvolution-view';
+import { FittingView } from './fitting-view';
 import { getLogbooksAction, getSamplesAction } from '@/features/samples/actions';
 import { Logbook } from '@/features/samples/types';
 
 export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
-    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics' | 'pipeline' | 'compare' | 'deconvolution'>('standard');
+    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics' | 'pipeline' | 'compare' | 'deconvolution' | 'fitting'>('standard');
     const [selectedH5, setSelectedH5] = useState('');
     const [vaultRoot, setVaultRoot] = useState('');
     const [sessionFiles, setSessionFiles] = useState<any[]>([]);
@@ -409,6 +410,15 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     Deconvolution
                                 </button>
                                 <button 
+                                    onClick={() => setMode('fitting')}
+                                    className={cn(
+                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                        mode === 'fitting' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-indigo-600"
+                                    )}
+                                >
+                                    Fitting (SV)
+                                </button>
+                                <button 
                                     onClick={() => setMode('compare')}
                                     className={cn(
                                         "px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
@@ -511,6 +521,14 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     mapHeight={mapDim.h}
                                     nSpectra={nSpectra}
                                 />
+                            ) : mode === 'fitting' ? (
+                                <FittingView
+                                    vaultRoot={vaultRoot}
+                                    h5Path={selectedH5}
+                                    mapWidth={mapDim.w}
+                                    mapHeight={mapDim.h}
+                                    nSpectra={nSpectra}
+                                />
                             ) : (
                                 <GrapheneAnalyticsView 
                                     vaultRoot={vaultRoot}
@@ -519,7 +537,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 />
                             )}
                         </div>
-                        {mode !== 'analytics' && mode !== 'pipeline' && mode !== 'compare' && mode !== 'deconvolution' && (
+                        {mode !== 'analytics' && mode !== 'pipeline' && mode !== 'compare' && mode !== 'deconvolution' && mode !== 'fitting' && (
                             <div className="h-72 shrink-0 bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 overflow-hidden">
                                 <SpectrumInspector 
                                     vaultRoot={vaultRoot}
