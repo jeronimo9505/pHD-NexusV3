@@ -1342,5 +1342,167 @@ def deconvolution_load_config(request: dict):
         return {"success": False, "message": str(e)}
 
 
+# FITTING (DECONVOLUTION 2) ENDPOINTS
+# =============================================================================
+class FittingFitRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    peaks: list[dict]
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    crop_range: Optional[list[float]] = None
+
+class FittingApplyRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    peaks: list[dict]
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    crop_range: Optional[list[float]] = None
+    threshold_snr: float = 3.0
+
+class FittingPreviewBaselineRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    crop_range: Optional[list[float]] = None
+
+@app.post("/api/fitting/fit-representative")
+def fitting_fit_representative(request: FittingFitRequest):
+    from scripts.fitting_engine import fit_spectrum
+    from processor import get_representative_spectrum
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+
+    rep = get_representative_spectrum(request.vault_root, [request.h5_relative_path])
+    if not rep:
+        raise HTTPException(status_code=404, detail="Could not extract representative spectrum")
+
+    x = np.array([pt["x"] for pt in rep])
+    y = np.array([pt["y"] for pt in rep])
+
+    crop_range_tup = tuple(request.crop_range) if request.crop_range else None
+
+    result = fit_spectrum(
+        x=x,
+        y=y,
+        peaks=request.peaks,
+        baseline_method=request.baseline_method,
+        baseline_params=request.baseline_params or {},
+        x_shift=request.x_shift,
+        crop_range=crop_range_tup
+    )
+
+    return result
+
+@app.post("/api/fitting/apply-to-map")
+def fitting_apply_to_map(request: FittingApplyRequest):
+    from scripts.fitting_engine import fit_map_batch
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+
+    try:
+        with h5py.File(path, "r") as f:
+            wavenumbers  = f["/spectrum/wavenumbers"][:]
+            intensities  = f["/spectrum/intensities"][:]
+
+        if intensities.ndim == 1:
+            intensities = intensities.reshape(1, -1)
+
+        crop_range_tup = tuple(request.crop_range) if request.crop_range else None
+
+        result = fit_map_batch(
+            wavenumbers=wavenumbers,
+            intensities_2d=intensities,
+            peaks=request.peaks,
+            baseline_method=request.baseline_method,
+            baseline_params=request.baseline_params or {},
+            x_shift=request.x_shift,
+            crop_range=crop_range_tup,
+            threshold_snr=request.threshold_snr
+        )
+        return result
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Batch fit failed: {str(e)}")
+
+@app.post("/api/fitting/preview-baseline")
+def fitting_preview_baseline(request: FittingPreviewBaselineRequest):
+    from scripts.fitting_engine import apply_baseline
+    from processor import get_representative_spectrum
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+
+    rep = get_representative_spectrum(request.vault_root, [request.h5_relative_path])
+    if not rep:
+        raise HTTPException(status_code=404, detail="Could not extract representative spectrum")
+
+    x = np.array([pt["x"] for pt in rep]) + request.x_shift
+    y = np.array([pt["y"] for pt in rep])
+
+    if request.crop_range:
+        xmin, xmax = request.crop_range
+        mask = (x >= xmin) & (x <= xmax)
+        if np.any(mask):
+            x = x[mask]
+            y = y[mask]
+
+    corrected, baseline = apply_baseline(x, y, request.baseline_method, request.baseline_params or {})
+
+    return {
+        "success": True,
+        "baseline": [{"x": float(xi), "y": float(yi)} for xi, yi in zip(x, baseline)],
+        "corrected": [{"x": float(xi), "y": float(yi)} for xi, yi in zip(x, corrected)]
+    }
+
+@app.post("/api/fitting/save-config")
+def fitting_save_config(request: FittingFitRequest):
+    import json
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        with h5py.File(path, "r+") as f:
+            config_data = {
+                "peaks": request.peaks,
+                "baseline_method": request.baseline_method,
+                "baseline_params": request.baseline_params or {},
+                "x_shift": request.x_shift,
+                "crop_range": request.crop_range,
+                "updated_at": datetime.now().isoformat()
+            }
+            f["config"].attrs["fitting"] = json.dumps(config_data)
+        return {"success": True, "message": "Configuration saved to file"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/fitting/load-config")
+def fitting_load_config(request: dict):
+    import json
+    path = Path(request.get("vault_root")) / request.get("h5_relative_path")
+    if not path.exists():
+        return {"success": False, "message": "File not found"}
+    try:
+        with h5py.File(path, "r") as f:
+            if "config" in f and "fitting" in f["config"].attrs:
+                data = json.loads(f["config"].attrs["fitting"])
+                return {"success": True, "config": data}
+        return {"success": False, "message": "No saved config found"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8888, reload=False)
