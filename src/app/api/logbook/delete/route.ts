@@ -29,8 +29,9 @@ export async function DELETE(req: Request) {
 
         if (error) throw error;
 
-        // 3. Sync to Telegram if metadata exists
-        if (entry?.telegram_message_id && entry?.telegram_chat_id) {
+        // 3. Sync deletion to Telegram
+        const chatId = entry?.telegram_chat_id || process.env.TELEGRAM_CHAT_ID;
+        if (entry?.telegram_message_id && chatId) {
             const botToken = process.env.TELEGRAM_BOT_TOKEN;
             if (botToken) {
                 try {
@@ -38,7 +39,7 @@ export async function DELETE(req: Request) {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            chat_id: entry.telegram_chat_id,
+                            chat_id: chatId.toString(),
                             message_id: entry.telegram_message_id
                         })
                     });

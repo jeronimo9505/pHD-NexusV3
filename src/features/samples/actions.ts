@@ -292,10 +292,15 @@ export async function createSampleAction(input: CreateSampleInput, logbookId: st
             .select('*', { count: 'exact', head: true })
             .eq('parent_id', input.parent_id);
 
-        const firstLetterCode = LOGBOOK_PREFIX?.charCodeAt(0) || 65; // Use first letter of LOGBOOK_PREFIX or 'A'
-        const nextLetter = String.fromCharCode(firstLetterCode + level);
+        let genPrefix = 'c';
+        if (level === 2) {
+            genPrefix = 'g';
+        } else if (level >= 3) {
+            genPrefix = `${level - 1}g`;
+        }
+
         const nextIndex = (siblingCount || 0) + 1;
-        sampleCode = `${parentCode}-${nextLetter}${nextIndex}`;
+        sampleCode = `${parentCode}-${genPrefix}${nextIndex}`;
     } else {
         // Stock (root): LOGBOOK_PREFIX + next count
         const { count: rootCount } = await supabase

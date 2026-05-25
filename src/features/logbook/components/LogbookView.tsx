@@ -42,6 +42,7 @@ import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import { ScientificText } from '@/components/ScientificText';
+import NotionLogbook from './NotionLogbook';
 
 const scrollbarStyles = `
   .custom-scroll::-webkit-scrollbar { width: 4px; }
@@ -180,6 +181,7 @@ function LogEntry({ entry, groupId, onImageClick, onUpdate, onDelete, comments, 
                         <div className="text-[16px] text-white/80 leading-relaxed font-normal tracking-tight">
                             <ScientificText text={c.content} onTagClick={onTagClick} />
                         </div>
+                        <MediaGallery files={c.media_files} onImageClick={onImageClick} onDeleteMedia={onDelete} />
                     </div>
                 ))}
                 {isReplying && (
@@ -204,7 +206,7 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
     const [tasks, setTasks] = useState<any[]>([]);
     const [allActiveDates, setAllActiveDates] = useState<string[]>([]);
     const [activeTag, setActiveTag] = useState<string | null>(null);
-    const [viewMode, setViewMode] = useState<'timeline' | 'gallery'>('timeline');
+    const [viewMode, setViewMode] = useState<'timeline' | 'gallery' | 'notebook'>('timeline');
     const [searchQuery, setSearchQuery] = useState('');
     const [filterTasks, setFilterTasks] = useState(false);
     const [mediaFilter, setMediaFilter] = useState<'all' | 'image' | 'video'>('all');
@@ -217,10 +219,72 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
     const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
+    const [selectedImage, setSelectedImage] = useState<File | null>(null);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const ITEMS_PER_PAGE = 50;
     const bottomRef = useRef<HTMLDivElement>(null);
     const pendingJumpDateRef = useRef<string | null>(null);
     const supabase = createClient();
+
+    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            if (!file.type.startsWith('image/')) {
+                toast.error('Only image files are supported');
+                return;
+            }
+            setSelectedImage(file);
+            setPreviewUrl(URL.createObjectURL(file));
+        }
+    };
+
+    const handleClearImage = () => {
+        setSelectedImage(null);
+        if (previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+            setPreviewUrl(null);
+        }
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+    };
+
+    const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        const items = e.clipboardData?.items;
+        if (items) {
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') !== -1) {
+                    const file = items[i].getAsFile();
+                    if (file) {
+                        setSelectedImage(file);
+                        setPreviewUrl(URL.createObjectURL(file));
+                        e.preventDefault();
+                        break;
+                    }
+                }
+            }
+        }
+    };
+
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+    };
+
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        const files = e.dataTransfer?.files;
+        if (files && files.length > 0) {
+            const file = files[0];
+            if (file.type.startsWith('image/')) {
+                setSelectedImage(file);
+                setPreviewUrl(URL.createObjectURL(file));
+            } else {
+                toast.error('Only image files are supported');
+            }
+        }
+    };
 
     useEffect(() => {
         fetchEntries(true);
@@ -275,10 +339,10 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
         if (jumpDate) {
             // Fetch entries before the selected jump date
             query = query.lte('created_at', `${jumpDate}T23:59:59`).order('created_at', { ascending: false });
-        } else if (direction === 'up' && entries.length > 0) {
+        } else if (!isInitial && direction === 'up' && entries.length > 0) {
             const oldestDate = entries[0].created_at;
             query = query.lt('created_at', oldestDate).order('created_at', { ascending: false });
-        } else if (direction === 'down' && entries.length > 0) {
+        } else if (!isInitial && direction === 'down' && entries.length > 0) {
             const newestDate = entries[entries.length - 1].created_at;
             query = query.gt('created_at', newestDate).order('created_at', { ascending: true });
         } else {
@@ -496,13 +560,40 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
         setPendingDeleteId(null);
     };
     const handleSend = async (text: string, parentId?: string) => { 
-        if (!text.trim()) return; 
-        await fetch('/api/logbook/send', { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ text, groupId, parentId }) 
-        });
-        fetchEntries();
+        if (!text.trim() && !selectedImage) return; 
+        
+        setIsUploading(true);
+        try {
+            const formData = new FormData();
+            formData.append('text', text);
+            formData.append('groupId', groupId);
+            if (parentId) {
+                formData.append('parentId', parentId);
+            }
+            if (selectedImage) {
+                formData.append('image', selectedImage);
+            }
+
+            const res = await fetch('/api/logbook/send', { 
+                method: 'POST', 
+                body: formData 
+            });
+
+            if (!res.ok) {
+                const errData = await res.json();
+                toast.error(errData.error || 'Failed to send message');
+            } else {
+                handleClearImage();
+                const textarea = document.getElementById('logbook-main-input') as HTMLTextAreaElement;
+                if (textarea) textarea.value = '';
+            }
+        } catch (err) {
+            console.error('Error sending logbook entry:', err);
+            toast.error('Error sending message');
+        } finally {
+            setIsUploading(false);
+            fetchEntries(true);
+        }
     };
 
     const handleToggleTask = async (taskId: string, currentStatus: string) => {
@@ -662,11 +753,20 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
                             <button 
                                 onClick={() => setViewMode('gallery')}
                                 className={cn(
-                                    "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                                    "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer",
                                     viewMode === 'gallery' ? "bg-white/10 text-white shadow-lg" : "text-white/20 hover:text-white/40"
                                 )}
                             >
                                 Gallery
+                            </button>
+                            <button 
+                                onClick={() => setViewMode('notebook')}
+                                className={cn(
+                                    "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer",
+                                    viewMode === 'notebook' ? "bg-white/10 text-white shadow-lg" : "text-white/20 hover:text-white/40"
+                                )}
+                            >
+                                Notebook
                             </button>
                         </div>
                     </div>
@@ -691,7 +791,11 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
                     </div>
                 </div>
 
-                <div className={cn("flex-1 overflow-y-auto px-16 pt-8 pb-40 custom-scroll", !isReady && "invisible")}>
+                <div className={cn(
+                    "flex-1 min-h-0",
+                    viewMode !== 'notebook' ? "overflow-y-auto px-16 pt-8 pb-40 custom-scroll" : "overflow-hidden",
+                    (!isReady && viewMode !== 'notebook') && "invisible"
+                )}>
                     {viewMode === 'timeline' ? (
                         <div className="max-w-6xl mx-auto space-y-12">
                             {hasMoreDown && (
@@ -738,7 +842,7 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
                             )}
                             <div ref={bottomRef} />
                         </div>
-                    ) : (
+                    ) : viewMode === 'gallery' ? (
                         <div className="max-w-7xl mx-auto">
                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
                                 {galleryMedia.map((m, i) => (
@@ -791,40 +895,87 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
                                 </div>
                             )}
                         </div>
+                    ) : (
+                        <NotionLogbook groupId={groupId} />
                     )}
                 </div>
 
-                <div className="absolute bottom-10 left-0 right-0 px-16 pointer-events-none">
-                    <div className="max-w-2xl mx-auto bg-[#1e1f20] border border-white/10 rounded-[40px] p-5 shadow-[0_30px_100px_-20px_rgba(0,0,0,0.8)] pointer-events-auto flex items-center gap-5 group focus-within:border-blue-500/30 transition-all">
-                        <Plus size={24} className="text-white/20 ml-2 hover:text-white transition-colors cursor-pointer" />
-                        <textarea 
-                            onKeyDown={(e) => { 
-                                if (e.key === 'Enter' && !e.shiftKey) { 
-                                    e.preventDefault(); 
-                                    const val = (e.target as any).value;
-                                    handleSend(val); 
-                                    (e.target as any).value = ''; 
-                                } 
-                            }} 
-                            placeholder="Start typing (#tag, SiO_2)..." 
-                            className="flex-1 bg-transparent border-none outline-none resize-none py-3.5 text-[18px] text-white font-medium" 
-                            rows={1} 
-                            id="logbook-main-input"
-                        />
-                        <button 
-                            onClick={() => {
-                                const el = document.getElementById('logbook-main-input') as HTMLTextAreaElement;
-                                if (el) {
-                                    handleSend(el.value);
-                                    el.value = '';
-                                }
-                            }}
-                            className="p-3.5 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-500/20 hover:bg-blue-500 transition-all"
+                {viewMode !== 'notebook' && (
+                    <div className="absolute bottom-10 left-0 right-0 px-16 pointer-events-none">
+                        <div 
+                            onDragOver={handleDragOver}
+                            onDrop={handleDrop}
+                            className="max-w-2xl mx-auto bg-[#1e1f20] border border-white/10 rounded-[30px] p-4 shadow-[0_30px_100px_-20px_rgba(0,0,0,0.8)] pointer-events-auto flex flex-col gap-3 group focus-within:border-blue-500/30 transition-all"
                         >
-                            <SendHorizontal size={22} />
-                        </button>
+                            {/* Preview section */}
+                            {previewUrl && (
+                                <div className="relative w-28 h-28 rounded-xl overflow-hidden border border-white/10 group/preview animate-in zoom-in duration-200">
+                                    <img src={previewUrl} className="w-full h-full object-cover" />
+                                    <button 
+                                        onClick={handleClearImage}
+                                        className="absolute top-1 right-1 p-1 bg-black/75 hover:bg-black text-white/70 hover:text-white rounded-full transition-all border border-white/10"
+                                        title="Clear Image"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Main input row */}
+                            <div className="flex items-center gap-4">
+                                <button 
+                                    type="button"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="p-1 text-white/20 hover:text-white transition-colors cursor-pointer"
+                                    title="Attach Image"
+                                >
+                                    <Plus size={24} />
+                                </button>
+                                <input 
+                                    type="file"
+                                    ref={fileInputRef}
+                                    onChange={handleImageChange}
+                                    accept="image/*"
+                                    className="hidden"
+                                />
+
+                                <textarea 
+                                    onKeyDown={(e) => { 
+                                        if (e.key === 'Enter' && !e.shiftKey) { 
+                                            e.preventDefault(); 
+                                            const val = (e.target as any).value;
+                                            handleSend(val); 
+                                            (e.target as any).value = ''; 
+                                        } 
+                                    }} 
+                                    onPaste={handlePaste}
+                                    placeholder={selectedImage ? "Add caption (#tag, SiO_2)..." : "Start typing (#tag, SiO_2)..."} 
+                                    className="flex-1 bg-transparent border-none outline-none resize-none py-2 text-[18px] text-white font-medium" 
+                                    rows={1} 
+                                    id="logbook-main-input"
+                                />
+
+                                <button 
+                                    onClick={() => {
+                                        const el = document.getElementById('logbook-main-input') as HTMLTextAreaElement;
+                                        if (el) {
+                                            handleSend(el.value);
+                                            el.value = '';
+                                        }
+                                    }}
+                                    disabled={isUploading}
+                                    className="p-3 bg-blue-600 disabled:bg-blue-600/50 disabled:text-white/50 text-white rounded-full shadow-lg shadow-blue-500/20 hover:bg-blue-500 transition-all flex items-center justify-center"
+                                >
+                                    {isUploading ? (
+                                        <Loader2 size={20} className="animate-spin text-white" />
+                                    ) : (
+                                        <SendHorizontal size={20} />
+                                    )}
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
 
             {lightbox && (
