@@ -1467,6 +1467,57 @@ def fitting_preview_baseline(request: FittingPreviewBaselineRequest):
         "corrected": [{"x": float(xi), "y": float(yi)} for xi, yi in zip(x, corrected)]
     }
 
+class FittingAutoDetectRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    crop_range: Optional[list[float]] = None
+    threshold: float = 0.05
+
+@app.post("/api/fitting/auto-detect")
+def fitting_auto_detect(request: FittingAutoDetectRequest):
+    from scripts.deconvolution_engine import auto_detect_peaks
+    from scripts.fitting_engine import apply_baseline
+    from processor import get_representative_spectrum
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+
+    rep = get_representative_spectrum(request.vault_root, [request.h5_relative_path])
+    if not rep:
+        raise HTTPException(status_code=404, detail="Could not extract representative spectrum")
+
+    x = np.array([pt["x"] for pt in rep]) + request.x_shift
+    y = np.array([pt["y"] for pt in rep])
+
+    if request.crop_range:
+        xmin, xmax = request.crop_range
+        mask = (x >= xmin) & (x <= xmax)
+        if np.any(mask):
+            x = x[mask]
+            y = y[mask]
+
+    # Apply baseline first so peak detection runs on the subtracted spectrum
+    y_corr, _ = apply_baseline(x, y, request.baseline_method, request.baseline_params or {})
+
+    detected = auto_detect_peaks(x, y_corr, prominence=request.threshold)
+    
+    # Enrich seeds with default amplitude and flags for the Fitting module
+    for pk in detected:
+        if len(x) > 0:
+            close_idx = np.argmin(np.abs(x - pk["center"]))
+            y_val = y_corr[close_idx]
+            pk["amplitude"] = round(y_val, 2)
+        else:
+            pk["amplitude"] = 1000.0
+        pk["active"] = True
+        pk["use_limits"] = True
+
+    return {"success": True, "peaks": detected}
+
 @app.post("/api/fitting/save-config")
 def fitting_save_config(request: FittingFitRequest):
     import json
