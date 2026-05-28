@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { BarChart2, Zap, GitBranch, Map } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -56,8 +56,8 @@ export function FittingResultsPanel({ result, mapWidth, mapHeight, peakNames }: 
             }
         });
         
-        // Initialize arrays
-        const nTotal = mapWidth * mapHeight;
+        // Initialize arrays (robust fallback to result.n_spectra or key counts if dimensions are empty/0)
+        const nTotal = result.n_spectra || (mapWidth * mapHeight) || Object.keys(result.results).length || 1;
         keysSet.forEach(k => {
             params[k] = new Array(nTotal).fill(null);
         });
@@ -75,8 +75,13 @@ export function FittingResultsPanel({ result, mapWidth, mapHeight, peakNames }: 
         return { allParams: params, paramKeys: Array.from(keysSet) };
     }, [result, mapWidth, mapHeight]);
 
-    if (!scatterX && paramKeys.length > 0) setScatterX(paramKeys[0]);
-    if (!scatterY && paramKeys.length > 0) setScatterY(paramKeys[Math.min(1, paramKeys.length - 1)]);
+    // Keep scatter selection in sync with parameter keys cleanly
+    useEffect(() => {
+        if (paramKeys.length > 0) {
+            setScatterX(prev => paramKeys.includes(prev) ? prev : paramKeys[0]);
+            setScatterY(prev => paramKeys.includes(prev) ? prev : paramKeys[Math.min(1, paramKeys.length - 1)]);
+        }
+    }, [paramKeys]);
 
     // KPI stats
     const stats = useMemo(() => {
@@ -201,7 +206,14 @@ function QualityTab({ r_squared_map }: { r_squared_map: (number | null)[] }) {
 }
 
 function DistributionsTab({ allParams, paramKeys }: { allParams: Record<string, (number | null)[]>; paramKeys: string[] }) {
-    const [selected, setSelected] = useState<string>(paramKeys[0] || '');
+    const [selected, setSelected] = useState<string>('');
+
+    // Sync selected state when parameter keys load or update
+    useEffect(() => {
+        if (paramKeys.length > 0) {
+            setSelected(prev => paramKeys.includes(prev) ? prev : paramKeys[0]);
+        }
+    }, [paramKeys]);
 
     const validData = (allParams[selected] || []).filter(v => v !== null) as number[];
     const hist = buildHistogram(validData, 30);
@@ -326,15 +338,31 @@ function MapsTab({
     mapWidth: number;
     mapHeight: number;
 }) {
-    const [selected, setSelected] = useState<string>(paramKeys[0] || '');
+    const [selected, setSelected] = useState<string>('');
+
+    // Sync selected parameter state
+    useEffect(() => {
+        if (paramKeys.length > 0) {
+            setSelected(prev => paramKeys.includes(prev) ? prev : paramKeys[0]);
+        }
+    }, [paramKeys]);
 
     const zMatrix = useMemo(() => {
         const flat = allParams[selected] || [];
+        
+        // Defensive dimensions fallback if they are 0/invalid in file metadata
+        let cols = mapWidth;
+        let rows = mapHeight;
+        if ((cols <= 0 || rows <= 0) && flat.length > 0) {
+            cols = Math.ceil(Math.sqrt(flat.length));
+            rows = Math.ceil(flat.length / cols);
+        }
+        
         const matrix: (number | null)[][] = [];
-        for (let r = 0; r < mapHeight; r++) {
+        for (let r = 0; r < rows; r++) {
             const row: (number | null)[] = [];
-            for (let c = 0; c < mapWidth; c++) {
-                const idx = r * mapWidth + c;
+            for (let c = 0; c < cols; c++) {
+                const idx = r * cols + c;
                 row.push(flat[idx] ?? null);
             }
             matrix.push(row);

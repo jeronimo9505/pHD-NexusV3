@@ -6,7 +6,7 @@ import { getCharacterizationsAction, deleteCharacterizationAction, updateSampleA
 import { X, Calendar, User, FlaskConical, FileText, Plus, ExternalLink, Microscope, Settings, Edit, MessageSquareText, Trash2, Pencil, Check, StickyNote, ArrowLeft, Edit2, ChevronDown, ChevronUp, Loader2, Save, History, Clock, Copy, Database, Image } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { formatCellValue } from '../utils';
+import { formatCellValue, splitValueAndUnit } from '../utils';
 import { CharacterizationModal } from './characterization-modal';
 import { format } from 'date-fns';
 import { SampleCommentsSection } from './sample-comments-section';
@@ -190,8 +190,8 @@ export function SampleDetailSheet({
             if (raw && typeof raw === 'object' && 'value' in raw) {
                 return { name: key, value: raw.value ?? '', unit: raw.unit ?? '' };
             }
-            const { v, u } = separateUnit(String(raw ?? ''));
-            return { name: key, value: v, unit: u };
+            const { value, unit } = splitValueAndUnit(raw);
+            return { name: key, value, unit };
         });
     };
 

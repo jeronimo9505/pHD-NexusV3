@@ -37,10 +37,21 @@ export function NomenclatureManager({
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         const item = editing!;
+        const originalItem = nomenclatures.find(n => n.id === item.id);
+        const willCascade = originalItem && (
+            originalItem.code !== item.code ||
+            originalItem.name !== item.name ||
+            originalItem.category !== item.category
+        );
+
         const res = await upsertNomenclatureAction(item);
         if (res.error) toast.error(res.error);
         else {
-            toast.success('Saved');
+            if (willCascade) {
+                toast.success('Global nomenclature update applied! Dependent samples updated successfully.');
+            } else {
+                toast.success('Saved');
+            }
             setEditing(null);
             setIsCreating(false);
             setIsCreatingCategory(false);
@@ -122,6 +133,13 @@ export function NomenclatureManager({
 
         router.refresh();
     };
+
+    const originalItem = editing?.id ? nomenclatures.find(n => n.id === editing.id) : null;
+    const hasChanges = !!(originalItem && editing && (
+        originalItem.code !== editing.code ||
+        originalItem.name !== editing.name ||
+        originalItem.category !== editing.category
+    ));
 
     return (
         <div className="space-y-6">
@@ -217,6 +235,17 @@ export function NomenclatureManager({
                             />
                         </div>
                     </div>
+                    {hasChanges && (
+                        <div className="mt-2.5 mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 font-medium flex items-start gap-2 animate-in fade-in duration-200 shadow-sm">
+                            <span className="mt-0.5">⚠️</span>
+                            <div>
+                                <p className="font-bold">Cascading Global Update</p>
+                                <p className="text-[11px] font-normal text-amber-600 mt-0.5">
+                                    Saving these edits will automatically update all matching samples using this nomenclature in their composition/attributes, and rebuild their composite names to maintain complete data consistency.
+                                </p>
+                            </div>
+                        </div>
+                    )}
                     <div className="flex justify-end gap-2">
                         <button
                             type="button"

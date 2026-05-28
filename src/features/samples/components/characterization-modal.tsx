@@ -11,6 +11,7 @@ import { ensureAuth } from '@/lib/google/auth';
 import { isDesktop, ingestFile, checkEngineHealth, SCIENCE_ENGINE_URL, fetchRepresentativeSpectrum, savePastedImage, renameVaultFiles } from '@/lib/desktop';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { splitValueAndUnit } from '../utils';
 
 
 interface CharacterizationModalProps {
@@ -461,8 +462,8 @@ export function CharacterizationModal({
                 // 1. Process Ordered Keys
                 order.forEach(k => {
                     if (data[k] !== undefined) {
-                        const { v, u } = separateUnit(String(data[k]));
-                        fields.push({ key: k, value: v, unit: u });
+                        const { value, unit } = splitValueAndUnit(data[k]);
+                        fields.push({ key: k, value, unit });
                         processedKeys.add(k);
                     }
                 });
@@ -471,8 +472,8 @@ export function CharacterizationModal({
                 Object.entries(data).forEach(([k, v]) => {
                     const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image'];
                     if (!processedKeys.has(k) && !systemKeys.includes(k)) {
-                        const { v: val, u: unit } = separateUnit(String(v));
-                        fields.push({ key: k, value: val, unit: unit });
+                        const { value, unit } = splitValueAndUnit(v);
+                        fields.push({ key: k, value, unit });
                     }
                 });
 
@@ -532,7 +533,7 @@ export function CharacterizationModal({
                             const newFields = cachedFields.map((f: any) => ({
                                 key: f.key,
                                 value: '',       // start clean in UI
-                                unit: f.unit || lastUnits[f.key] || ''
+                                unit: f.unit || lastUnits[f.key] || splitValueAndUnit(f.value).unit
                             }));
                             setDataFields(newFields);
                             loadedFromCache = true;
@@ -574,9 +575,9 @@ export function CharacterizationModal({
                         // 1. Ordered keys first
                         order.forEach(k => {
                             if (!systemKeys.has(k) && data[k] !== undefined && !seen.has(k)) {
-                                const { v, u } = separateUnit(String(data[k]));
-                                const unit = lastUnits[k] || u;
-                                cacheFields.push({ key: k, value: v, unit });
+                                const parsed = splitValueAndUnit(data[k]);
+                                const unit = lastUnits[k] || parsed.unit;
+                                cacheFields.push({ key: k, value: parsed.value, unit });
                                 displayFields.push({ key: k, value: '', unit });
                                 seen.add(k);
                             }
@@ -585,9 +586,9 @@ export function CharacterizationModal({
                         // 2. Any remaining non-system keys
                         Object.keys(data).forEach(k => {
                             if (!systemKeys.has(k) && !seen.has(k)) {
-                                const { v, u } = separateUnit(String(data[k]));
-                                const unit = lastUnits[k] || u;
-                                cacheFields.push({ key: k, value: v, unit });
+                                const parsed = splitValueAndUnit(data[k]);
+                                const unit = lastUnits[k] || parsed.unit;
+                                cacheFields.push({ key: k, value: parsed.value, unit });
                                 displayFields.push({ key: k, value: '', unit });
                                 seen.add(k);
                             }
@@ -635,6 +636,18 @@ export function CharacterizationModal({
         if (field === 'key' && val && lastUnits[val] && !newFields[index].unit) {
             newFields[index].unit = lastUnits[val];
         }
+    };
+
+    const normalizeFieldValueUnit = (index: number) => {
+        const field = dataFields[index];
+        if (!field || field.unit.trim()) return;
+
+        const parsed = splitValueAndUnit(field.value);
+        if (!parsed.unit || parsed.value === field.value) return;
+
+        const newFields = [...dataFields];
+        newFields[index] = { ...field, value: parsed.value, unit: parsed.unit };
+        setDataFields(newFields);
     };
 
     const handleAddField = () => {
@@ -690,8 +703,9 @@ export function CharacterizationModal({
         dataFields.forEach(field => {
             if (field.key.trim()) {
                 const k = field.key.trim();
-                const v = field.value.trim();
-                const u = field.unit.trim();
+                const parsed = splitValueAndUnit(field.value);
+                const v = parsed.value.trim();
+                const u = (field.unit.trim() || parsed.unit.trim());
 
                 if (v || u) { // Only save if there is a value or unit (or should we strictly require value?)
                     cleanData[k] = u ? `${v} ${u}` : v;
@@ -915,11 +929,14 @@ export function CharacterizationModal({
             if (typeof window !== 'undefined') {
                 const paramsToSave = dataFields
                     .filter(f => f.key.trim() !== '' && f.key.trim() !== 'attached_images' && f.key.trim() !== 'attached_image')
-                    .map(f => ({
-                        key: f.key.trim(),
-                        value: f.value.trim(),
-                        unit: f.unit.trim()
-                    }));
+                    .map(f => {
+                        const parsed = splitValueAndUnit(f.value);
+                        return {
+                            key: f.key.trim(),
+                            value: parsed.value.trim(),
+                            unit: f.unit.trim() || parsed.unit.trim()
+                        };
+                    });
                 localStorage.setItem(`phdnexus_last_params_${finalType}`, JSON.stringify(paramsToSave));
             }
             toast.success(initialData?.id ? 'Updated' : 'Created');
@@ -1227,7 +1244,14 @@ export function CharacterizationModal({
                                                         try {
                                                             const cachedFields = JSON.parse(lastParamsJson);
                                                             if (Array.isArray(cachedFields) && cachedFields.length > 0) {
-                                                                setDataFields(cachedFields);
+                                                                setDataFields(cachedFields.map((f: any) => {
+                                                                    const parsed = splitValueAndUnit(f.value);
+                                                                    return {
+                                                                        key: String(f.key ?? ''),
+                                                                        value: parsed.value,
+                                                                        unit: f.unit || lastUnits[f.key] || parsed.unit
+                                                                    };
+                                                                }));
                                                                 filledFromCache = true;
                                                             }
                                                         } catch (err) {
@@ -1254,15 +1278,15 @@ export function CharacterizationModal({
                                                         const fields: { key: string; value: string; unit: string }[] = [];
                                                         order.forEach(k => {
                                                             if (!systemKeys.has(k) && data[k] !== undefined && !seen.has(k)) {
-                                                                const { v, u } = separateUnit(String(data[k]));
-                                                                fields.push({ key: k, value: v, unit: lastUnits[k] || u });
+                                                                const parsed = splitValueAndUnit(data[k]);
+                                                                fields.push({ key: k, value: parsed.value, unit: lastUnits[k] || parsed.unit });
                                                                 seen.add(k);
                                                             }
                                                         });
                                                         Object.keys(data).forEach(k => {
                                                             if (!systemKeys.has(k) && !seen.has(k)) {
-                                                                const { v, u } = separateUnit(String(data[k]));
-                                                                fields.push({ key: k, value: v, unit: lastUnits[k] || u });
+                                                                const parsed = splitValueAndUnit(data[k]);
+                                                                fields.push({ key: k, value: parsed.value, unit: lastUnits[k] || parsed.unit });
                                                                 seen.add(k);
                                                             }
                                                         });
@@ -1372,6 +1396,7 @@ export function CharacterizationModal({
                                                     <input
                                                         value={field.value}
                                                         onChange={e => handleFieldChange(idx, 'value', e.target.value)}
+                                                        onBlur={() => normalizeFieldValueUnit(idx)}
                                                         placeholder="Value"
                                                         className="w-full text-sm font-mono bg-slate-50 border border-transparent focus:bg-white focus:border-blue-200 rounded px-2 py-1 focus:ring-0 text-slate-700 placeholder:text-slate-300 transition-colors"
                                                     />

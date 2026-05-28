@@ -634,12 +634,96 @@ export async function upsertNomenclatureAction(item: SampleNomenclature) {
         delete (payload as any).id;
     }
 
-    const { error } = await supabase
+    // 1. Fetch existing nomenclature item to compare if it is an edit
+    let oldItem: SampleNomenclature | null = null;
+    if (item.id) {
+        const { data } = await supabase
+            .from('sample_nomenclatures')
+            .select('*')
+            .eq('id', item.id)
+            .single();
+        oldItem = data;
+    }
+
+    // 2. Perform the upsert
+    const { error: upsertError } = await supabase
         .from('sample_nomenclatures')
         .upsert(payload)
         .select();
 
-    if (error) return { error: error.message };
+    if (upsertError) return { error: upsertError.message };
+
+    // 3. Propagate changes to matching samples if nomenclature code/name/category was modified
+    if (oldItem) {
+        const codeChanged = oldItem.code !== item.code;
+        const nameChanged = oldItem.name !== item.name;
+        const categoryChanged = oldItem.category !== item.category;
+
+        if (codeChanged || nameChanged || categoryChanged) {
+            // Get all samples in this group
+            const { data: samples } = await supabase
+                .from('samples')
+                .select('*')
+                .eq('group_id', item.group_id);
+
+            if (samples && samples.length > 0) {
+                for (const s of samples) {
+                    let needsUpdate = false;
+                    let updatedComposition = Array.isArray(s.composition) ? [...s.composition as any[]] : [];
+                    let updatedAttributes = (s.attributes && typeof s.attributes === 'object' && !Array.isArray(s.attributes)) ? { ...s.attributes as Record<string, any> } : {};
+
+                    // A. Update matching items in the composition array
+                    if (Array.isArray(s.composition)) {
+                        updatedComposition = s.composition.map((c: any) => {
+                            const isMatch = c.category === oldItem!.category && 
+                                           (c.code === oldItem!.code || c.value === oldItem!.name);
+                            if (isMatch) {
+                                needsUpdate = true;
+                                return {
+                                    ...c,
+                                    category: item.category,
+                                    code: item.code,
+                                    value: item.name
+                                };
+                            }
+                            return c;
+                        });
+                    }
+
+                    // B. Update matching custom attributes
+                    if (s.attributes && typeof s.attributes === 'object') {
+                        for (const [key, val] of Object.entries(s.attributes)) {
+                            if (val === oldItem!.code) {
+                                updatedAttributes[key] = item.code;
+                                needsUpdate = true;
+                            } else if (val === oldItem!.name) {
+                                updatedAttributes[key] = item.name;
+                                needsUpdate = true;
+                            }
+                        }
+                    }
+
+                    // C. Persist changes to sample and rebuild generated name from updated composition
+                    if (needsUpdate) {
+                        const updatePayload: any = {
+                            composition: updatedComposition,
+                            attributes: updatedAttributes,
+                            updated_at: new Date().toISOString()
+                        };
+
+                        if (updatedComposition.length > 0) {
+                            updatePayload.name = updatedComposition.map((c: any) => c.code).join('-');
+                        }
+
+                        await supabase
+                            .from('samples')
+                            .update(updatePayload)
+                            .eq('id', s.id);
+                    }
+                }
+            }
+        }
+    }
 
     revalidatePath(`/${item.group_id}/samples`);
     return { success: true };
