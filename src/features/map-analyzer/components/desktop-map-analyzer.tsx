@@ -20,6 +20,7 @@ import { Logbook } from '@/features/samples/types';
 
 export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics' | 'pipeline' | 'compare' | 'deconvolution' | 'fitting'>('standard');
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [selectedH5, setSelectedH5] = useState('');
     const [vaultRoot, setVaultRoot] = useState('');
     const [sessionFiles, setSessionFiles] = useState<any[]>([]);
@@ -263,7 +264,10 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     return (
         <div className="flex h-full w-full bg-slate-50 text-slate-900 font-sans">
             {/* Sidebar Library (Light) */}
-            <div className="w-[500px] border-r border-slate-200 flex flex-col bg-white relative z-50 shrink-0 shadow-sm">
+            <div className={cn(
+                "border-r border-slate-200 flex flex-col bg-white relative z-50 shrink-0 shadow-sm transition-all duration-300 ease-in-out",
+                isSidebarCollapsed ? "w-0 opacity-0 border-r-0 overflow-hidden" : "w-[500px]"
+            )}>
                 <VaultLibrary 
                     vaultRoot={vaultRoot} 
                     groupId={groupId}
@@ -302,6 +306,20 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
 
             {/* Main Visualizer Area */}
             <div className="flex-1 flex flex-col overflow-hidden relative bg-slate-100/30">
+                {/* Collapsible Sidebar Toggle Handle */}
+                <button
+                    onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                    className={cn(
+                        "absolute top-1/2 -translate-y-1/2 z-50 w-5 h-14 bg-white hover:bg-slate-50 border border-slate-200 text-slate-400 hover:text-indigo-600 shadow-md flex items-center justify-center transition-all focus:outline-none cursor-pointer hover:scale-105",
+                        isSidebarCollapsed 
+                            ? "left-0 rounded-r-xl border-l-0" 
+                            : "-left-[1px] rounded-r-xl border-l-0"
+                    )}
+                    title={isSidebarCollapsed ? "Expand active workspace" : "Collapse active workspace"}
+                >
+                    <ChevronRight size={14} className={cn("transition-transform duration-300", !isSidebarCollapsed && "rotate-180")} />
+                </button>
+
                 {(selectedH5 || mode === 'compare') && (
                     <div className="h-16 px-8 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between shrink-0 relative z-30 shadow-sm">
                         <div className="flex items-center gap-6">
