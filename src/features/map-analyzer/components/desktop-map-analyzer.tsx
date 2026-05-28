@@ -283,10 +283,15 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                     onSelect={(file) => {
                         setSelectedH5(file.h5_relative_path);
                         const settings = fileSettings[file.h5_relative_path];
-                        setMapDim({ 
-                            w: settings?.w || file.map_width || 0, 
-                            h: settings?.h || file.map_height || 0 
-                        });
+                        
+                        let w = settings?.w || file.map_width || 0;
+                        let h = settings?.h || file.map_height || 0;
+                        if ((w <= 0 || h <= 0) && file.n_spectra > 0) {
+                            w = Math.ceil(Math.sqrt(file.n_spectra));
+                            h = Math.ceil(file.n_spectra / w);
+                        }
+                        
+                        setMapDim({ w, h });
                         setStepSize(settings?.stepSize ?? 1.0);
                         setNSpectra(file.n_spectra || 0);
                         setSelectedPixelIndex(0);

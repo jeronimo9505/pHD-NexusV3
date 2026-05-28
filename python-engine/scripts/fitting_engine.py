@@ -81,6 +81,7 @@ def apply_baseline(
 def build_fitting_model(peaks: List[dict]) -> Tuple[lmfit.CompositeModel, lmfit.Parameters]:
     """
     Build custom CompositeModel and Parameters for lmfit based on peak configurations.
+    Supports advanced constraints: fixedParams, minParams, maxParams, and exprParams.
     """
     active_peaks = [p for p in peaks if p.get("active", True)]
     if not active_peaks:
@@ -121,48 +122,46 @@ def build_fitting_model(peaks: List[dict]) -> Tuple[lmfit.CompositeModel, lmfit.
         # Define limits dynamic flags
         use_limits = pk.get("use_limits", True)
 
-        if model_name in ("DecaySingleExp", "DecayBiExp"):
-            # Time decays don't use standard center/fwhm parameters
-            if model_name == "DecaySingleExp":
-                A_init = amplitude_val
-                tau_init = float(pk.get("tau", fwhm_init))
-                B_init = float(pk.get("B", 0.0))
-                
-                params.add(f"{prefix}A", value=A_init, min=0.0 if use_limits else -np.inf)
-                params.add(f"{prefix}tau", value=tau_init, min=0.1 if use_limits else -np.inf, max=10000.0 if use_limits else np.inf)
-                params.add(f"{prefix}B", value=B_init)
-            else: # DecayBiExp
-                A1_init = amplitude_val * 0.7
-                tau1_init = float(pk.get("tau1", fwhm_init * 0.5))
-                A2_init = amplitude_val * 0.3
-                tau2_init = float(pk.get("tau2", fwhm_init * 2.0))
-                B_init = float(pk.get("B", 0.0))
-                
-                params.add(f"{prefix}A1", value=A1_init, min=0.0 if use_limits else -np.inf)
-                params.add(f"{prefix}tau1", value=tau1_init, min=0.1 if use_limits else -np.inf, max=10000.0 if use_limits else np.inf)
-                params.add(f"{prefix}A2", value=A2_init, min=0.0 if use_limits else -np.inf)
-                params.add(f"{prefix}tau2", value=tau2_init, min=0.1 if use_limits else -np.inf, max=10000.0 if use_limits else np.inf)
-                params.add(f"{prefix}B", value=B_init)
-        else:
-            # Standard peak shapes
-            sigma_init = fwhm_init / 2.0
+        def add_param(p_key, backend_key, val, default_min=-np.inf, default_max=np.inf):
+            is_fixed = pk.get("fixedParams", {}).get(p_key, False)
+            expr = pk.get("exprParams", {}).get(p_key, "")
             
-            # Setup bounds
-            c_min = center_min if use_limits else -np.inf
-            c_max = center_max if use_limits else np.inf
-            s_min = 0.1 if use_limits else -np.inf
-            s_max = 500.0 if use_limits else np.inf
-            amp_min = 0.0 if use_limits else -np.inf
+            p_min = pk.get("minParams", {}).get(p_key, default_min)
+            p_max = pk.get("maxParams", {}).get(p_key, default_max)
+            
+            if not expr or not isinstance(expr, str) or expr.strip() == "":
+                expr = None
+            
+            params.add(
+                f"{prefix}{backend_key}",
+                value=val,
+                vary=not is_fixed,
+                min=p_min if use_limits else -np.inf,
+                max=p_max if use_limits else np.inf,
+                expr=expr
+            )
 
-            params.add(f"{prefix}center", value=center, min=c_min, max=c_max)
-            params.add(f"{prefix}sigma", value=sigma_init, min=s_min, max=s_max)
-            params.add(f"{prefix}amplitude", value=amplitude_val, min=amp_min)
+        if model_name in ("DecaySingleExp", "DecayBiExp"):
+            if model_name == "DecaySingleExp":
+                add_param("amplitude", "A", amplitude_val, default_min=0.0)
+                add_param("tau", "tau", float(pk.get("tau", fwhm_init)), default_min=0.1, default_max=10000.0)
+                add_param("B", "B", float(pk.get("B", 0.0)))
+            else: # DecayBiExp
+                add_param("amplitude", "A1", amplitude_val * 0.7, default_min=0.0)
+                add_param("tau1", "tau1", float(pk.get("tau1", fwhm_init * 0.5)), default_min=0.1, default_max=10000.0)
+                add_param("amplitude", "A2", amplitude_val * 0.3, default_min=0.0)
+                add_param("tau2", "tau2", float(pk.get("tau2", fwhm_init * 2.0)), default_min=0.1, default_max=10000.0)
+                add_param("B", "B", float(pk.get("B", 0.0)))
+        else:
+            sigma_init = fwhm_init / 2.0
+            add_param("center", "center", center, default_min=center_min, default_max=center_max)
+            add_param("fwhm_init", "sigma", sigma_init, default_min=0.1, default_max=500.0)
+            add_param("amplitude", "amplitude", amplitude_val, default_min=0.0)
             
             if model_name == "PseudoVoigt":
-                params.add(f"{prefix}fraction", value=0.5, min=0.0 if use_limits else -np.inf, max=1.0 if use_limits else np.inf)
+                add_param("fraction", "fraction", 0.5, default_min=0.0, default_max=1.0)
             elif model_name == "Fano":
-                q_init = float(pk.get("q", 1.0))
-                params.add(f"{prefix}q", value=q_init, min=-100.0 if use_limits else -np.inf, max=100.0 if use_limits else np.inf)
+                add_param("q", "q", float(pk.get("q", 1.0)), default_min=-100.0, default_max=100.0)
 
         composite = m if composite is None else composite + m
 

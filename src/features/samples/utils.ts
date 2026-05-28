@@ -80,3 +80,26 @@ export function formatCellValue(value: any, type: string): string {
 
     return String(value);
 }
+
+export function splitValueAndUnit(input: unknown): { value: string; unit: string } {
+    const raw = String(input ?? '').trim();
+    if (!raw) return { value: '', unit: '' };
+
+    const compactMultiplier = raw.match(/^x\s*([+-]?\d+(?:\.\d+)?)$/i);
+    if (compactMultiplier) return { value: compactMultiplier[1], unit: 'x' };
+
+    const trailingMultiplier = raw.match(/^([+-]?\d+(?:\.\d+)?)\s*x$/i);
+    if (trailingMultiplier) return { value: trailingMultiplier[1], unit: 'x' };
+
+    const spacedUnit = raw.match(/^(.+?\d.*?)\s+([^\s]+)$/u);
+    if (spacedUnit) {
+        return { value: spacedUnit[1].trim(), unit: spacedUnit[2].trim() };
+    }
+
+    const numericWithUnit = raw.match(/^([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)\s*([^\d\s]+)$/iu);
+    if (numericWithUnit) {
+        return { value: numericWithUnit[1], unit: numericWithUnit[2] };
+    }
+
+    return { value: raw, unit: '' };
+}
