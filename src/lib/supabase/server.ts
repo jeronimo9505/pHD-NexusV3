@@ -14,13 +14,12 @@ export const createClient = cache(async () => {
         const cookieStore = await cookies();
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        // Prefer service role key for server‑side operations; fall back to anon key for public access.
-        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
         if (!supabaseUrl || !supabaseKey) {
-            console.error("Supabase URL or key is missing from environment variables.");
+            console.error("Supabase URL or Anon Key is missing from environment variables.");
             throw new Error(
-                "Supabase URL or key is missing. Ensure NEXT_PUBLIC_SUPABASE_URL and either NEXT_PUBLIC_SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY are set."
+                "Supabase URL or Anon Key is missing. Please ensure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set."
             );
         }
 

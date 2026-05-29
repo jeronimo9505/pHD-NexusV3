@@ -29,6 +29,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     const [dbLogbooks, setDbLogbooks] = useState<Logbook[]>([]);
     const [dbSamples, setDbSamples] = useState<any[]>([]);
     const [mounted, setMounted] = useState(false);
+    const [isLoadingMetadata, setIsLoadingMetadata] = useState(true);
     const [applySnv, setApplySnv] = useState(false);
     const [saveName, setSaveName] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -66,6 +67,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
 
         // Fetch Logbooks from Supabase for naming mapping
         async function fetchInitialData() {
+            setIsLoadingMetadata(true);
             try {
                 const { data: lbs } = await getLogbooksAction(groupId);
                 if (lbs) {
@@ -87,6 +89,8 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                 if (ws) setSavedWorkspaces(ws);
             } catch (err) {
                 console.error("Failed to fetch metadata", err);
+            } finally {
+                setIsLoadingMetadata(false);
             }
         }
         fetchInitialData();
@@ -284,6 +288,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                     onLoadWorkspace={handleLoadWorkspace}
                     onRemove={handleRemove}
                     onDeleteFile={handleDeleteFile}
+                    isLoading={isLoadingMetadata}
                     onSelect={(file) => {
                         setSelectedH5(file.h5_relative_path);
                         const settings = fileSettings[file.h5_relative_path];
