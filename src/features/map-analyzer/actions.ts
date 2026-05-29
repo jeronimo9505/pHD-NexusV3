@@ -78,3 +78,74 @@ export async function deleteRamanWorkspaceAction(id: string, groupId: string) {
     revalidatePath(`/${groupId}/map-analyzer`);
     return { success: true };
 }
+
+export async function getPipelineTemplatesAction(groupId: string) {
+    const supabase = await createClient();
+    const { data, error } = await (supabase as any)
+        .from('pipeline_templates')
+        .select('*')
+        .eq('group_id', groupId)
+        .order('name', { ascending: true });
+
+    if (error) return { error: error.message };
+    return { data };
+}
+
+export async function savePipelineTemplateAction(input: {
+    group_id: string;
+    name: string;
+    steps: any[];
+    id?: string;
+}) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    const payload: any = {
+        group_id: input.group_id,
+        name: input.name,
+        steps: input.steps,
+        updated_at: new Date().toISOString()
+    };
+
+    if (!input.id) {
+        payload.created_by = user?.id;
+    }
+
+    let res;
+    if (input.id) {
+        res = await (supabase as any)
+            .from('pipeline_templates')
+            .update(payload)
+            .eq('id', input.id)
+            .select()
+            .single();
+    } else {
+        res = await (supabase as any)
+            .from('pipeline_templates')
+            .insert(payload)
+            .select()
+            .single();
+    }
+
+    if (res.error) {
+        console.error("Error saving pipeline template:", res.error);
+        return { error: res.error.message };
+    }
+
+    revalidatePath(`/${input.group_id}/map-analyzer`);
+    return { data: res.data };
+}
+
+export async function deletePipelineTemplateAction(id: string, groupId: string) {
+    const supabase = await createClient();
+    const { error } = await (supabase as any)
+        .from('pipeline_templates')
+        .delete()
+        .eq('id', id);
+
+    if (error) return { error: error.message };
+
+    revalidatePath(`/${groupId}/map-analyzer`);
+    return { success: true };
+}
+
