@@ -145,6 +145,11 @@ export function FittingView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpectra }
                 setBaselineMethod(d.config.baseline_method || 'asls');
                 setBaselineParams(d.config.baseline_params || { lam: 1e5, p: 0.01, order: 2 });
                 setXShift(d.config.x_shift || 0.0);
+                if (typeof d.config.is_baseline_subtracted === 'boolean') {
+                    setIsBaselineSubtracted(d.config.is_baseline_subtracted);
+                } else {
+                    setIsBaselineSubtracted(true);
+                }
                 if (d.config.crop_range) {
                     setAppliedCrop(d.config.crop_range);
                     setCropMin(d.config.crop_range[0]);
@@ -168,6 +173,7 @@ export function FittingView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpectra }
                     baseline_params: baselineParams,
                     x_shift: xShift,
                     crop_range: appliedCrop,
+                    is_baseline_subtracted: isBaselineSubtracted,
                 }),
             });
             const d = await res.json();
@@ -433,7 +439,7 @@ export function FittingView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpectra }
     };
 
     const copyModelConfig = () => {
-        const data = { peaks, baselineMethod, baselineParams, xShift, cropRange: appliedCrop };
+        const data = { peaks, baselineMethod, baselineParams, xShift, cropRange: appliedCrop, isBaselineSubtracted };
         navigator.clipboard.writeText(JSON.stringify(data, null, 2));
         toast.success("Full SPECTROview model JSON copied to clipboard");
     };
@@ -447,6 +453,7 @@ export function FittingView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpectra }
                 if (data.baselineMethod) setBaselineMethod(data.baselineMethod);
                 if (data.baselineParams) setBaselineParams(data.baselineParams);
                 if (typeof data.xShift === 'number') setXShift(data.xShift);
+                if (typeof data.isBaselineSubtracted === 'boolean') setIsBaselineSubtracted(data.isBaselineSubtracted);
                 if (Array.isArray(data.cropRange)) {
                     setAppliedCrop(data.cropRange as [number, number]);
                     setCropMin(data.cropRange[0]);
@@ -477,24 +484,17 @@ export function FittingView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpectra }
             renderY = renderY.filter((_, i) => mask[i]);
         }
 
-        // 1. Plot raw spectrum
-        if (!isBaselineSubtracted) {
+        const useBaseline = isBaselineSubtracted && baselineMethod !== 'none';
+
+        // 1. Plot raw / baseline-corrected spectrum
+        if (!useBaseline) {
             traces.push({
                 x: renderX,
                 y: renderY,
                 mode: 'lines',
                 name: 'Spectrum',
-                line: { color: '#475569', width: 1.5, dash: 'dot' }
+                line: { color: '#6366f1', width: 1.5 }
             });
-            if (previewBaseline) {
-                traces.push({
-                    x: previewBaseline.baseline.map(p => p.x),
-                    y: previewBaseline.baseline.map(p => p.y),
-                    mode: 'lines',
-                    name: 'Baseline (Preview)',
-                    line: { color: '#f97316', width: 2 }
-                });
-            }
         } else {
             // Plot baseline-corrected
             if (previewBaseline) {
@@ -504,6 +504,20 @@ export function FittingView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpectra }
                     mode: 'lines',
                     name: 'Corrected',
                     line: { color: '#10b981', width: 2 }
+                });
+                traces.push({
+                    x: previewBaseline.baseline.map(p => p.x),
+                    y: previewBaseline.baseline.map(p => p.y),
+                    mode: 'lines',
+                    name: 'Baseline (Preview)',
+                    line: { color: '#f97316', width: 1.5 }
+                });
+                traces.push({
+                    x: renderX,
+                    y: renderY,
+                    mode: 'lines',
+                    name: 'Raw Spectrum',
+                    line: { color: '#475569', width: 1, dash: 'dot' }
                 });
             } else {
                 traces.push({
@@ -526,7 +540,7 @@ export function FittingView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpectra }
                 mode: 'lines+markers',
                 name: `${pk.name} Seed`,
                 line: { color, width: 1.5, dash: 'dash' },
-                marker: { size: 5, symbol: 'diamond' }
+                marker: { color, size: 5, symbol: 'diamond' }
             });
         });
 
@@ -550,15 +564,15 @@ export function FittingView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpectra }
                         y: compPts.map(p => p.y),
                         mode: 'lines',
                         fill: 'tozeroy',
-                        fillcolor: `${color}13`,
+                        fillcolor: `${color}25`,
                         name: compName.replace('_', ' '),
-                        line: { color, width: 1.5, dash: 'solid' }
+                        line: { color, width: 2, dash: 'solid' }
                     });
                 });
             }
 
             if (showResiduals) {
-                const maxVal = Math.max(...(isBaselineSubtracted && previewBaseline ? previewBaseline.corrected.map(p=>p.y) : renderY));
+                const maxVal = Math.max(...(useBaseline && previewBaseline ? previewBaseline.corrected.map(p=>p.y) : renderY));
                 traces.push({
                     x: fitX,
                     y: fitData.residuals.map(p => p.y - (0.12 * maxVal)),
@@ -570,7 +584,7 @@ export function FittingView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpectra }
         }
 
         return traces;
-    }, [rawSpectrum, isBaselineSubtracted, previewBaseline, peaks, fitData, status, showResiduals, showComponents, xShift, appliedCrop]);
+    }, [rawSpectrum, isBaselineSubtracted, baselineMethod, previewBaseline, peaks, fitData, status, showResiduals, showComponents, xShift, appliedCrop]);
 
     return (
         <div className="flex flex-col h-full w-full flex-1 bg-[#080d16] text-slate-100 font-sans overflow-hidden">
@@ -1098,6 +1112,13 @@ export function FittingView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpectra }
                                 mapWidth={mapWidth}
                                 mapHeight={mapHeight}
                                 peakNames={peaks.map(p => p.name)}
+                                vaultRoot={vaultRoot}
+                                h5Path={h5Path}
+                                peaks={peaks}
+                                baselineMethod={isBaselineSubtracted ? baselineMethod : 'none'}
+                                baselineParams={baselineParams}
+                                xShift={xShift}
+                                cropRange={appliedCrop}
                             />
                         </div>
                     )}

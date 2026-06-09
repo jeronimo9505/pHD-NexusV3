@@ -155,7 +155,8 @@ def apply_baseline(
         params = {}
 
     if method == "none":
-        return y.copy(), np.zeros_like(y)
+        min_y = np.min(y)
+        return y - min_y, np.full_like(y, min_y)
 
     fitter = Baseline(x_data=x)
 
@@ -226,8 +227,11 @@ def build_lmfit_model(peaks: list[dict]) -> tuple[lmfit.CompositeModel, lmfit.Pa
         center_max  = float(pk["center_max"])
         fwhm_init   = float(pk.get("fwhm_init", 30.0))
 
-        # sigma from FWHM (for Lorentzian: FWHM = 2*sigma)
-        sigma_init  = fwhm_init / 2.0
+        # sigma from FWHM (for Lorentzian: FWHM = 2*sigma, for Gaussian: FWHM = 2.35482004503*sigma)
+        if pk["model"] == "Gaussian":
+            sigma_init = fwhm_init / 2.35482004503
+        else:
+            sigma_init = fwhm_init / 2.0
 
         p = m.make_params(
             center=dict(value=center, min=center_min, max=center_max),
@@ -336,7 +340,12 @@ def fit_spectrum(
             return float(p.stderr) if (p is not None and p.stderr is not None) else default
 
         sigma    = _val("sigma")
-        fwhm     = sigma * 2.0 if pk["model"] in ("Lorentzian", "Gaussian") else _val("fwhm", sigma * 2.0)
+        if pk["model"] == "Gaussian":
+            fwhm = sigma * 2.35482004503
+        elif pk["model"] == "Lorentzian":
+            fwhm = sigma * 2.0
+        else:
+            fwhm = _val("fwhm", sigma * 2.0)
         amp      = _val("amplitude")
         center   = _val("center")
         # Area: for Lorentzian = π*amp*sigma; Gaussian ≈ amp*sigma*sqrt(2π)
@@ -357,7 +366,7 @@ def fit_spectrum(
             "center":        round(center, 3),
             "center_err":    round(_err("center"), 4),
             "fwhm":          round(fwhm, 3),
-            "fwhm_err":      round(_err("sigma") * 2, 4),
+            "fwhm_err":      round(_err("sigma") * 2.35482004503, 4) if pk["model"] == "Gaussian" else round(_err("sigma") * 2.0, 4),
             "amplitude":     round(amp, 3),
             "amplitude_err": round(_err("amplitude"), 4),
             "area":          round(area, 3),

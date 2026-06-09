@@ -115,9 +115,9 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
     );
 
     return (
-        <div className="flex flex-col h-full bg-[#0d111a] rounded-2xl border border-slate-800 p-4 shadow-xl select-none">
+        <div className="flex-1 flex flex-col h-full bg-[#0d111a] rounded-2xl border border-slate-800 p-3 shadow-xl select-none">
             {/* Header controls */}
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-2.5">
                 <div className="flex items-center gap-2">
                     <Sliders size={14} className="text-indigo-400" />
                     <span className="text-xs font-black text-slate-200 uppercase tracking-widest">
@@ -145,17 +145,17 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
                     </p>
                 </div>
             ) : (
-                <div className="flex-1 overflow-x-auto overflow-y-auto max-h-[300px] border border-slate-800 rounded-xl bg-slate-950/40">
+                <div className="flex-1 overflow-x-auto overflow-y-auto min-h-0 border border-slate-800 rounded-xl bg-slate-950/40">
                     <table className="w-full text-left border-collapse text-[10px] font-sans">
                         <thead>
                             <tr className="border-b border-slate-800 bg-slate-900/60 sticky top-0 z-10">
-                                <th className="p-2.5 w-[36px] text-center"></th>
-                                <th className="p-2.5 w-[76px] font-bold text-slate-400 uppercase tracking-wider">Label</th>
-                                <th className="p-2.5 w-[100px] font-bold text-slate-400 uppercase tracking-wider">Model</th>
-                                <th className="p-2.5 w-[44px] text-center font-bold text-slate-400 uppercase tracking-wider">Active</th>
+                                <th className="px-2 py-1.5 w-[36px] text-center"></th>
+                                <th className="px-2 py-1.5 w-[76px] font-bold text-slate-400 uppercase tracking-wider">Label</th>
+                                <th className="px-2 py-1.5 w-[100px] font-bold text-slate-400 uppercase tracking-wider">Model</th>
+                                <th className="px-2 py-1.5 w-[44px] text-center font-bold text-slate-400 uppercase tracking-wider">Active</th>
                                 
                                 {activeParams.map(param => (
-                                    <th key={param} className="p-2.5 min-w-[130px] border-l border-slate-800 text-center">
+                                    <th key={param} className="px-2 py-1.5 min-w-[130px] border-l border-slate-800 text-center">
                                         <span className="text-indigo-400 font-extrabold uppercase tracking-wide">{param}</span>
                                         <div className="flex items-center justify-center gap-1 mt-1 text-[8px] text-slate-500 font-bold uppercase tracking-wider">
                                             {showLimits && <span className="w-10">min</span>}
@@ -179,7 +179,7 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
                                         )}
                                     >
                                         {/* Delete */}
-                                        <td className="p-2 text-center">
+                                        <td className="px-2 py-1 text-center">
                                             <button
                                                 onClick={() => remove(pk.id)}
                                                 disabled={disabled}
@@ -190,7 +190,7 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
                                         </td>
 
                                         {/* Label */}
-                                        <td className="p-2">
+                                        <td className="px-2 py-1">
                                             <div className="flex items-center gap-1.5">
                                                 <div 
                                                     className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
@@ -207,7 +207,7 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
                                         </td>
 
                                         {/* Model */}
-                                        <td className="p-2">
+                                        <td className="px-2 py-1">
                                             <select
                                                 className="w-full bg-slate-900/80 hover:bg-slate-800 border border-slate-800 rounded-md px-1.5 py-0.5 font-bold text-slate-400 focus:border-indigo-500 cursor-pointer focus:outline-none transition-colors"
                                                 value={pk.model}
@@ -219,7 +219,7 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
                                         </td>
 
                                         {/* Active Toggle */}
-                                        <td className="p-2 text-center">
+                                        <td className="px-2 py-1 text-center">
                                             <button
                                                 onClick={() => update(pk.id, 'active', !pk.active)}
                                                 disabled={disabled}
@@ -240,19 +240,19 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
                                             const supported = supportsParam(pk.model, param);
                                             if (!supported) {
                                                 return (
-                                                    <td key={param} className="p-2 border-l border-slate-800/40 text-center text-slate-700 bg-slate-950/10 font-bold select-none">-</td>
+                                                    <td key={param} className="px-2 py-1 border-l border-slate-800/40 text-center text-slate-700 bg-slate-950/10 font-bold select-none">-</td>
                                                 );
                                             }
 
                                             // Determine current values in peak state
                                             const val = (pk as any)[param] !== undefined ? (pk as any)[param] : 0.0;
                                             const isFixed = !!pk.fixedParams?.[param];
-                                            const minVal = pk.minParams?.[param] !== undefined ? pk.minParams[param] : (param === 'center' ? pk.center_min : 0.0);
-                                            const maxVal = pk.maxParams?.[param] !== undefined ? pk.maxParams[param] : (param === 'center' ? pk.center_max : 10000.0);
+                                            const minVal = pk.minParams?.[param] !== undefined ? pk.minParams[param] : (param === 'center' ? pk.center_min : (param === 'fwhm_init' ? 4.0 : 0.0));
+                                            const maxVal = pk.maxParams?.[param] !== undefined ? pk.maxParams[param] : (param === 'center' ? pk.center_max : (param === 'fwhm_init' ? 100.0 : 10000.0));
                                             const exprVal = pk.exprParams?.[param] || '';
 
                                             return (
-                                                <td key={param} className="p-2 border-l border-slate-800/40">
+                                                <td key={param} className="px-2 py-1 border-l border-slate-800/40">
                                                     <div className="flex items-center justify-center gap-1">
                                                         {/* Min parameter constraint */}
                                                         {showLimits && (

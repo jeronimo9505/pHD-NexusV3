@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Search, ChevronRight, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { isDesktop } from '@/lib/desktop';
+import { isDesktop, fetchVaultFiles } from '@/lib/desktop';
 import { VaultLibrary } from './vault-library';
 import { HeatmapCanvas } from './heatmap-canvas';
 import { SpectrumInspector } from './spectrum-inspector';
@@ -15,11 +15,12 @@ import { PipelineEditor } from './pipeline-editor';
 import { ComparisonView } from './comparison-view';
 import { DeconvolutionView } from './deconvolution-view';
 import { FittingView } from './fitting-view';
-import { getLogbooksAction, getSamplesAction } from '@/features/samples/actions';
+import { RgiView } from './rgi-view';
+import { getLogbooksAction, getSamplesAction, registerGroupedH5FileAction } from '@/features/samples/actions';
 import { Logbook } from '@/features/samples/types';
 
 export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
-    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics' | 'pipeline' | 'compare' | 'deconvolution' | 'fitting'>('standard');
+    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics' | 'pipeline' | 'compare' | 'deconvolution' | 'fitting' | 'rgi'>('standard');
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [selectedH5, setSelectedH5] = useState('');
     const [vaultRoot, setVaultRoot] = useState('');
@@ -103,11 +104,99 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
         }
     }, [sessionFiles, groupId, vaultRoot]);
 
-    const handleImport = (newFiles: any[]) => {
+    const handleImport = async (newFiles: any[]) => {
+        let filesToImport = [...newFiles];
+        
+        try {
+            if (vaultRoot && newFiles.length > 0) {
+                // Helper to get subfolder segment from relative path
+                const getSubfolder = (path: string) => {
+                    if (!path) return undefined;
+                    const parts = path.replace(/\\/g, '/').split('/');
+                    return parts.length > 1 ? parts[0] : undefined;
+                };
+
+                const subfolders = Array.from(new Set(newFiles.map(f => getSubfolder(f.h5_relative_path)).filter(Boolean))) as string[];
+                let allVaultFiles: any[] = [];
+                
+                if (subfolders.length > 0) {
+                    for (const sub of subfolders) {
+                        const res = await fetchVaultFiles(vaultRoot, sub);
+                        if (res.success && res.files) {
+                            allVaultFiles = [...allVaultFiles, ...res.files];
+                        }
+                    }
+                } else {
+                    const res = await fetchVaultFiles(vaultRoot);
+                    if (res.success && res.files) {
+                        allVaultFiles = res.files;
+                    }
+                }
+
+                // Helper to get all ancestors of a file stem
+                const getAncestors = (file: any, allFiles: any[]): string[] => {
+                    const ancestors = [file.h5_relative_path];
+                    let current = file;
+                    
+                    while (true) {
+                        // 1. Try metadata parent_file first
+                        if (current.parent_file) {
+                            const parent = allFiles.find(f => f.h5_relative_path === current.parent_file);
+                            if (parent) {
+                                ancestors.push(parent.h5_relative_path);
+                                current = parent;
+                                continue;
+                            }
+                        }
+                        
+                        // 2. Fallback to name-based parent resolution
+                        const currentStem = current.name.replace(/\.h5$/i, '');
+                        const suffixRegex = /(_preprocessed(_\d+)?|_rgi(_\w+)?|_deconvolution(_\d+)?|_fitting(_\d+)?)$/i;
+                        const match = currentStem.match(suffixRegex);
+                        
+                        if (match && match.index !== undefined && match.index > 0) {
+                            const parentStem = currentStem.substring(0, match.index);
+                            const parent = allFiles.find(f => f.name.replace(/\.h5$/i, '').toLowerCase() === parentStem.toLowerCase());
+                            if (parent) {
+                                ancestors.push(parent.h5_relative_path);
+                                current = parent;
+                                continue;
+                            }
+                        }
+                        
+                        break;
+                    }
+                    
+                    return ancestors;
+                };
+
+                const isSameBranch = (fileA: any, fileB: any, allFiles: any[]) => {
+                    const ancestorsA = getAncestors(fileA, allFiles);
+                    const ancestorsB = getAncestors(fileB, allFiles);
+                    return ancestorsA.includes(fileB.h5_relative_path) || ancestorsB.includes(fileA.h5_relative_path);
+                };
+
+                // Find other files in the vault that belong to the same direct branch
+                const relatedFiles = allVaultFiles.filter(vf => {
+                    return newFiles.some(f => isSameBranch(f, vf, allVaultFiles));
+                });
+
+                // Add related files avoiding duplicates in filesToImport
+                const existingPaths = new Set(filesToImport.map(f => f.h5_relative_path));
+                relatedFiles.forEach(rf => {
+                    if (!existingPaths.has(rf.h5_relative_path)) {
+                        filesToImport.push(rf);
+                    }
+                });
+            }
+        } catch (e) {
+            console.error("Failed to fetch related vault files during import:", e);
+        }
+
         setSessionFiles(prev => {
             // Avoid duplicates
             const existingPaths = new Set(prev.map(f => f.h5_relative_path));
-            const uniqueNew = newFiles.filter(f => !existingPaths.has(f.h5_relative_path));
+            const uniqueNew = filesToImport.filter(f => !existingPaths.has(f.h5_relative_path));
             return [...prev, ...uniqueNew];
         });
         
@@ -223,6 +312,98 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
         }
     };
 
+    const handleGroupFiles = async (files: any[]) => {
+        if (!files || files.length < 2) return;
+        
+        const firstFile = files[0];
+        const defaultName = firstFile.name
+            ? firstFile.name.replace(/\.h5$/i, '') + '_grouped'
+            : 'Grouped_Spectra';
+            
+        const groupName = prompt(
+            `Enter a name for the grouped map file (will contain ${files.length} spectra):`,
+            defaultName
+        );
+        if (groupName === null) return; // cancelled
+        
+        const cleanGroupName = groupName.trim() || defaultName;
+        
+        try {
+            const res = await fetch('http://127.0.0.1:8888/api/map/group', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    vault_root: vaultRoot,
+                    h5_relative_paths: files.map(f => f.h5_relative_path),
+                    group_name: cleanGroupName
+                })
+            });
+            const data = await res.json();
+            if (data.success && data.file) {
+                toast.success(data.message || 'Grouped successfully');
+                
+                let updatedFile = { ...data.file };
+                
+                // Try to find a valid characterization ID from the files being grouped
+                let charId: string | undefined = undefined;
+                for (const f of files) {
+                    if (f.id && f.id.includes('-')) {
+                        const parts = f.id.split('-');
+                        if (parts[0].length === 36) {
+                            charId = parts[0];
+                            break;
+                        }
+                    }
+                }
+
+                // Register file in Supabase so it's available in Vault Discovery
+                try {
+                    const regRes = await registerGroupedH5FileAction({
+                        charId,
+                        sampleName: firstFile.sample_name || 'Uncategorized',
+                        h5Path: data.file.h5_relative_path,
+                        originalFileName: data.file.name,
+                        groupId
+                    });
+                    if (regRes.success && regRes.charId) {
+                        updatedFile.id = `${regRes.charId}-${data.file.h5_relative_path}`;
+                        updatedFile.sample_name = firstFile.sample_name;
+                    }
+                } catch (dbErr) {
+                    console.error("Failed to register grouped file in Supabase:", dbErr);
+                }
+                
+                // Add to workspace sessionFiles
+                setSessionFiles(prev => {
+                    const exists = prev.some(f => f.h5_relative_path === updatedFile.h5_relative_path);
+                    if (exists) return prev;
+                    return [updatedFile, ...prev];
+                });
+                
+                // Clear checkboxes
+                setCompareFiles([]);
+                
+                // Auto-select the newly created grouped map file
+                setSelectedH5(data.file.h5_relative_path);
+                
+                // Auto-configure dimensions: 1D map of n_spectra x 1
+                const n = data.file.n_spectra || files.length;
+                setMapDim({ w: n, h: 1 });
+                setStepSize(1.0);
+                setNSpectra(n);
+                setSelectedPixelIndex(0);
+                setWavenumberRange(undefined);
+                
+                // Switch mode to standard to show the new map
+                setMode('standard');
+            } else {
+                toast.error(data.message || data.detail || 'Failed to group files');
+            }
+        } catch (e) {
+            toast.error('Engine connection failed');
+        }
+    };
+
     const handleSaveWorkspace = async (customName?: string, customFiles?: any[]) => {
         const name = customName || saveName;
         const targetFiles = customFiles || sessionFiles;
@@ -280,6 +461,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                     dbSamples={dbSamples}
                     compareFiles={compareFiles}
                     onToggleCompare={handleToggleCompare}
+                    onGroupFiles={handleGroupFiles}
                     onOpenExplorer={() => setIsExplorerOpen(true)}
                     onSaveWorkspace={() => handleSaveWorkspace()}
                     onSaveComparison={() => handleSaveWorkspace(undefined, compareFiles)}
@@ -447,6 +629,15 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     Fitting (SV)
                                 </button>
                                 <button 
+                                    onClick={() => setMode('rgi')}
+                                    className={cn(
+                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                        mode === 'rgi' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-emerald-600"
+                                    )}
+                                >
+                                    RGI Workspace
+                                </button>
+                                <button 
                                     onClick={() => setMode('compare')}
                                     className={cn(
                                         "px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
@@ -557,6 +748,15 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     mapHeight={mapDim.h}
                                     nSpectra={nSpectra}
                                 />
+                            ) : mode === 'rgi' ? (
+                                <RgiView
+                                    vaultRoot={vaultRoot}
+                                    h5Path={selectedH5}
+                                    mapWidth={mapDim.w}
+                                    mapHeight={mapDim.h}
+                                    nSpectra={nSpectra}
+                                    onFileCreated={(file) => handleImport([file])}
+                                />
                             ) : (
                                 <GrapheneAnalyticsView 
                                     vaultRoot={vaultRoot}
@@ -565,7 +765,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 />
                             )}
                         </div>
-                        {mode !== 'analytics' && mode !== 'pipeline' && mode !== 'compare' && mode !== 'deconvolution' && mode !== 'fitting' && (
+                        {mode !== 'analytics' && mode !== 'pipeline' && mode !== 'compare' && mode !== 'deconvolution' && mode !== 'fitting' && mode !== 'rgi' && (
                             <div className="h-72 shrink-0 bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 overflow-hidden">
                                 <SpectrumInspector 
                                     vaultRoot={vaultRoot}

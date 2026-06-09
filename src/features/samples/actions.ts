@@ -971,3 +971,120 @@ export async function getLastCharacterizationParamsAction(groupId: string, charT
 
     return { data: match.data as Record<string, any> };
 }
+
+export async function registerGroupedH5FileAction(input: {
+    charId?: string;
+    sampleName: string;
+    h5Path: string;
+    originalFileName: string;
+    groupId: string;
+}) {
+    const supabase = await createClient();
+
+    let targetCharId = input.charId;
+
+    // 1. If no charId was provided, look it up via sample and characterization
+    if (!targetCharId && input.sampleName && input.sampleName !== 'Uncategorized') {
+        try {
+            // Find sample with sample_code matching sampleName or name matching sampleName in the group
+            const { data: sample } = await supabase
+                .from('samples')
+                .select('id')
+                .eq('group_id', input.groupId)
+                .or(`sample_code.eq."${input.sampleName}",name.eq."${input.sampleName}"`)
+                .limit(1)
+                .single();
+
+            if (sample) {
+                // Find existing Raman characterization for this sample
+                const { data: char } = await supabase
+                    .from('sample_characterizations')
+                    .select('id')
+                    .eq('sample_id', sample.id)
+                    .eq('type', 'Raman')
+                    .limit(1)
+                    .single();
+
+                if (char) {
+                    targetCharId = char.id;
+                } else {
+                    // Create new Raman characterization for this sample
+                    const user = await supabase.auth.getUser();
+                    const newChar = {
+                        sample_id: sample.id,
+                        type: 'Raman',
+                        data: {
+                            local_h5_paths: [input.h5Path],
+                            original_files: [input.originalFileName]
+                        },
+                        created_by: user.data.user?.id,
+                        performed_at: new Date().toISOString()
+                    };
+                    const { data: createdChar, error: createError } = await supabase
+                        .from('sample_characterizations')
+                        .insert(newChar)
+                        .select('id')
+                        .single();
+
+                    if (!createError && createdChar) {
+                        revalidatePath(`/${input.groupId}/samples`);
+                        return { success: true, charId: createdChar.id };
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Failed to locate sample or characterization for grouping:', e);
+        }
+    }
+
+    // 2. If we have a targetCharId, update it
+    if (targetCharId) {
+        try {
+            const { data: char, error: fetchError } = await supabase
+                .from('sample_characterizations')
+                .select('data')
+                .eq('id', targetCharId)
+                .single();
+
+            if (!fetchError && char) {
+                const currentData = char.data ? { ...(char.data as Record<string, any>) } : {};
+                
+                const paths = Array.isArray(currentData.local_h5_paths) 
+                    ? [...currentData.local_h5_paths] 
+                    : currentData.local_h5_path 
+                        ? [currentData.local_h5_path] 
+                        : [];
+                        
+                if (!paths.includes(input.h5Path)) {
+                    paths.push(input.h5Path);
+                }
+                currentData.local_h5_paths = paths;
+
+                const originalFiles = Array.isArray(currentData.original_files)
+                    ? [...currentData.original_files]
+                    : currentData.original_file
+                        ? [currentData.original_file]
+                        : [];
+
+                if (!originalFiles.includes(input.originalFileName)) {
+                    originalFiles.push(input.originalFileName);
+                }
+                currentData.original_files = originalFiles;
+
+                const { error: updateError } = await supabase
+                    .from('sample_characterizations')
+                    .update({ data: currentData })
+                    .eq('id', targetCharId);
+
+                if (!updateError) {
+                    revalidatePath(`/${input.groupId}/samples`);
+                    return { success: true, charId: targetCharId };
+                }
+            }
+        } catch (e) {
+            console.error('Failed to update characterization paths for grouping:', e);
+        }
+    }
+
+    return { success: false, error: 'Could not register grouped file in database.' };
+}

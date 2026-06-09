@@ -128,6 +128,7 @@ def convert_to_h5(
     intensities: np.ndarray,
     metadata: Dict[str, Any],
     vault_root: str,
+    custom_filename: Optional[str] = None,
 ) -> Tuple[Path, str]:
     """
     Convert spectrum to HDF5 and save in vault.
@@ -141,7 +142,18 @@ def convert_to_h5(
     abs_dir = Path(vault_root) / subpath
     abs_dir.mkdir(parents=True, exist_ok=True)
 
-    filename = _build_h5_filename(metadata, abs_dir)
+    if custom_filename:
+        filename = custom_filename
+        if not filename.lower().endswith(".h5"):
+            filename += ".h5"
+        # Ensure no overwrite
+        counter = 1
+        stem = Path(filename).stem
+        while (abs_dir / filename).exists():
+            filename = f"{stem}_{counter}.h5"
+            counter += 1
+    else:
+        filename = _build_h5_filename(metadata, abs_dir)
     
     h5_path = abs_dir / filename
     relative_path = f"{subpath}/{filename}"
