@@ -36,6 +36,10 @@ interface VaultFile {
     n_spectra: number;
     map_width: number;
     map_height: number;
+    pipeline_applied?: boolean;
+    pipeline_name?: string;
+    pipeline_history?: string;
+    parent_file?: string;
     metadata?: {
         laser?: string;
         power?: string;

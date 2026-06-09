@@ -56,6 +56,24 @@ class IngestRequest(BaseModel):
     is_generic: Optional[bool] = False
 
 
+class IngestGroupRequest(BaseModel):
+    file_paths: list[str]        # List of absolute paths to source files
+    vault_root: str              # User-configured local vault root path
+    group_id: str
+    sample_id: Optional[str] = None
+    sample_code: Optional[str] = None
+    sample_name: Optional[str] = None
+    logbook_name: Optional[str] = None
+    analyte: Optional[str] = None
+    laser_wavelength_nm: Optional[int] = None
+    laser_power_uw: Optional[float] = None
+    integration_time_s: Optional[float] = None
+    accumulations: Optional[int] = 1
+    technique: Optional[str] = "raman"
+    measured_at: Optional[str] = None
+    parameters: Optional[dict] = None
+
+
 class IngestResponse(BaseModel):
     success: bool
     h5_relative_path: str        # Relative path from vault_root to the .h5 file
@@ -189,6 +207,130 @@ async def ingest_file(request: IngestRequest):
         n_points=len(wavenumbers),
         n_spectra=1 if intensities.ndim == 1 else intensities.shape[0],
         message=f"Successfully ingested {source_path.name} → {relative_path}"
+    )
+
+
+@app.post("/api/ingest/group", response_model=IngestResponse)
+async def ingest_group_files(request: IngestGroupRequest):
+    """
+    Ingest multiple raw spectral files (.txt, .mat) into a single grouped HDF5 file.
+    1. Reads all files.
+    2. Aligns their wavenumber axes and stacks their intensity vectors.
+    3. Saves them into a single HDF5 file in the vault.
+    """
+    import numpy as np
+    from scipy.interpolate import interp1d
+    from processor import convert_to_h5, generate_preview
+    
+    if not request.file_paths:
+        raise HTTPException(status_code=400, detail="No files selected for ingestion grouping")
+        
+    vault_root = Path(request.vault_root)
+    
+    # We will use the first file path as the reference for name generation and directory
+    first_path = Path(request.file_paths[0])
+    if not first_path.exists():
+        raise HTTPException(status_code=404, detail=f"Base file not found: {request.file_paths[0]}")
+        
+    # Read spectra from all files, align them to the first file's grid
+    target_wn = None
+    all_spectra = []
+    
+    for path_str in request.file_paths:
+        p = Path(path_str)
+        if not p.exists():
+            continue
+        
+        ext = p.suffix.lower()
+        try:
+            if ext == ".txt":
+                wn, ints, _ = read_witec_txt(p)
+            elif ext == ".mat":
+                wn, ints, _ = read_matlab_mat(p)
+            else:
+                # Skip unsupported files in this group
+                continue
+        except Exception as e:
+            print(f"Error reading {p.name} during group ingestion: {e}")
+            continue
+            
+        # Force 2D (n_spectra, n_points)
+        if ints.ndim == 1:
+            ints = ints.reshape(1, -1)
+        elif ints.ndim > 2:
+            ints = ints.reshape(-1, ints.shape[-1])
+            
+        # Sort by wavenumber
+        idx = np.argsort(wn)
+        wn = wn[idx]
+        ints = ints[:, idx]
+        
+        if target_wn is None:
+            target_wn = wn
+            
+        # Align if grids differ
+        if not np.array_equal(wn, target_wn):
+            for i in range(ints.shape[0]):
+                f_int = interp1d(wn, ints[i], bounds_error=False, fill_value="extrapolate")
+                all_spectra.append(f_int(target_wn))
+        else:
+            for i in range(ints.shape[0]):
+                all_spectra.append(ints[i])
+                
+    if target_wn is None or not all_spectra:
+        raise HTTPException(status_code=400, detail="No valid spectra could be parsed from the files")
+        
+    stacked_intensities = np.vstack(all_spectra)
+    n_total_spectra = stacked_intensities.shape[0]
+    
+    # Build metadata dict
+    full_metadata = {
+        "group_id": request.group_id,
+        "logbook_name": request.logbook_name or "",
+        "sample_id": request.sample_id or "",
+        "sample_code": request.sample_code or "",
+        "sample_name": request.sample_name or "",
+        "analyte": request.analyte or "",
+        "laser_wavelength_nm": request.laser_wavelength_nm or 0,
+        "laser_power_uw": request.laser_power_uw or 0.0,
+        "integration_time_s": request.integration_time_s or 0.0,
+        "accumulations": request.accumulations or 1,
+        "technique": request.technique or "raman",
+        "source_format": "grouped",
+        "original_filename": f"{first_path.stem}_grouped",
+        "measured_at": request.measured_at or "",
+        "parameters": request.parameters or {},
+    }
+    
+    # Convert to HDF5 and organize in vault
+    try:
+        # Generate custom grouped filename using first file stem
+        clean_name = f"{first_path.stem}_grouped"
+        
+        h5_path, relative_path = convert_to_h5(
+            wavenumbers=target_wn,
+            intensities=stacked_intensities,
+            metadata=full_metadata,
+            vault_root=request.vault_root,
+            custom_filename=clean_name
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"HDF5 grouping conversion failed: {str(e)}")
+        
+    # Generate preview PNG as base64
+    try:
+        preview_b64 = generate_preview(target_wn, stacked_intensities, full_metadata)
+    except Exception:
+        preview_b64 = None
+        
+    return IngestResponse(
+        success=True,
+        h5_relative_path=relative_path,
+        preview_base64=preview_b64,
+        wavenumber_range=[float(target_wn.min()), float(target_wn.max())],
+        n_points=len(target_wn),
+        n_spectra=n_total_spectra,
+        message=f"Successfully grouped and ingested {len(request.file_paths)} files into {relative_path}"
     )
 
 
@@ -439,6 +581,7 @@ def list_vault_files(vault_root: str, group_id: str = None):
                     "pipeline_applied": decode_attr(meta.get("pipeline_applied")).lower() == "true",
                     "pipeline_name": decode_attr(meta.get("pipeline_name", "")),
                     "pipeline_history": decode_attr(meta.get("pipeline_history", "")),
+                    "parent_file": decode_attr(meta.get("parent_file", "")),
                 })
         except Exception:
             pass
@@ -812,6 +955,7 @@ def apply_pipeline_to_file(request: PipelineApplyRequest):
         metadata["pipeline_name"] = request.pipeline_name or "unnamed"
         metadata["pipeline_history"] = json.dumps(request.steps)
         metadata["processed_at"] = datetime.now().isoformat()
+        metadata["parent_file"] = request.h5_relative_path
         
         # Save new file
         with h5py.File(target_path, "w") as f:
@@ -855,7 +999,8 @@ def apply_pipeline_to_file(request: PipelineApplyRequest):
             "pipeline_applied": True,
             "pipeline_name": metadata.get("pipeline_name", "unnamed"),
             "pipeline_history": metadata.get("pipeline_history", ""),
-            "parent_name": source_path.name
+            "parent_name": source_path.name,
+            "parent_file": request.h5_relative_path
         }
         
         return {
@@ -888,6 +1033,167 @@ def delete_map_file(request: DeleteMapRequest):
         return {"success": True, "message": "File deleted successfully"}
     except Exception as e:
         return {"success": False, "message": f"Failed to delete file: {str(e)}"}
+
+
+class GroupRequest(BaseModel):
+    vault_root: str
+    h5_relative_paths: list[str]
+    group_name: Optional[str] = None
+
+@app.post("/api/map/group")
+def group_map_files(request: GroupRequest):
+    import h5py
+    import numpy as np
+    from scipy.interpolate import interp1d
+    from pathlib import Path
+    from datetime import datetime
+    
+    if not request.h5_relative_paths:
+        raise HTTPException(status_code=400, detail="No files selected for grouping")
+        
+    vault_root = Path(request.vault_root)
+    first_path = vault_root / request.h5_relative_paths[0]
+    if not first_path.exists():
+        raise HTTPException(status_code=404, detail=f"Base file not found: {request.h5_relative_paths[0]}")
+        
+    parent_dir = first_path.parent
+    
+    # 1. Read first file to get base metadata
+    base_metadata = {}
+    try:
+        with h5py.File(first_path, "r") as f:
+            for k in f.attrs.keys():
+                base_metadata[k] = f.attrs[k]
+    except Exception as e:
+        print(f"Error reading base attributes: {e}")
+        
+    def decode_val(val):
+        if isinstance(val, bytes):
+            return val.decode("utf-8", "ignore")
+        return val
+        
+    base_metadata = {k: decode_val(v) for k, v in base_metadata.items()}
+    
+    # 2. Align and extract spectra
+    target_wn = None
+    all_spectra = []
+    
+    for rel_path in request.h5_relative_paths:
+        abs_path = vault_root / rel_path
+        if not abs_path.exists():
+            continue
+        try:
+            with h5py.File(abs_path, "r") as f:
+                if "spectrum" not in f:
+                    continue
+                wn = f["spectrum/wavenumbers"][:]
+                ints = f["spectrum/intensities"][:]
+                
+                # Force 2D (n_spectra, n_points)
+                if ints.ndim == 1:
+                    ints = ints.reshape(1, -1)
+                elif ints.ndim > 2:
+                    # Flatten spatial dimensions to spectra
+                    ints = ints.reshape(-1, ints.shape[-1])
+                    
+                # Sort by wavenumber
+                idx = np.argsort(wn)
+                wn = wn[idx]
+                ints = ints[:, idx]
+                
+                if target_wn is None:
+                    target_wn = wn
+                    
+                # Align if grids differ
+                if not np.array_equal(wn, target_wn):
+                    for i in range(ints.shape[0]):
+                        f_int = interp1d(wn, ints[i], bounds_error=False, fill_value="extrapolate")
+                        all_spectra.append(f_int(target_wn))
+                else:
+                    for i in range(ints.shape[0]):
+                        all_spectra.append(ints[i])
+        except Exception as e:
+            print(f"Error reading {rel_path} during group: {e}")
+            
+    if target_wn is None or not all_spectra:
+        raise HTTPException(status_code=400, detail="No valid spectra could be extracted")
+        
+    stacked_intensities = np.vstack(all_spectra)
+    n_total_spectra = stacked_intensities.shape[0]
+    
+    # 3. Build target filename
+    if request.group_name:
+        clean_name = request.group_name.strip()
+        if not clean_name.lower().endswith(".h5"):
+            clean_name += ".h5"
+    else:
+        # Generate default name based on first file
+        clean_name = f"{first_path.stem}_grouped.h5"
+        
+    target_path = parent_dir / clean_name
+    
+    # Ensure no overwrite
+    counter = 1
+    stem = target_path.stem
+    while target_path.exists():
+        target_path = parent_dir / f"{stem}_{counter}.h5"
+        counter += 1
+        
+    # 4. Save new H5 file
+    try:
+        # Update metadata for map dimensions
+        base_metadata["map_width"] = str(n_total_spectra)
+        base_metadata["map_height"] = "1"
+        base_metadata["created_at"] = datetime.now().isoformat()
+        base_metadata["original_files"] = ",".join([Path(p).name for p in request.h5_relative_paths])
+        
+        with h5py.File(target_path, "w") as f:
+            # Copy metadata
+            for k, v in base_metadata.items():
+                try:
+                    f.attrs[k] = v
+                except Exception:
+                    try:
+                        f.attrs[k] = str(v)
+                    except Exception:
+                        pass
+                        
+            grp = f.create_group("spectrum")
+            ds_wn = grp.create_dataset("wavenumbers", data=target_wn, compression="gzip")
+            ds_wn.attrs["units"] = "cm^-1"
+            ds_wn.attrs["label"] = "Raman Shift"
+            
+            ds_int = grp.create_dataset("intensities", data=stacked_intensities, compression="gzip")
+            ds_int.attrs["units"] = "counts"
+            ds_int.attrs["label"] = "Intensity"
+            
+        relative_path = target_path.relative_to(vault_root).as_posix()
+        
+        file_info = {
+            "id": relative_path,
+            "h5_relative_path": relative_path,
+            "name": target_path.name,
+            "sample_name": base_metadata.get("sample_name") or base_metadata.get("sample_code", "Unknown"),
+            "technique": base_metadata.get("technique", "raman"),
+            "measured_at": base_metadata.get("measured_at") or base_metadata.get("created_at") or "",
+            "created_at": base_metadata["created_at"],
+            "n_spectra": n_total_spectra,
+            "map_width": n_total_spectra,
+            "map_height": 1,
+            "pipeline_applied": False,
+            "pipeline_name": "",
+            "pipeline_history": ""
+        }
+        
+        return {
+            "success": True,
+            "file": file_info,
+            "message": f"Successfully grouped {len(request.h5_relative_paths)} files into {target_path.name}"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Grouping failed: {str(e)}")
+
 
 
 class RenameRequest(BaseModel):
@@ -1352,6 +1658,7 @@ class FittingFitRequest(BaseModel):
     baseline_params: Optional[dict] = None
     x_shift: float = 0.0
     crop_range: Optional[list[float]] = None
+    is_baseline_subtracted: bool = True
 
 class FittingApplyRequest(BaseModel):
     vault_root: str
@@ -1400,6 +1707,51 @@ def fitting_fit_representative(request: FittingFitRequest):
     )
 
     return result
+
+class FittingPixelRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    spectrum_index: int
+    peaks: list[dict]
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    crop_range: Optional[list[float]] = None
+
+@app.post("/api/fitting/fit-pixel")
+def fitting_fit_pixel(request: FittingPixelRequest):
+    from scripts.fitting_engine import fit_spectrum
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+
+    try:
+        with h5py.File(path, "r") as f:
+            wn = f["/spectrum/wavenumbers"][:]
+            ints = f["/spectrum/intensities"][:]
+            
+        if ints.ndim == 1:
+            ints = ints.reshape(1, -1)
+            
+        if request.spectrum_index < 0 or request.spectrum_index >= ints.shape[0]:
+            raise HTTPException(status_code=400, detail="Invalid spectrum index")
+            
+        y = ints[request.spectrum_index]
+        crop_range_tup = tuple(request.crop_range) if request.crop_range else None
+
+        result = fit_spectrum(
+            x=wn,
+            y=y,
+            peaks=request.peaks,
+            baseline_method=request.baseline_method,
+            baseline_params=request.baseline_params or {},
+            x_shift=request.x_shift,
+            crop_range=crop_range_tup
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/fitting/apply-to-map")
 def fitting_apply_to_map(request: FittingApplyRequest):
@@ -1518,6 +1870,7 @@ def fitting_auto_detect(request: FittingAutoDetectRequest):
 
     return {"success": True, "peaks": detected}
 
+
 @app.post("/api/fitting/save-config")
 def fitting_save_config(request: FittingFitRequest):
     import json
@@ -1532,6 +1885,7 @@ def fitting_save_config(request: FittingFitRequest):
                 "baseline_params": request.baseline_params or {},
                 "x_shift": request.x_shift,
                 "crop_range": request.crop_range,
+                "is_baseline_subtracted": request.is_baseline_subtracted,
                 "updated_at": datetime.now().isoformat()
             }
             f["config"].attrs["fitting"] = json.dumps(config_data)
@@ -1555,5 +1909,288 @@ def fitting_load_config(request: dict):
         return {"success": False, "message": str(e)}
 
 
+# =============================================================================
+# RAMAN GLOBAL INTELLIGENCE (RGI) ENDPOINTS
+# =============================================================================
+
+class RgiBuildModelRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    crop_range: Optional[list[float]] = None
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    n_components_pca: int = 5
+    n_components_nmf: int = 3
+    n_clusters: int = 4
+    normalization: str = "vector"
+
+class RgiFitRepresentativesRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    cluster_id: int
+    peaks: list[dict]
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    crop_range: Optional[list[float]] = None
+
+class RgiMapFitRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    peaks: list[dict]
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    crop_range: Optional[list[float]] = None
+    threshold_snr: float = 3.0
+    cluster_models_override: Optional[dict] = None  # Mapping of string cluster_id -> list of peaks
+
+class RgiSaveRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    session_data: dict
+    save_suffix: Optional[str] = "rgi"
+
+class RgiLoadRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+
+@app.post("/api/rgi/save-results")
+def rgi_save_results(request: RgiSaveRequest):
+    import shutil
+    import json
+    
+    vault_root_path = Path(request.vault_root)
+    original_path = vault_root_path / request.h5_relative_path
+    
+    if not original_path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+        
+    # Ensure save_suffix is clean
+    suffix = request.save_suffix or "rgi"
+    suffix = "".join([c for c in suffix if c.isalnum() or c in "-_."]).strip()
+    if not suffix:
+        suffix = "rgi"
+        
+    filename = original_path.name
+    expected_end = f"_{suffix}.h5"
+    
+    if filename.endswith(expected_end):
+        target_path = original_path
+        relative_path = request.h5_relative_path
+    else:
+        new_filename = original_path.stem + f"_{suffix}.h5"
+        target_path = original_path.parent / new_filename
+        relative_path = target_path.relative_to(vault_root_path).as_posix()
+        try:
+            # Copy original file to target file
+            shutil.copy2(original_path, target_path)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to duplicate H5 file: {str(e)}")
+            
+    try:
+        # Open in write/append mode
+        with h5py.File(target_path, "r+") as f:
+            # Write parent_file if it's a new file (not overwrite)
+            if not filename.endswith(expected_end):
+                f.attrs["parent_file"] = request.h5_relative_path
+                
+            # Delete old saved session dataset/group if exists
+            if "/analysis/rgi_v1/saved_session" in f:
+                del f["/analysis/rgi_v1/saved_session"]
+            
+            # Ensure group /analysis/rgi_v1 exists
+            if "/analysis/rgi_v1" not in f:
+                f.create_group("/analysis/rgi_v1")
+            
+            # Serialize React state variable to JSON string
+            json_str = json.dumps(request.session_data)
+            
+            # Save it as a variable-length string dataset
+            str_dtype = h5py.string_dtype(encoding="utf-8")
+            f.create_dataset("/analysis/rgi_v1/saved_session", data=json_str, dtype=str_dtype)
+            
+            # Read metadata for file details
+            meta = dict(f.attrs)
+            def decode_attr(val, default=""):
+                if val is None: return default
+                if isinstance(val, bytes): return val.decode("utf-8", "ignore")
+                if hasattr(val, "decode"): return val.decode("utf-8", "ignore")
+                return str(val)
+                
+            n_spectra = 1
+            try:
+                intensities = f["/spectrum/intensities"]
+                if len(intensities.shape) >= 2:
+                    n_spectra = intensities.shape[0] if len(intensities.shape) == 2 else np.prod(intensities.shape[:-1])
+            except:
+                pass
+                
+            file_details = {
+                "id": relative_path,
+                "h5_relative_path": relative_path,
+                "name": target_path.name,
+                "sample_name": decode_attr(meta.get("sample_name") or meta.get("sample_code", "Unknown")).strip(),
+                "technique": decode_attr(meta.get("technique", "Unknown")).strip(),
+                "measured_at": decode_attr(meta.get("measured_at", "")).strip(),
+                "created_at": decode_attr(meta.get("created_at", "")),
+                "n_spectra": n_spectra,
+                "map_width": int(meta.get("map_width", 0)),
+                "map_height": int(meta.get("map_height", 0)),
+                "pipeline_applied": decode_attr(meta.get("pipeline_applied")).lower() == "true",
+                "pipeline_name": decode_attr(meta.get("pipeline_name", "")),
+                "pipeline_history": decode_attr(meta.get("pipeline_history", "")),
+                "parent_file": decode_attr(meta.get("parent_file", "")),
+            }
+            
+        return {"success": True, "message": "Results saved successfully", "file_details": file_details}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to write results: {str(e)}")
+
+@app.post("/api/rgi/load-results")
+def rgi_load_results(request: RgiLoadRequest):
+    import json
+    vault_root_path = Path(request.vault_root)
+    path = vault_root_path / request.h5_relative_path
+    
+    if not path.exists():
+        return {"success": False, "message": "File not found"}
+        
+    try:
+        with h5py.File(path, "r") as f:
+            if "/analysis/rgi_v1/saved_session" in f:
+                val = f["/analysis/rgi_v1/saved_session"][()]
+                if isinstance(val, bytes):
+                    json_str = val.decode("utf-8", "ignore")
+                elif hasattr(val, "decode"):
+                    json_str = val.decode("utf-8", "ignore")
+                else:
+                    json_str = str(val)
+                session_data = json.loads(json_str)
+                return {"success": True, "session_data": session_data}
+                
+        return {"success": False, "message": "No saved RGI session found"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@app.post("/api/rgi/build-map-model")
+def rgi_build_map_model(request: RgiBuildModelRequest):
+    from scripts.rgi_engine import RamanGlobalIntelligenceEngine
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+    
+    try:
+        rgi = RamanGlobalIntelligenceEngine(str(path))
+        result = rgi.build_map_model(
+            crop_range=request.crop_range,
+            baseline_method=request.baseline_method,
+            baseline_params=request.baseline_params,
+            x_shift=request.x_shift,
+            n_components_pca=request.n_components_pca,
+            n_components_nmf=request.n_components_nmf,
+            n_clusters=request.n_clusters,
+            normalization=request.normalization
+        )
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rgi/fit-representatives")
+def rgi_fit_representatives(request: RgiFitRepresentativesRequest):
+    from scripts.rgi_engine import fit_spectrum
+    
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+        
+    try:
+        # Load clustering from file to find representative index for this cluster_id
+        with h5py.File(path, "r") as f:
+            if "/analysis/rgi_v1/clustering/representatives" not in f:
+                raise HTTPException(status_code=400, detail="Run map segmentation first")
+            reps = f["/analysis/rgi_v1/clustering/representatives"][:]
+            wavenumbers = f["/spectrum/wavenumbers"][:]
+            intensities_2d = f["/spectrum/intensities"][:]
+            
+        if request.cluster_id < 0 or request.cluster_id >= len(reps):
+            raise HTTPException(status_code=400, detail="Invalid cluster id")
+            
+        pixel_index = int(reps[request.cluster_id])
+        if pixel_index < 0:
+            raise HTTPException(status_code=400, detail="No representative pixel found for this cluster")
+            
+        y = intensities_2d[pixel_index]
+        crop_range_tup = tuple(request.crop_range) if request.crop_range else None
+        
+        result = fit_spectrum(
+            x=wavenumbers,
+            y=y,
+            peaks=request.peaks,
+            baseline_method=request.baseline_method,
+            baseline_params=request.baseline_params or {},
+            x_shift=request.x_shift,
+            crop_range=crop_range_tup
+        )
+        result["pixel_index"] = pixel_index
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+rgi_progress = {"completed": 0, "total": 0, "active": False}
+
+@app.get("/api/rgi/fit-progress")
+async def get_rgi_fit_progress():
+    return rgi_progress
+
+@app.post("/api/rgi/run-constrained-map-fit")
+def rgi_run_constrained_map_fit(request: RgiMapFitRequest):
+    from scripts.rgi_engine import RamanGlobalIntelligenceEngine
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+        
+    try:
+        parsed_override = None
+        if request.cluster_models_override:
+            parsed_override = {}
+            for k, v in request.cluster_models_override.items():
+                parsed_override[int(k)] = v
+                
+        global rgi_progress
+        rgi_progress = {"completed": 0, "total": 0, "active": True}
+        
+        def progress_callback(completed, total):
+            rgi_progress["completed"] = completed
+            rgi_progress["total"] = total
+            
+        rgi = RamanGlobalIntelligenceEngine(str(path))
+        result = rgi.run_constrained_map_fit(
+            peaks=request.peaks,
+            baseline_method=request.baseline_method,
+            baseline_params=request.baseline_params,
+            x_shift=request.x_shift,
+            crop_range=request.crop_range,
+            threshold_snr=request.threshold_snr,
+            cluster_models_override=parsed_override,
+            progress_callback=progress_callback
+        )
+        rgi_progress["active"] = False
+        return result
+    except Exception as e:
+        rgi_progress["active"] = False
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8888, reload=False)
+

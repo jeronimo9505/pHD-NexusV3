@@ -31,6 +31,7 @@ interface VaultFile {
     pipeline_applied?: boolean;
     pipeline_name?: string;
     pipeline_history?: string; // JSON string of steps
+    parent_file?: string;
 }
 
 interface FileNode {
@@ -180,6 +181,54 @@ function SampleOverviewPopover({ group, onClose, position }: { group: SampleGrou
     );
 }
 
+// Match any derivative indicator: _preprocessed, _rgi, _deconvolution, _fitting (case insensitive)
+const DERIVATIVE_REGEX = /(_preprocessed|_rgi|_deconvolution|_fitting)\b/i;
+
+const isPipelineFile = (f: VaultFile) =>
+    !!f.parent_file || f.pipeline_applied === true || DERIVATIVE_REGEX.test(f.name.replace(/\.h5$/i, ''));
+
+const getAncestors = (file: VaultFile, allFiles: VaultFile[]): string[] => {
+    const ancestors = [file.h5_relative_path];
+    let current = file;
+    
+    while (true) {
+        // 1. Try metadata parent_file first
+        if (current.parent_file) {
+            const parent = allFiles.find(f => f.h5_relative_path === current.parent_file);
+            if (parent) {
+                ancestors.push(parent.h5_relative_path);
+                current = parent;
+                continue;
+            }
+        }
+        
+        // 2. Fallback to name-based parent resolution
+        const currentStem = current.name.replace(/\.h5$/i, '');
+        const match = currentStem.match(DERIVATIVE_REGEX);
+        
+        if (match && match.index !== undefined && match.index > 0) {
+            const parentStem = currentStem.substring(0, match.index);
+            const parent = allFiles.find(f => f.name.replace(/\.h5$/i, '').toLowerCase() === parentStem.toLowerCase());
+            if (parent) {
+                ancestors.push(parent.h5_relative_path);
+                current = parent;
+                continue;
+            }
+        }
+        
+        break;
+    }
+    
+    return ancestors;
+};
+
+const getUltimateParentStem = (file: VaultFile, allFiles: VaultFile[]) => {
+    const ancestors = getAncestors(file, allFiles);
+    const ultimateParentPath = ancestors[ancestors.length - 1];
+    const ultimateParent = allFiles.find(f => f.h5_relative_path === ultimateParentPath);
+    return ultimateParent ? ultimateParent.name.replace(/\.h5$/i, '') : file.name.replace(/\.h5$/i, '');
+};
+
 export function VaultLibrary({ 
     vaultRoot, 
     groupId, 
@@ -197,7 +246,8 @@ export function VaultLibrary({
     onRemove,
     onDeleteFile,
     onToggleCompare,
-    isLoading = false
+    isLoading = false,
+    onGroupFiles
 }: { 
     vaultRoot: string;
     groupId: string;
@@ -216,6 +266,7 @@ export function VaultLibrary({
     onDeleteFile?: (file: any) => void;
     onToggleCompare?: (file: any) => void;
     isLoading?: boolean;
+    onGroupFiles?: (files: VaultFile[]) => void;
 }) {
     const [search, setSearch] = useState('');
     const [expandedSamples, setExpandedSamples] = useState<Record<string, boolean>>({});
@@ -232,16 +283,6 @@ export function VaultLibrary({
     const groupedData = useMemo(() => {
         // ── helpers ──────────────────────────────────────────────────────────
         const getStem = (f: VaultFile) => f.name.replace(/\.h5$/i, '');
-
-        // A file is a pipeline derivative if it has pipeline_applied OR
-        // its stem ends with _preprocessed or _preprocessed_N
-        const isPipelineFile = (f: VaultFile) =>
-            f.pipeline_applied === true ||
-            /_preprocessed(_\d+)?$/.test(getStem(f));
-
-        // Strip _preprocessed(_N)? to find the parent's stem
-        const getParentStem = (f: VaultFile) =>
-            getStem(f).replace(/_preprocessed(_\d+)?$/, '');
 
         // ── group by sample ──────────────────────────────────────────────────
         const groups = sessionFiles.reduce((acc, file) => {
@@ -286,7 +327,7 @@ export function VaultLibrary({
             // Attach each pipeline to its parent; orphans become root nodes
             const orphanNodes: FileNode[] = [];
             pipelines.forEach(pf => {
-                const parentStem = getParentStem(pf);
+                const parentStem = getUltimateParentStem(pf, group.files);
                 const parentNode = nodeRecord[parentStem];
                 if (parentNode) {
                     parentNode.children.push(pf);
@@ -349,6 +390,16 @@ export function VaultLibrary({
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    {compareFiles.length > 1 && onGroupFiles && (
+                        <button 
+                            onClick={() => onGroupFiles(compareFiles)}
+                            disabled={isSaving}
+                            className="p-2.5 bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100 rounded-xl transition-all shadow-sm active:scale-95 group"
+                            title="Group Selected Spectra into a Single Map file"
+                        >
+                            <Map size={16} className="group-hover:scale-110 transition-transform text-amber-700" />
+                        </button>
+                    )}
                     {compareFiles.length > 0 && onSaveComparison && (
                         <button 
                             onClick={onSaveComparison}
@@ -793,11 +844,11 @@ function FileItem({
                 "flex-1 px-2 py-1.5 flex items-center gap-1.5 min-w-0 overflow-hidden",
                 isChild && "border-l-2 border-orange-100"
             )}>
-                {file.pipeline_applied ? (
+                {file.pipeline_applied || isPipelineFile(file) ? (
                     // Pipeline file — show its name as a styled badge
                     <>
                         <span className="text-[10px] font-black text-indigo-600 italic truncate">
-                            {file.pipeline_name || 'Preprocessed'}
+                            {file.pipeline_name || (file.name.toLowerCase().includes('_rgi') ? 'RGI' : 'Preprocessed')}
                         </span>
                         <div className="relative shrink-0">
                             <button

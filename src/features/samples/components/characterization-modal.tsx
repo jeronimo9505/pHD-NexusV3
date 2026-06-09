@@ -4,11 +4,11 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Sample, SampleCharacterization } from '../types';
 import { createCharacterizationAction, updateCharacterizationAction, getGroupCharacterizationTypesAction, getLastCharacterizationParamsAction } from '../actions';
 import { toast } from 'sonner';
-import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity, HardDrive, CheckCircle2, AlertCircle, Clipboard, Image } from 'lucide-react';
+import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity, HardDrive, CheckCircle2, AlertCircle, Clipboard, Image, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { uploadFileToDrive } from '@/lib/google/upload';
 import { ensureAuth } from '@/lib/google/auth';
-import { isDesktop, ingestFile, checkEngineHealth, SCIENCE_ENGINE_URL, fetchRepresentativeSpectrum, savePastedImage, renameVaultFiles } from '@/lib/desktop';
+import { isDesktop, ingestFile, ingestGroupFiles, checkEngineHealth, SCIENCE_ENGINE_URL, fetchRepresentativeSpectrum, savePastedImage, renameVaultFiles } from '@/lib/desktop';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { splitValueAndUnit } from '../utils';
@@ -348,6 +348,70 @@ export function CharacterizationModal({
             if (lastPreview) setSpectrumPreviewB64(lastPreview);
             setIngestStatus('success');
             toast.success(`${newH5Paths.length - h5RelativePaths.length} new file(s) processed into Data Vault`);
+        } catch (err: any) {
+            setIngestStatus('error');
+            toast.error(err.message || 'Python engine error');
+        }
+    };
+
+    const handleDesktopGroupFileIngest = async () => {
+        if (localFilePaths.length < 2) {
+            toast.error('Please select at least 2 raw files to group during ingestion.');
+            return;
+        }
+
+        const currentVaultRoot = typeof window !== 'undefined' ? localStorage.getItem('phdnexus_vault_root') : null;
+        if (!currentVaultRoot || !currentVaultRoot.trim()) {
+            toast.error('Local Data Vault Root is not configured. Please set it up in Group Settings > Drive Integration.');
+            return;
+        }
+
+        setIngestStatus('loading');
+        try {
+            const analyte = dataFields.find(f => f.key.toLowerCase().includes('analyte'))?.value || '';
+            const laserField = dataFields.find(f => f.key.toLowerCase().includes('laser'))?.value || '';
+            const laserNm = parseInt(laserField.replace(/\D/g, '')) || undefined;
+            const powerField = dataFields.find(f => f.key.toLowerCase().includes('power'))?.value || '';
+            const powerUw = parseFloat(powerField.replace(/[^\d.]/g, '')) || undefined;
+
+            const parameters: Record<string, string> = {};
+            dataFields.forEach(f => {
+                const val = (typeof f.value === 'string' ? f.value : '').trim();
+                const unit = (f.unit || '').trim();
+                if (val) {
+                    parameters[f.key] = unit ? `${val} ${unit}` : val;
+                }
+            });
+
+            const result = await ingestGroupFiles({
+                file_paths: localFilePaths.map(p => p.trim()),
+                vault_root: currentVaultRoot.trim(),
+                group_id: groupId,
+                sample_id: sample.id,
+                sample_code: sample.sample_code,
+                sample_name: sample.name,
+                logbook_name: logbookName,
+                analyte,
+                laser_wavelength_nm: laserNm,
+                laser_power_uw: powerUw,
+                technique: type,
+                parameters
+            });
+
+            const newH5Paths = [...h5RelativePaths, result.h5_relative_path];
+            const newMeta = { ...fileMetadata };
+            newMeta[result.h5_relative_path] = {
+                range: result.wavenumber_range,
+                points: result.n_points,
+                spectra: result.n_spectra
+            };
+
+            setH5RelativePaths(Array.from(new Set(newH5Paths)));
+            setFileMetadata(newMeta);
+
+            if (result.preview_base64) setSpectrumPreviewB64(result.preview_base64);
+            setIngestStatus('success');
+            toast.success(`Ingested and grouped ${localFilePaths.length} files into 1 file: ${result.h5_relative_path.split('/').pop()}`);
         } catch (err: any) {
             setIngestStatus('error');
             toast.error(err.message || 'Python engine error');
@@ -1556,29 +1620,51 @@ export function CharacterizationModal({
                                                     )}
                                                 </div>
 
-                                                <div className="flex gap-2">
+                                                <div className="flex flex-col gap-2">
                                                     <button
                                                         type="button"
                                                         onClick={handleSelectRawFile}
-                                                        className="flex-1 flex items-center justify-center gap-2 text-xs font-medium border border-slate-200 border-dashed rounded-lg px-3 py-2 outline-none hover:border-purple-400 bg-white hover:bg-purple-50 hover:text-purple-600 transition-colors text-slate-500"
+                                                        className="w-full flex items-center justify-center gap-2 text-xs font-semibold border border-slate-200 border-dashed rounded-lg px-3 py-2 outline-none hover:border-purple-400 bg-white hover:bg-purple-50 hover:text-purple-600 transition-colors text-slate-500"
                                                     >
-                                                        <FolderOpen size={14} /> Select Additional Files...
+                                                        <FolderOpen size={14} /> Select Files to Ingest...
                                                     </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleDesktopFileIngest}
-                                                        disabled={ingestStatus === 'loading' || !engineOnline}
-                                                        className={cn(
-                                                            "px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap",
-                                                            engineOnline
-                                                                ? "bg-purple-600 text-white hover:bg-purple-700 shadow-sm"
-                                                                : "bg-slate-100 text-slate-400 cursor-not-allowed"
-                                                        )}
-                                                    >
-                                                        {ingestStatus === 'loading'
-                                                            ? <><Loader2 size={12} className="animate-spin" /> Processing...</>
-                                                            : <><Activity size={12} /> Ingest File</>}
-                                                    </button>
+                                                    
+                                                    {localFilePaths.length > 0 && (
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleDesktopFileIngest}
+                                                                disabled={ingestStatus === 'loading' || !engineOnline}
+                                                                className={cn(
+                                                                    "flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap border border-purple-200",
+                                                                    engineOnline
+                                                                        ? "bg-white text-purple-600 hover:bg-purple-50 active:scale-[0.98]"
+                                                                        : "bg-slate-50 text-slate-400 cursor-not-allowed"
+                                                                )}
+                                                            >
+                                                                {ingestStatus === 'loading'
+                                                                    ? <><Loader2 size={12} className="animate-spin" /> Ingesting...</>
+                                                                    : <><Activity size={12} /> Ingest Separately ({localFilePaths.length})</>}
+                                                            </button>
+                                                            
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleDesktopGroupFileIngest}
+                                                                disabled={ingestStatus === 'loading' || !engineOnline || localFilePaths.length < 2}
+                                                                className={cn(
+                                                                    "flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap shadow-sm active:scale-[0.98]",
+                                                                    engineOnline && localFilePaths.length >= 2
+                                                                        ? "bg-purple-600 text-white hover:bg-purple-700"
+                                                                        : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                                                                )}
+                                                                title="Merge all selected files into a single matrix file"
+                                                            >
+                                                                {ingestStatus === 'loading'
+                                                                    ? <><Loader2 size={12} className="animate-spin" /> Grouping...</>
+                                                                    : <><Layers size={12} /> Ingest into 1 File</>}
+                                                            </button>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
 

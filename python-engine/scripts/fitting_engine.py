@@ -51,7 +51,8 @@ def apply_baseline(
         params = {}
         
     if method == "none" or not method:
-        return y.copy(), np.zeros_like(y)
+        min_y = np.min(y)
+        return y - min_y, np.full_like(y, min_y)
 
     fitter = Baseline(x_data=x)
     try:
@@ -153,10 +154,17 @@ def build_fitting_model(peaks: List[dict]) -> Tuple[lmfit.CompositeModel, lmfit.
                 add_param("tau2", "tau2", float(pk.get("tau2", fwhm_init * 2.0)), default_min=0.1, default_max=10000.0)
                 add_param("B", "B", float(pk.get("B", 0.0)))
         else:
-            sigma_init = fwhm_init / 2.0
+            if model_name == "Gaussian":
+                sigma_init = fwhm_init / 2.35482004503
+            else:
+                sigma_init = fwhm_init / 2.0
             add_param("center", "center", center, default_min=center_min, default_max=center_max)
-            add_param("fwhm_init", "sigma", sigma_init, default_min=0.1, default_max=500.0)
+            add_param("fwhm_init", "sigma", sigma_init, default_min=2.0, default_max=50.0)
             add_param("amplitude", "amplitude", amplitude_val, default_min=0.0)
+            if model_name == "Gaussian":
+                params.add(f"{prefix}fwhm", expr=f"2.35482004503 * {prefix}sigma")
+            else:
+                params.add(f"{prefix}fwhm", expr=f"2.0 * {prefix}sigma")
             
             if model_name == "PseudoVoigt":
                 add_param("fraction", "fraction", 0.5, default_min=0.0, default_max=1.0)
@@ -218,7 +226,7 @@ def fit_spectrum(
             params[p_name].set(value=y_max * 0.5, min=0.0)
 
     try:
-        result = model.fit(y_corr, params, x=x_proc, method="leastsq", max_nfev=400)
+        result = model.fit(y_corr, params, x=x_proc, method="leastsq", max_nfev=1000)
         best_fit = result.best_fit
         residuals = result.residual
         success = result.success
@@ -311,7 +319,7 @@ def _fit_single_pixel_worker(args) -> dict:
             if "amplitude" in p_name or "_A" in p_name:
                 params[p_name].set(value=y_max * 0.5, min=0.0)
 
-        result = model.fit(y_corr, params, x=x_proc, method="leastsq", max_nfev=150)
+        result = model.fit(y_corr, params, x=x_proc, method="leastsq", max_nfev=800)
         
         # Collect parameters
         vals = {}

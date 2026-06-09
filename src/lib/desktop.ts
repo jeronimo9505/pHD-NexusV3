@@ -71,6 +71,38 @@ export async function ingestFile(request: IngestRequest): Promise<IngestResponse
 }
 
 /**
+ * Send a group file ingestion request to the Python engine.
+ */
+export async function ingestGroupFiles(request: {
+    file_paths: string[];
+    vault_root: string;
+    group_id: string;
+    sample_id?: string;
+    sample_code?: string;
+    sample_name?: string;
+    logbook_name?: string;
+    analyte?: string;
+    laser_wavelength_nm?: number;
+    laser_power_uw?: number;
+    integration_time_s?: number;
+    accumulations?: number;
+    technique?: string;
+    measured_at?: string;
+    parameters?: Record<string, string>;
+}): Promise<IngestResponse> {
+    const res = await fetch(`${SCIENCE_ENGINE_URL}/api/ingest/group`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Group Ingestion failed");
+    }
+    return res.json();
+}
+
+/**
  * Fetch processed spectrum data from the engine for a given .h5 file.
  */
 export async function fetchSpectrum(h5AbsPath: string): Promise<{
