@@ -187,6 +187,24 @@ def build_fitting_model(peaks: List[dict]) -> Tuple[lmfit.CompositeModel, lmfit.
                 expr=expr
             )
 
+        def add_fwhm_as_sigma_param(sigma_val, fwhm_to_sigma_factor, default_fwhm_min=4.0, default_fwhm_max=100.0):
+            is_fixed = pk.get("fixedParams", {}).get("fwhm_init", False)
+            expr = pk.get("exprParams", {}).get("fwhm_init", "")
+            fwhm_min = pk.get("minParams", {}).get("fwhm_init", default_fwhm_min)
+            fwhm_max = pk.get("maxParams", {}).get("fwhm_init", default_fwhm_max)
+
+            if not expr or not isinstance(expr, str) or expr.strip() == "":
+                expr = None
+
+            params.add(
+                f"{prefix}sigma",
+                value=sigma_val,
+                vary=not is_fixed,
+                min=(float(fwhm_min) / fwhm_to_sigma_factor) if use_limits else -np.inf,
+                max=(float(fwhm_max) / fwhm_to_sigma_factor) if use_limits else np.inf,
+                expr=expr,
+            )
+
         if model_name in ("DecaySingleExp", "DecayBiExp"):
             if model_name == "DecaySingleExp":
                 add_param("amplitude", "A", amplitude_val, default_min=0.0)
@@ -200,11 +218,12 @@ def build_fitting_model(peaks: List[dict]) -> Tuple[lmfit.CompositeModel, lmfit.
                 add_param("B", "B", float(pk.get("B", 0.0)))
         else:
             if model_name == "Gaussian":
-                sigma_init = fwhm_init / 2.35482004503
+                fwhm_to_sigma_factor = 2.35482004503
             else:
-                sigma_init = fwhm_init / 2.0
+                fwhm_to_sigma_factor = 2.0
+            sigma_init = fwhm_init / fwhm_to_sigma_factor
             add_param("center", "center", center, default_min=center_min, default_max=center_max)
-            add_param("fwhm_init", "sigma", sigma_init, default_min=2.0, default_max=50.0)
+            add_fwhm_as_sigma_param(sigma_init, fwhm_to_sigma_factor)
             add_param("amplitude", "amplitude", amplitude_val, default_min=0.0)
             if model_name == "Gaussian":
                 params.add(f"{prefix}fwhm", expr=f"2.35482004503 * {prefix}sigma")

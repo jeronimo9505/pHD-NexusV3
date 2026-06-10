@@ -30,9 +30,12 @@ function cleanRgiFileName(name: string): string {
     let clean = name.replace(/\.h5$/i, '');
     
     // 2. Quitar sufijos comunes de RGI y agrupaciones
+    clean = clean.replace(/_grouped_rgi2_.*$/i, '');
     clean = clean.replace(/_grouped_rgi_.*$/i, '');
+    clean = clean.replace(/_rgi2_.*$/i, '');
     clean = clean.replace(/_rgi_.*$/i, '');
     clean = clean.replace(/_grouped.*$/i, '');
+    clean = clean.replace(/_rgi2$/i, '');
     clean = clean.replace(/_rgi$/i, '');
     
     // 3. Quitar prefijo de celda (ej. F1C1_)
@@ -192,7 +195,7 @@ export function ComparisonView({
             try {
                 await Promise.all(compareFiles.map(async (file) => {
                     try {
-                        const res = await fetch(`${SCIENCE_ENGINE_URL}/api/rgi/load-scientific-maps`, {
+                        let res = await fetch(`${SCIENCE_ENGINE_URL}/api/rgi2/load-scientific-maps`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -200,12 +203,21 @@ export function ComparisonView({
                                 h5_relative_path: file.h5_relative_path
                             })
                         });
+                        let data = res.ok ? await res.json() : null;
+                        if (!data?.success) {
+                            res = await fetch(`${SCIENCE_ENGINE_URL}/api/rgi/load-scientific-maps`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    vault_root: vaultRoot,
+                                    h5_relative_path: file.h5_relative_path
+                                })
+                            });
+                            data = res.ok ? await res.json() : null;
+                        }
                         
-                        if (res.ok) {
-                            const data = await res.json();
-                            if (data.success) {
-                                sessions[file.id] = data;
-                            }
+                        if (data?.success) {
+                            sessions[file.id] = data;
                         }
                     } catch (e) {
                         console.error(`Error loading RGI maps for ${file.name}:`, e);

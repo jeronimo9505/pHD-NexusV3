@@ -181,8 +181,8 @@ function SampleOverviewPopover({ group, onClose, position }: { group: SampleGrou
     );
 }
 
-// Match any derivative indicator: _preprocessed, _rgi, _deconvolution, _fitting (case insensitive)
-const DERIVATIVE_REGEX = /(_preprocessed|_rgi|_deconvolution|_fitting)\b/i;
+// Match any derivative indicator: _preprocessed, _rgi2, _rgi, _deconvolution, _fitting (case insensitive)
+const DERIVATIVE_REGEX = /(_preprocessed|_rgi2|_rgi|_deconvolution|_fitting)\b/i;
 
 const isPipelineFile = (f: VaultFile) =>
     !!f.parent_file || f.pipeline_applied === true || DERIVATIVE_REGEX.test(f.name.replace(/\.h5$/i, ''));
@@ -848,7 +848,7 @@ function FileItem({
                     // Pipeline file — show its name as a styled badge
                     <>
                         <span className="text-[10px] font-black text-indigo-600 italic truncate">
-                            {file.pipeline_name || (file.name.toLowerCase().includes('_rgi') ? 'RGI' : 'Preprocessed')}
+                            {file.pipeline_name || (file.name.toLowerCase().includes('_rgi2') ? 'RGI2' : file.name.toLowerCase().includes('_rgi') ? 'RGI' : 'Preprocessed')}
                         </span>
                         <div className="relative shrink-0">
                             <button
