@@ -2345,6 +2345,361 @@ def get_rgi_graphene_analytics(request: RgiAnalyticsRequest):
         raise HTTPException(status_code=500, detail=f"RGI Graphene analytics failed: {str(e)}")
 
 
+# =============================================================================
+# RAMAN GLOBAL INTELLIGENCE 2 (RGI2) ENDPOINTS
+# =============================================================================
+
+class Rgi2BuildModelRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    crop_range: Optional[list[float]] = None
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    n_components_pca: int = 5
+    n_components_nmf: int = 3
+    n_clusters: int = 4
+    normalization: str = "vector"
+    clustering_method: str = "gmm"
+    save_suffix: Optional[str] = None
+    despike: bool = False
+    despike_method: str = "whitaker_hayes"
+    despike_threshold: float = 7.0
+    despike_window: int = 7
+
+
+class Rgi2FitRepresentativesRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    cluster_id: int
+    peaks: list[dict]
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    crop_range: Optional[list[float]] = None
+    despike: bool = False
+    despike_method: str = "whitaker_hayes"
+    despike_threshold: float = 7.0
+    despike_window: int = 7
+
+
+class Rgi2AdvancedMapFitRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    peaks: list[dict]
+    baseline_method: str = "asls"
+    baseline_params: Optional[dict] = None
+    x_shift: float = 0.0
+    crop_range: Optional[list[float]] = None
+    threshold_snr: float = 3.0
+    threshold_r2: float = 0.85
+    cluster_models_override: Optional[dict] = None
+    cluster_fit_data: Optional[dict] = None
+    lambda_cluster: float = 0.5
+    spatial_mode: str = "edge-preserving"
+    map_width: int = 0
+    map_height: int = 0
+    despike: bool = False
+    despike_method: str = "whitaker_hayes"
+    despike_threshold: float = 7.0
+    despike_window: int = 7
+
+
+class Rgi2SaveRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    session_data: dict
+    save_suffix: Optional[str] = None
+
+
+def _clean_rgi2_suffix(suffix: Optional[str]) -> str:
+    if not suffix:
+        suffix = f"rgi2_{datetime.now().strftime('%y%m%d')}"
+    clean = "".join(c for c in suffix if c.isalnum() or c in "-_.").strip()
+    if not clean:
+        clean = "rgi2"
+    if not clean.lower().startswith("rgi2"):
+        clean = f"rgi2_{clean}"
+    return clean
+
+
+def _decode_h5_attr(val, default=""):
+    if val is None:
+        return default
+    if isinstance(val, bytes):
+        return val.decode("utf-8", "ignore")
+    if hasattr(val, "decode"):
+        return val.decode("utf-8", "ignore")
+    return str(val)
+
+
+def _rgi2_file_details(vault_root_path: Path, target_path: Path) -> dict:
+    relative_path = target_path.relative_to(vault_root_path).as_posix()
+    with h5py.File(target_path, "r") as f:
+        meta = dict(f.attrs)
+        n_spectra = 1
+        try:
+            intensities = f["/spectrum/intensities"]
+            if len(intensities.shape) >= 2:
+                n_spectra = intensities.shape[0] if len(intensities.shape) == 2 else int(np.prod(intensities.shape[:-1]))
+        except Exception:
+            pass
+    return {
+        "id": relative_path,
+        "h5_relative_path": relative_path,
+        "name": target_path.name,
+        "sample_name": _decode_h5_attr(meta.get("sample_name") or meta.get("sample_code", "Unknown")).strip(),
+        "technique": _decode_h5_attr(meta.get("technique", "Unknown")).strip(),
+        "measured_at": _decode_h5_attr(meta.get("measured_at", "")).strip(),
+        "created_at": _decode_h5_attr(meta.get("created_at", "")),
+        "n_spectra": n_spectra,
+        "map_width": int(meta.get("map_width", 0)),
+        "map_height": int(meta.get("map_height", 0)),
+        "pipeline_applied": True,
+        "pipeline_name": "RGI2",
+        "pipeline_history": _decode_h5_attr(meta.get("pipeline_history", "")),
+        "parent_file": _decode_h5_attr(meta.get("parent_file", "")),
+    }
+
+
+def _prepare_rgi2_work_file(vault_root: str, h5_relative_path: str, save_suffix: Optional[str] = None) -> tuple[Path, str, dict]:
+    import shutil
+
+    vault_root_path = Path(vault_root)
+    original_path = vault_root_path / h5_relative_path
+    if not original_path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+
+    if "_rgi2" in original_path.stem.lower():
+        details = _rgi2_file_details(vault_root_path, original_path)
+        return original_path, h5_relative_path, details
+
+    suffix = _clean_rgi2_suffix(save_suffix)
+    target_path = original_path.parent / f"{original_path.stem}_{suffix}.h5"
+    relative_path = target_path.relative_to(vault_root_path).as_posix()
+    if not target_path.exists():
+        shutil.copy2(original_path, target_path)
+        with h5py.File(target_path, "r+") as f:
+            f.attrs["parent_file"] = h5_relative_path
+            f.attrs["pipeline_applied"] = "true"
+            f.attrs["pipeline_name"] = "RGI2"
+    details = _rgi2_file_details(vault_root_path, target_path)
+    return target_path, relative_path, details
+
+
+@app.post("/api/rgi2/build-map-model")
+def rgi2_build_map_model(request: Rgi2BuildModelRequest):
+    from scripts.rgi2_engine import RamanGlobalIntelligence2Engine
+
+    try:
+        path, relative_path, file_details = _prepare_rgi2_work_file(
+            request.vault_root,
+            request.h5_relative_path,
+            request.save_suffix,
+        )
+        rgi2 = RamanGlobalIntelligence2Engine(str(path))
+        result = rgi2.build_map_model(
+            crop_range=request.crop_range,
+            baseline_method=request.baseline_method,
+            baseline_params=request.baseline_params,
+            x_shift=request.x_shift,
+            n_components_pca=request.n_components_pca,
+            n_components_nmf=request.n_components_nmf,
+            n_clusters=request.n_clusters,
+            normalization=request.normalization,
+            clustering_method=request.clustering_method,
+            despike=request.despike,
+            despike_method=request.despike_method,
+            despike_threshold=request.despike_threshold,
+            despike_window=request.despike_window,
+        )
+        result["h5_relative_path"] = relative_path
+        result["file_details"] = file_details
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/rgi2/fit-representatives")
+def rgi2_fit_representatives(request: Rgi2FitRepresentativesRequest):
+    from scripts.rgi2_engine import RamanGlobalIntelligence2Engine
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+    try:
+        rgi2 = RamanGlobalIntelligence2Engine(str(path))
+        return rgi2.fit_representative(
+            cluster_id=request.cluster_id,
+            peaks=request.peaks,
+            baseline_method=request.baseline_method,
+            baseline_params=request.baseline_params or {},
+            x_shift=request.x_shift,
+            crop_range=request.crop_range,
+            despike=request.despike,
+            despike_method=request.despike_method,
+            despike_threshold=request.despike_threshold,
+            despike_window=request.despike_window,
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+rgi2_progress = {"completed": 0, "total": 0, "active": False}
+
+
+@app.get("/api/rgi2/fit-progress")
+async def get_rgi2_fit_progress():
+    return rgi2_progress
+
+
+@app.post("/api/rgi2/run-advanced-map-fit")
+def rgi2_run_advanced_map_fit(request: Rgi2AdvancedMapFitRequest):
+    from scripts.rgi2_engine import RamanGlobalIntelligence2Engine
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+    try:
+        parsed_override = None
+        if request.cluster_models_override:
+            parsed_override = {int(k): v for k, v in request.cluster_models_override.items()}
+        global rgi2_progress
+        rgi2_progress = {"completed": 0, "total": 0, "active": True}
+
+        def progress_callback(completed, total):
+            rgi2_progress["completed"] = completed
+            rgi2_progress["total"] = total
+
+        rgi2 = RamanGlobalIntelligence2Engine(str(path))
+        result = rgi2.run_advanced_map_fit(
+            peaks=request.peaks,
+            baseline_method=request.baseline_method,
+            baseline_params=request.baseline_params or {},
+            x_shift=request.x_shift,
+            crop_range=request.crop_range,
+            threshold_snr=request.threshold_snr,
+            threshold_r2=request.threshold_r2,
+            cluster_models_override=parsed_override,
+            cluster_fit_data=request.cluster_fit_data,
+            lambda_cluster=request.lambda_cluster,
+            spatial_mode=request.spatial_mode,
+            map_width=request.map_width,
+            map_height=request.map_height,
+            despike=request.despike,
+            despike_method=request.despike_method,
+            despike_threshold=request.despike_threshold,
+            despike_window=request.despike_window,
+            progress_callback=progress_callback,
+        )
+        rgi2_progress["active"] = False
+        return result
+    except Exception as e:
+        rgi2_progress["active"] = False
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/rgi2/save-results")
+def rgi2_save_results(request: Rgi2SaveRequest):
+    import json
+
+    try:
+        path, relative_path, file_details = _prepare_rgi2_work_file(
+            request.vault_root,
+            request.h5_relative_path,
+            request.save_suffix,
+        )
+        with h5py.File(path, "r+") as f:
+            if "/analysis/rgi2_v1" not in f:
+                f.create_group("/analysis/rgi2_v1")
+            if "/analysis/rgi2_v1/saved_session" in f:
+                del f["/analysis/rgi2_v1/saved_session"]
+            str_dtype = h5py.string_dtype(encoding="utf-8")
+            f.create_dataset(
+                "/analysis/rgi2_v1/saved_session",
+                data=json.dumps(request.session_data),
+                dtype=str_dtype,
+            )
+        file_details = _rgi2_file_details(Path(request.vault_root), path)
+        return {
+            "success": True,
+            "message": "RGI2 results saved successfully",
+            "h5_relative_path": relative_path,
+            "file_details": file_details,
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to write RGI2 results: {str(e)}")
+
+
+@app.post("/api/rgi2/load-results")
+def rgi2_load_results(request: RgiLoadRequest):
+    import json
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        return {"success": False, "message": "File not found"}
+    try:
+        with h5py.File(path, "r") as f:
+            if "/analysis/rgi2_v1/saved_session" not in f:
+                return {"success": False, "message": "No saved RGI2 session found"}
+            val = f["/analysis/rgi2_v1/saved_session"][()]
+            if isinstance(val, bytes):
+                json_str = val.decode("utf-8", "ignore")
+            elif hasattr(val, "decode"):
+                json_str = val.decode("utf-8", "ignore")
+            else:
+                json_str = str(val)
+            return {"success": True, "session_data": json.loads(json_str)}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@app.post("/api/rgi2/load-scientific-maps")
+def rgi2_load_scientific_maps(request: RgiLoadRequest):
+    import json
+
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        return {"success": False, "message": "File not found"}
+    try:
+        with h5py.File(path, "r") as f:
+            if "/analysis/rgi2_v1/fits/scientific" in f:
+                sci = f["/analysis/rgi2_v1/fits/scientific"]
+                maps = sci["maps"]
+                payload = {
+                    "success": True,
+                    "analysis_mask": [bool(v) for v in sci["analysis_mask"][:]],
+                    "analysis_mask_type": _decode_h5_attr(sci.attrs.get("analysis_mask_type", "interpretable_graphene")),
+                }
+                for key in maps.keys():
+                    values = maps[key][:]
+                    payload[key] = [None if np.isnan(v) or np.isinf(v) else float(v) for v in values]
+                return payload
+            if "/analysis/rgi2_v1/saved_session" in f:
+                val = f["/analysis/rgi2_v1/saved_session"][()]
+                json_str = val.decode("utf-8", "ignore") if hasattr(val, "decode") else str(val)
+                session = json.loads(json_str)
+                mfr = session.get("mapFitResult", {})
+                if mfr:
+                    sci_maps = mfr.get("scientific_maps", {})
+                    return {
+                        "success": True,
+                        "analysis_mask": mfr.get("analysis_mask", []),
+                        "analysis_mask_type": mfr.get("analysis_mask_type", "interpretable_graphene"),
+                        "pos_G": sci_maps.get("pos_G", {}).get("values", []),
+                        "pos_2D": sci_maps.get("pos_2D", {}).get("values", []),
+                    }
+        return {"success": False, "message": "No RGI2 calculation results found in HDF5 file."}
+    except Exception as e:
+        return {"success": False, "message": f"Failed to load RGI2 scientific maps: {str(e)}"}
 
 
 if __name__ == "__main__":

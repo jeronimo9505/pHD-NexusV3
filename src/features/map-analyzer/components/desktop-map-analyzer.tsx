@@ -16,11 +16,12 @@ import { ComparisonView } from './comparison-view';
 import { DeconvolutionView } from './deconvolution-view';
 import { FittingView } from './fitting-view';
 import { RgiView } from './rgi-view';
+import { Rgi2View } from './rgi2-view';
 import { getLogbooksAction, getSamplesAction, registerGroupedH5FileAction } from '@/features/samples/actions';
 import { Logbook } from '@/features/samples/types';
 
 export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
-    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics' | 'pipeline' | 'compare' | 'deconvolution' | 'fitting' | 'rgi'>('standard');
+    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics' | 'pipeline' | 'compare' | 'deconvolution' | 'fitting' | 'rgi' | 'rgi2'>('standard');
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [selectedH5, setSelectedH5] = useState('');
     const [vaultRoot, setVaultRoot] = useState('');
@@ -35,7 +36,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     const [saveName, setSaveName] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [savedWorkspaces, setSavedWorkspaces] = useState<any[]>([]);
-    
+
     // Global dimension settings derived from metadata, but can be updated
     const [mapDim, setMapDim] = useState({ w: 0, h: 0 });
     const [stepSize, setStepSize] = useState(1.0); // Default 1.0 micron per spectrum
@@ -53,7 +54,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     useEffect(() => {
         setMounted(true);
         if (typeof window === 'undefined') return;
-        
+
         const root = localStorage.getItem('phdnexus_vault_root');
         if (root) setVaultRoot(root);
 
@@ -106,7 +107,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
 
     const handleImport = async (newFiles: any[]) => {
         let filesToImport = [...newFiles];
-        
+
         try {
             if (vaultRoot && newFiles.length > 0) {
                 // Helper to get subfolder segment from relative path
@@ -118,7 +119,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
 
                 const subfolders = Array.from(new Set(newFiles.map(f => getSubfolder(f.h5_relative_path)).filter(Boolean))) as string[];
                 let allVaultFiles: any[] = [];
-                
+
                 if (subfolders.length > 0) {
                     for (const sub of subfolders) {
                         const res = await fetchVaultFiles(vaultRoot, sub);
@@ -137,7 +138,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                 const getAncestors = (file: any, allFiles: any[]): string[] => {
                     const ancestors = [file.h5_relative_path];
                     let current = file;
-                    
+
                     while (true) {
                         // 1. Try metadata parent_file first
                         if (current.parent_file) {
@@ -148,12 +149,12 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 continue;
                             }
                         }
-                        
+
                         // 2. Fallback to name-based parent resolution
                         const currentStem = current.name.replace(/\.h5$/i, '');
-                        const suffixRegex = /(_preprocessed(_\d+)?|_rgi(_\w+)?|_deconvolution(_\d+)?|_fitting(_\d+)?)$/i;
+                        const suffixRegex = /(_preprocessed(_\d+)?|_rgi2(_\w+)?|_rgi(_\w+)?|_deconvolution(_\d+)?|_fitting(_\d+)?)$/i;
                         const match = currentStem.match(suffixRegex);
-                        
+
                         if (match && match.index !== undefined && match.index > 0) {
                             const parentStem = currentStem.substring(0, match.index);
                             const parent = allFiles.find(f => f.name.replace(/\.h5$/i, '').toLowerCase() === parentStem.toLowerCase());
@@ -163,10 +164,10 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 continue;
                             }
                         }
-                        
+
                         break;
                     }
-                    
+
                     return ancestors;
                 };
 
@@ -199,7 +200,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
             const uniqueNew = filesToImport.filter(f => !existingPaths.has(f.h5_relative_path));
             return [...prev, ...uniqueNew];
         });
-        
+
         // Auto-select the newly generated/imported file for better UX
         if (newFiles.length === 1) {
             setSelectedH5(newFiles[0].h5_relative_path);
@@ -241,7 +242,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
 
     const handleLoadWorkspace = (ws: any) => {
         if (!ws || !ws.files) return;
-        
+
         // If it's a comparison, we might want to just add to compareFiles
         // but usually the user wants to load the whole state
         if (ws.settings?.type === 'comparison') {
@@ -262,7 +263,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
             <div className="flex-1 flex flex-col items-center justify-center bg-slate-900 text-slate-400 p-8 text-center animate-in fade-in">
                 <h2 className="text-xl font-bold text-slate-200 mb-2">Desktop Required</h2>
                 <p className="max-w-md">
-                    The Map Analyzer module requires direct access to your local files and science engine. 
+                    The Map Analyzer module requires direct access to your local files and science engine.
                     Please open PhD Nexus using the Desktop Application.
                 </p>
             </div>
@@ -283,7 +284,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     const handleUpdateDimensions = (w: number, h: number, step?: number) => {
         setMapDim({ w, h });
         if (step !== undefined) setStepSize(step);
-        
+
         if (selectedH5) {
             setFileSettings(prev => ({
                 ...prev,
@@ -305,7 +306,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
             if (exists) return prev.filter(f => f.h5_relative_path !== file.h5_relative_path);
             return [...prev, file];
         });
-        
+
         // Auto-switch to compare mode if we just selected the second file
         if (mode !== 'compare' && compareFiles.length === 1) {
             setMode('compare');
@@ -314,20 +315,20 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
 
     const handleGroupFiles = async (files: any[]) => {
         if (!files || files.length < 2) return;
-        
+
         const firstFile = files[0];
         const defaultName = firstFile.name
             ? firstFile.name.replace(/\.h5$/i, '') + '_grouped'
             : 'Grouped_Spectra';
-            
+
         const groupName = prompt(
             `Enter a name for the grouped map file (will contain ${files.length} spectra):`,
             defaultName
         );
         if (groupName === null) return; // cancelled
-        
+
         const cleanGroupName = groupName.trim() || defaultName;
-        
+
         try {
             const res = await fetch('http://127.0.0.1:8888/api/map/group', {
                 method: 'POST',
@@ -341,9 +342,9 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
             const data = await res.json();
             if (data.success && data.file) {
                 toast.success(data.message || 'Grouped successfully');
-                
+
                 let updatedFile = { ...data.file };
-                
+
                 // Try to find a valid characterization ID from the files being grouped
                 let charId: string | undefined = undefined;
                 for (const f of files) {
@@ -372,20 +373,20 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                 } catch (dbErr) {
                     console.error("Failed to register grouped file in Supabase:", dbErr);
                 }
-                
+
                 // Add to workspace sessionFiles
                 setSessionFiles(prev => {
                     const exists = prev.some(f => f.h5_relative_path === updatedFile.h5_relative_path);
                     if (exists) return prev;
                     return [updatedFile, ...prev];
                 });
-                
+
                 // Clear checkboxes
                 setCompareFiles([]);
-                
+
                 // Auto-select the newly created grouped map file
                 setSelectedH5(data.file.h5_relative_path);
-                
+
                 // Auto-configure dimensions: 1D map of n_spectra x 1
                 const n = data.file.n_spectra || files.length;
                 setMapDim({ w: n, h: 1 });
@@ -393,7 +394,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                 setNSpectra(n);
                 setSelectedPixelIndex(0);
                 setWavenumberRange(undefined);
-                
+
                 // Switch mode to standard to show the new map
                 setMode('standard');
             } else {
@@ -407,7 +408,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     const handleSaveWorkspace = async (customName?: string, customFiles?: any[]) => {
         const name = customName || saveName;
         const targetFiles = customFiles || sessionFiles;
-        
+
         if (!name.trim() || targetFiles.length === 0) {
             const promptName = prompt("Enter a name for this workspace/comparison set:", name);
             if (!promptName) return;
@@ -426,7 +427,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                 group_id: groupId,
                 name: name,
                 files: files,
-                settings: { 
+                settings: {
                     type: files === compareFiles ? 'comparison' : 'workspace',
                     timestamp: new Date().toISOString()
                 }
@@ -453,8 +454,8 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                 "border-r border-slate-200 flex flex-col bg-white relative z-50 shrink-0 shadow-sm transition-all duration-300 ease-in-out",
                 isSidebarCollapsed ? "w-0 opacity-0 border-r-0 overflow-hidden" : "w-[500px]"
             )}>
-                <VaultLibrary 
-                    vaultRoot={vaultRoot} 
+                <VaultLibrary
+                    vaultRoot={vaultRoot}
                     groupId={groupId}
                     selectedH5={selectedH5}
                     sessionFiles={sessionFiles}
@@ -474,14 +475,14 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                     onSelect={(file) => {
                         setSelectedH5(file.h5_relative_path);
                         const settings = fileSettings[file.h5_relative_path];
-                        
+
                         let w = settings?.w || file.map_width || 0;
                         let h = settings?.h || file.map_height || 0;
                         if ((w <= 0 || h <= 0) && file.n_spectra > 0) {
                             w = Math.ceil(Math.sqrt(file.n_spectra));
                             h = Math.ceil(file.n_spectra / w);
                         }
-                        
+
                         setMapDim({ w, h });
                         setStepSize(settings?.stepSize ?? 1.0);
                         setNSpectra(file.n_spectra || 0);
@@ -498,8 +499,8 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                     onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
                     className={cn(
                         "absolute top-1/2 -translate-y-1/2 z-50 w-5 h-14 bg-white hover:bg-slate-50 border border-slate-200 text-slate-400 hover:text-indigo-600 shadow-md flex items-center justify-center transition-all focus:outline-none cursor-pointer hover:scale-105",
-                        isSidebarCollapsed 
-                            ? "left-0 rounded-r-xl border-l-0" 
+                        isSidebarCollapsed
+                            ? "left-0 rounded-r-xl border-l-0"
                             : "-left-[1px] rounded-r-xl border-l-0"
                     )}
                     title={isSidebarCollapsed ? "Expand active workspace" : "Collapse active workspace"}
@@ -516,9 +517,9 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     <h2 className="text-sm font-bold text-slate-900 truncate max-w-[300px]">
                                         {mode === 'compare' ? 'Comparison Mode' : (() => {
                                             const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
-                                            const s = dbSamples.find(s => 
-                                                s.sample_code === f?.sample_name || 
-                                                s.name === f?.sample_name || 
+                                            const s = dbSamples.find(s =>
+                                                s.sample_code === f?.sample_name ||
+                                                s.name === f?.sample_name ||
                                                 (f?.name && s.sample_code && f.name.includes(s.sample_code))
                                             );
                                             return s?.name || f?.sample_name || 'Sample';
@@ -526,9 +527,9 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     </h2>
                                     {mode !== 'compare' && (() => {
                                         const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
-                                        const s = dbSamples.find(s => 
-                                            s.sample_code === f?.sample_name || 
-                                            s.name === f?.sample_name || 
+                                        const s = dbSamples.find(s =>
+                                            s.sample_code === f?.sample_name ||
+                                            s.name === f?.sample_name ||
                                             (f?.name && s.sample_code && f.name.includes(s.sample_code))
                                         );
                                         return s?.sample_code ? (
@@ -540,9 +541,9 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                         <span className="text-xs font-medium text-slate-500 truncate max-w-[300px]">
                                             {dbLogbooks.find(l => {
                                                 const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
-                                                const sMatch = dbSamples.find(s => 
-                                                    s.sample_code === f?.sample_name || 
-                                                    s.name === f?.sample_name || 
+                                                const sMatch = dbSamples.find(s =>
+                                                    s.sample_code === f?.sample_name ||
+                                                    s.name === f?.sample_name ||
                                                     (f?.name && s.sample_code && f.name.includes(s.sample_code))
                                                 );
                                                 return sMatch?.logbook_id === l.id;
@@ -561,7 +562,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
 
                         <div className="flex items-center gap-4">
                              {(mode === 'graphene' || mode === 'analytics') && (
-                                 <button 
+                                 <button
                                      onClick={() => setApplySnv(!applySnv)}
                                      className={cn(
                                          "px-3 py-1.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-2",
@@ -572,9 +573,9 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                      SNV Norm
                                  </button>
                              )}
-                             
+
                              <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-                                <button 
+                                <button
                                     onClick={() => setMode('standard')}
                                     className={cn(
                                         "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
@@ -583,7 +584,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 >
                                     Standard
                                 </button>
-                                <button 
+                                <button
                                     onClick={() => setMode('graphene')}
                                     className={cn(
                                         "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
@@ -592,7 +593,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 >
                                     Graphene
                                 </button>
-                                <button 
+                                <button
                                     onClick={() => setMode('analytics')}
                                     className={cn(
                                         "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
@@ -601,7 +602,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 >
                                     Analytics
                                 </button>
-                                <button 
+                                <button
                                     onClick={() => setMode('pipeline')}
                                     className={cn(
                                         "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
@@ -610,7 +611,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 >
                                     Pipeline
                                 </button>
-                                <button 
+                                <button
                                     onClick={() => setMode('deconvolution')}
                                     className={cn(
                                         "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
@@ -619,7 +620,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 >
                                     Deconvolution
                                 </button>
-                                <button 
+                                <button
                                     onClick={() => setMode('fitting')}
                                     className={cn(
                                         "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
@@ -628,7 +629,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 >
                                     Fitting (SV)
                                 </button>
-                                <button 
+                                <button
                                     onClick={() => setMode('rgi')}
                                     className={cn(
                                         "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
@@ -637,7 +638,16 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 >
                                     RGI Workspace
                                 </button>
-                                <button 
+                                <button
+                                    onClick={() => setMode('rgi2')}
+                                    className={cn(
+                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                        mode === 'rgi2' ? "bg-white text-teal-600 shadow-sm" : "text-slate-500 hover:text-teal-600"
+                                    )}
+                                >
+                                    RGI2 Workspace
+                                </button>
+                                <button
                                     onClick={() => setMode('compare')}
                                     className={cn(
                                         "px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
@@ -669,7 +679,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                             <p className="text-sm text-slate-500 leading-relaxed mb-8">
                                 Select a spectrum or map from your session sidebar to begin analysis.
                             </p>
-                            <button 
+                            <button
                                 onClick={() => setIsExplorerOpen(true)}
                                 className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-2xl shadow-lg shadow-indigo-100 transition-all flex items-center gap-2 mx-auto"
                             >
@@ -683,7 +693,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                         <div className="flex-1 relative border-b border-slate-200 bg-slate-900 overflow-hidden flex shadow-inner">
                             {/* We keep the canvas area dark for scientific contrast, but the UI around it is light */}
                             {mode === 'standard' ? (
-                                <HeatmapCanvas 
+                                <HeatmapCanvas
                                     vaultRoot={vaultRoot}
                                     h5Path={selectedH5}
                                     mapWidth={mapDim.w}
@@ -699,7 +709,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     onDismiss={handleDismissBanner}
                                 />
                             ) : mode === 'graphene' ? (
-                                <GrapheneCanvasGrid 
+                                <GrapheneCanvasGrid
                                     vaultRoot={vaultRoot}
                                     h5Path={selectedH5}
                                     mapWidth={mapDim.w}
@@ -716,7 +726,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     wavenumberRange={wavenumberRange}
                                 />
                             ) : mode === 'compare' ? (
-                                <ComparisonView 
+                                <ComparisonView
                                     vaultRoot={vaultRoot}
                                     compareFiles={compareFiles}
                                     dbSamples={dbSamples}
@@ -727,7 +737,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     onClear={() => setCompareFiles([])}
                                 />
                             ) : mode === 'pipeline' ? (
-                                <PipelineEditor 
+                                <PipelineEditor
                                     vaultRoot={vaultRoot}
                                     h5Path={selectedH5}
                                     onFileCreated={(file) => handleImport([file])}
@@ -758,17 +768,27 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     nSpectra={nSpectra}
                                     onFileCreated={(file) => handleImport([file])}
                                 />
+                            ) : mode === 'rgi2' ? (
+                                <Rgi2View
+                                    vaultRoot={vaultRoot}
+                                    h5Path={selectedH5}
+                                    mapWidth={mapDim.w}
+                                    mapHeight={mapDim.h}
+                                    stepSize={stepSize}
+                                    nSpectra={nSpectra}
+                                    onFileCreated={(file) => handleImport([file])}
+                                />
                             ) : (
-                                <GrapheneAnalyticsView 
+                                <GrapheneAnalyticsView
                                     vaultRoot={vaultRoot}
                                     h5Path={selectedH5}
                                     applySnv={applySnv}
                                 />
                             )}
                         </div>
-                        {mode !== 'analytics' && mode !== 'pipeline' && mode !== 'compare' && mode !== 'deconvolution' && mode !== 'fitting' && mode !== 'rgi' && (
+                        {mode !== 'analytics' && mode !== 'pipeline' && mode !== 'compare' && mode !== 'deconvolution' && mode !== 'fitting' && mode !== 'rgi' && mode !== 'rgi2' && (
                             <div className="h-72 shrink-0 bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 overflow-hidden">
-                                <SpectrumInspector 
+                                <SpectrumInspector
                                     vaultRoot={vaultRoot}
                                     h5Path={selectedH5}
                                     pixelIndex={selectedPixelIndex}
@@ -781,9 +801,9 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
             </div>
 
             {isExplorerOpen && (
-            <VaultExplorerModal 
+            <VaultExplorerModal
                 groupId={groupId}
-                isOpen={isExplorerOpen} 
+                isOpen={isExplorerOpen}
                 onClose={() => setIsExplorerOpen(false)}
                 vaultRoot={vaultRoot}
                 onImport={handleImport}

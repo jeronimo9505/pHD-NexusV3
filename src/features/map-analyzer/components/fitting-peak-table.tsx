@@ -69,7 +69,38 @@ function supportsParam(model: string, param: string): boolean {
 export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false, showExpr = false }: Props) {
     
     const update = (id: string, field: keyof FittingPeakConfig, value: any) => {
-        onChange(peaks.map(p => p.id === id ? { ...p, [field]: value } : p));
+        onChange(peaks.map(p => {
+            if (p.id !== id) return p;
+            if (field === 'center') {
+                const center = Number(value);
+                const oldCenter = Number(p.center);
+                const oldMin = Number(p.center_min);
+                const oldMax = Number(p.center_max);
+                const halfWindow = Number.isFinite(oldCenter) && Number.isFinite(oldMin) && Number.isFinite(oldMax)
+                    ? Math.max(Math.abs(oldCenter - oldMin), Math.abs(oldMax - oldCenter), 30)
+                    : 30;
+                const nextMinParams = { ...(p.minParams || {}) };
+                const nextMaxParams = { ...(p.maxParams || {}) };
+                if (nextMinParams.center !== undefined) nextMinParams.center = Math.round((center - halfWindow) * 100) / 100;
+                if (nextMaxParams.center !== undefined) nextMaxParams.center = Math.round((center + halfWindow) * 100) / 100;
+                return {
+                    ...p,
+                    center,
+                    center_min: Math.round((center - halfWindow) * 100) / 100,
+                    center_max: Math.round((center + halfWindow) * 100) / 100,
+                    minParams: nextMinParams,
+                    maxParams: nextMaxParams,
+                };
+            }
+            if (field === 'fwhm_init' || field === 'amplitude') {
+                const numericValue = Number(value);
+                const minLimit = p.minParams?.[field] !== undefined ? Number(p.minParams[field]) : (field === 'fwhm_init' ? 4.0 : 0.0);
+                const maxLimit = p.maxParams?.[field] !== undefined ? Number(p.maxParams[field]) : (field === 'fwhm_init' ? 100.0 : 10000.0);
+                const clipped = Math.min(Math.max(numericValue, minLimit), maxLimit);
+                return { ...p, [field]: Number.isFinite(clipped) ? clipped : numericValue };
+            }
+            return { ...p, [field]: value };
+        }));
     };
 
     const updateNested = (id: string, group: 'fixedParams' | 'minParams' | 'maxParams' | 'exprParams', key: string, value: any) => {
@@ -77,6 +108,27 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
             if (p.id !== id) return p;
             const updatedGroup = { ...(p[group] || {}), [key]: value };
             return { ...p, [group]: updatedGroup };
+        }));
+    };
+
+    const updateLimit = (id: string, group: 'minParams' | 'maxParams', key: string, value: number) => {
+        onChange(peaks.map(p => {
+            if (p.id !== id) return p;
+            const updatedGroup = { ...(p[group] || {}), [key]: value };
+            const currentValue = Number((p as any)[key]);
+            const shouldClipValue = key === 'fwhm_init' || key === 'amplitude';
+            const clippedValue = shouldClipValue
+                ? group === 'minParams'
+                    ? Math.max(currentValue, value)
+                    : Math.min(currentValue, value)
+                : currentValue;
+            return {
+                ...p,
+                ...(key === 'center' && group === 'minParams' ? { center_min: value } : {}),
+                ...(key === 'center' && group === 'maxParams' ? { center_max: value } : {}),
+                ...(shouldClipValue && Number.isFinite(clippedValue) ? { [key]: clippedValue } : {}),
+                [group]: updatedGroup,
+            };
         }));
     };
 
@@ -261,7 +313,7 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
                                                                 step="any"
                                                                 className="w-10 bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-center text-[9px] font-mono text-slate-500 focus:border-indigo-500 focus:outline-none"
                                                                 value={minVal}
-                                                                onChange={e => updateNested(pk.id, 'minParams', param, parseFloat(e.target.value) || 0.0)}
+                                                            onChange={e => updateLimit(pk.id, 'minParams', param, parseFloat(e.target.value) || 0.0)}
                                                                 disabled={disabled || isFixed}
                                                             />
                                                         )}
@@ -293,7 +345,7 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
                                                                 step="any"
                                                                 className="w-10 bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-center text-[9px] font-mono text-slate-500 focus:border-indigo-500 focus:outline-none"
                                                                 value={maxVal}
-                                                                onChange={e => updateNested(pk.id, 'maxParams', param, parseFloat(e.target.value) || 0.0)}
+                                                            onChange={e => updateLimit(pk.id, 'maxParams', param, parseFloat(e.target.value) || 0.0)}
                                                                 disabled={disabled || isFixed}
                                                             />
                                                         )}
