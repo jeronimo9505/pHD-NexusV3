@@ -13,6 +13,7 @@ import lmfit
 from pybaselines import Baseline
 import re
 import os
+import sys
 import json
 from concurrent.futures import ProcessPoolExecutor
 from typing import Optional, List, Dict, Tuple, Any
@@ -182,7 +183,11 @@ def fit_spectrum(
     baseline_method: str = "asls",
     baseline_params: Optional[dict] = None,
     x_shift: float = 0.0,
-    crop_range: Optional[Tuple[float, float]] = None
+    crop_range: Optional[Tuple[float, float]] = None,
+    despike: bool = False,
+    despike_method: str = "whitaker_hayes",
+    despike_threshold: float = 7.0,
+    despike_window: int = 7
 ) -> Dict[str, Any]:
     """
     Process single spectrum: x_shift -> crop -> baseline -> lmfit -> metrics.
@@ -198,6 +203,28 @@ def fit_spectrum(
         if np.any(mask):
             x_proc = x_proc[mask]
             y_proc = y_proc[mask]
+
+    # 2.5 Despike
+    if despike:
+        try:
+            _engine_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if _engine_dir not in sys.path:
+                sys.path.append(_engine_dir)
+            from pipeline_engine import _step_despike
+            
+            y_2d = y_proc.reshape(1, -1)
+            y_clean, _ = _step_despike(
+                x_proc,
+                y_2d,
+                {
+                    "method": despike_method,
+                    "threshold": despike_threshold,
+                    "window": despike_window
+                }
+            )
+            y_proc = y_clean[0]
+        except Exception as e:
+            print(f"Error despiking in fitting_engine.fit_spectrum: {e}")
 
     # 3. Baseline subtraction
     y_corr, baseline = apply_baseline(x_proc, y_proc, baseline_method, baseline_params)
