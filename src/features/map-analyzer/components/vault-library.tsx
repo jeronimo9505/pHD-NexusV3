@@ -914,18 +914,18 @@ function FileItem({
                         }}
                         className={cn(
                             "p-1 transition-colors",
-                            file.pipeline_applied ? "text-slate-300 hover:text-red-500" : "text-slate-300 hover:text-indigo-500"
+                            isPipelineFile(file) ? "text-slate-300 hover:text-red-500" : "text-slate-300 hover:text-indigo-500"
                         )}
-                        title={file.pipeline_applied ? "Eliminar ficha y archivo" : "Quitar del espacio de trabajo"}
+                        title={isPipelineFile(file) ? "Eliminar ficha y archivo" : "Quitar del espacio de trabajo"}
                     >
-                        {file.pipeline_applied ? <Trash2 size={11} /> : <X size={11} />}
+                        {isPipelineFile(file) ? <Trash2 size={11} /> : <X size={11} />}
                     </button>
                 ) : (
                     <button
                         onMouseLeave={() => setConfirmDelete(false)}
                         onClick={(e) => {
                             e.stopPropagation();
-                            if (file.pipeline_applied) {
+                            if (isPipelineFile(file)) {
                                 onDeleteFile?.(file);
                             } else {
                                 onRemove(file.h5_relative_path);

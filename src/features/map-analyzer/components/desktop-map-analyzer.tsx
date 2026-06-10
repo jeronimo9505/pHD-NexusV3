@@ -754,6 +754,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     h5Path={selectedH5}
                                     mapWidth={mapDim.w}
                                     mapHeight={mapDim.h}
+                                    stepSize={stepSize}
                                     nSpectra={nSpectra}
                                     onFileCreated={(file) => handleImport([file])}
                                 />

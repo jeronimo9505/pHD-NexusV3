@@ -6,6 +6,7 @@ selects representative spectra, and runs cluster-guided constrained map fits.
 """
 
 import os
+import sys
 import json
 import numpy as np
 import h5py
@@ -226,7 +227,11 @@ def fit_spectrum(
     baseline_method: str = "asls",
     baseline_params: Optional[dict] = None,
     x_shift: float = 0.0,
-    crop_range: Optional[Tuple[float, float]] = None
+    crop_range: Optional[Tuple[float, float]] = None,
+    despike: bool = False,
+    despike_method: str = "whitaker_hayes",
+    despike_threshold: float = 7.0,
+    despike_window: int = 7
 ) -> Dict[str, Any]:
     x_proc = x.copy() + x_shift
     y_proc = y.copy()
@@ -237,6 +242,27 @@ def fit_spectrum(
         if np.any(mask):
             x_proc = x_proc[mask]
             y_proc = y_proc[mask]
+
+    if despike:
+        try:
+            _engine_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if _engine_dir not in sys.path:
+                sys.path.append(_engine_dir)
+            from pipeline_engine import _step_despike
+            
+            y_2d = y_proc.reshape(1, -1)
+            y_clean, _ = _step_despike(
+                x_proc,
+                y_2d,
+                {
+                    "method": despike_method,
+                    "threshold": despike_threshold,
+                    "window": despike_window
+                }
+            )
+            y_proc = y_clean[0]
+        except Exception as e:
+            print(f"Error despiking in rgi_engine.fit_spectrum: {e}")
 
     y_corr, baseline = apply_baseline(x_proc, y_proc, baseline_method, baseline_params)
 
@@ -552,6 +578,8 @@ def build_interpretation_summary(
         notes.append("Defect-rich graphene is a major fraction of the map; inspect ID/IG and D-band confidence.")
     if analysis_mask_type == "reliable_fits_fallback":
         notes.append("No pixels passed strict graphene classing; descriptive statistics use reliable converged fits as fallback.")
+    elif analysis_mask_type == "converged_fits_fallback":
+        notes.append("No fits passed the reliability threshold; statistics use all converged fits as fallback.")
     if dominant_reason and dominant_reason != "OK":
         notes.append(f"Dominant fit issue: {dominant_reason}.")
     if not notes:
@@ -598,9 +626,13 @@ def build_scientific_results(
     interpretable_mask = reliable_mask & np.isin(quality_classes, [1, 2, 3])
     analysis_mask = interpretable_mask.copy()
     analysis_mask_type = "interpretable_graphene"
-    if np.sum(analysis_mask) == 0 and np.sum(reliable_mask) > 0:
-        analysis_mask = reliable_mask.copy()
-        analysis_mask_type = "reliable_fits_fallback"
+    if np.sum(analysis_mask) == 0:
+        if np.sum(reliable_mask) > 0:
+            analysis_mask = reliable_mask.copy()
+            analysis_mask_type = "reliable_fits_fallback"
+        else:
+            analysis_mask = success_map.copy()
+            analysis_mask_type = "converged_fits_fallback"
     confidence = _confidence_values(success_map, r2_map, snr_map)
     source_status = _status_labels(success_map, r2_map, snr_map, quality_classes, snr_reliable_min)
 
@@ -755,7 +787,14 @@ def build_scientific_results(
     }
 
 def _fit_single_pixel_rgi_worker(args) -> dict:
-    idx, wavenumbers, intensity, peaks, baseline_method, baseline_params, x_shift, crop_range, threshold_snr = args
+    if len(args) == 9:
+        idx, wavenumbers, intensity, peaks, baseline_method, baseline_params, x_shift, crop_range, threshold_snr = args
+        despike = False
+        despike_method = "whitaker_hayes"
+        despike_threshold = 7.0
+        despike_window = 7
+    else:
+        idx, wavenumbers, intensity, peaks, baseline_method, baseline_params, x_shift, crop_range, threshold_snr, despike, despike_method, despike_threshold, despike_window = args
     
     x_proc = wavenumbers.copy() + x_shift
     y_proc = intensity.copy()
@@ -766,6 +805,27 @@ def _fit_single_pixel_rgi_worker(args) -> dict:
         if np.any(mask):
             x_proc = x_proc[mask]
             y_proc = y_proc[mask]
+
+    if despike:
+        try:
+            _engine_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if _engine_dir not in sys.path:
+                sys.path.append(_engine_dir)
+            from pipeline_engine import _step_despike
+            
+            y_2d = y_proc.reshape(1, -1)
+            y_clean, _ = _step_despike(
+                x_proc,
+                y_2d,
+                {
+                    "method": despike_method,
+                    "threshold": despike_threshold,
+                    "window": despike_window
+                }
+            )
+            y_proc = y_clean[0]
+        except Exception as e:
+            print(f"Error despiking in worker: {e}")
 
     y_corr, baseline = apply_baseline(x_proc, y_proc, baseline_method, baseline_params)
 
@@ -844,7 +904,11 @@ class RamanGlobalIntelligenceEngine:
         n_components_pca: int = 5,
         n_components_nmf: int = 3,
         n_clusters: int = 4,
-        normalization: str = "vector"
+        normalization: str = "vector",
+        despike: bool = False,
+        despike_method: str = "whitaker_hayes",
+        despike_threshold: float = 7.0,
+        despike_window: int = 7
     ) -> dict:
         if not os.path.exists(self.h5_path):
             return {"success": False, "message": "HDF5 file not found"}
@@ -858,16 +922,38 @@ class RamanGlobalIntelligenceEngine:
 
         n_spectra = intensities_2d.shape[0]
 
-        # 1. Preprocessing (Crop, Shift, Baseline)
+        # 1. Preprocessing (Crop, Shift, Despike, Baseline)
         x_proc = wavenumbers.copy() + x_shift
         xmin, xmax = (crop_range[0], crop_range[1]) if crop_range else (x_proc[0], x_proc[-1])
         mask = (x_proc >= xmin) & (x_proc <= xmax)
         x_crop = x_proc[mask]
 
+        X_cropped = intensities_2d[:, mask]
+
+        if despike:
+            try:
+                _engine_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                if _engine_dir not in sys.path:
+                    sys.path.append(_engine_dir)
+                from pipeline_engine import _step_despike
+                
+                # Run despiking in vectorized mode across all spectra
+                X_cropped, _ = _step_despike(
+                    x_crop,
+                    X_cropped,
+                    {
+                        "method": despike_method,
+                        "threshold": despike_threshold,
+                        "window": despike_window
+                    }
+                )
+            except Exception as e:
+                print(f"Error despiking in build_map_model: {e}")
+
         X_corr = []
         baselines = []
         for i in range(n_spectra):
-            y_pixel = intensities_2d[i][mask]
+            y_pixel = X_cropped[i]
             y_corr, bs = apply_baseline(x_crop, y_pixel, baseline_method, baseline_params)
             X_corr.append(y_corr)
             baselines.append(bs)
@@ -939,6 +1025,10 @@ class RamanGlobalIntelligenceEngine:
             prep_grp.attrs["x_shift"] = x_shift
             prep_grp.attrs["crop_range"] = [float(xmin), float(xmax)]
             prep_grp.attrs["normalization"] = normalization
+            prep_grp.attrs["despike"] = despike
+            prep_grp.attrs["despike_method"] = despike_method
+            prep_grp.attrs["despike_threshold"] = despike_threshold
+            prep_grp.attrs["despike_window"] = despike_window
 
             # ML datasets
             rgi_grp.create_dataset("decomposition/pca_scores", data=pca_scores)
@@ -954,8 +1044,7 @@ class RamanGlobalIntelligenceEngine:
         # Build spectra data for representatives to send back
         rep_spectra_data = []
         for c_idx, global_idx in enumerate(cluster_representatives):
-            y_raw = intensities_2d[global_idx]
-            y_crop_pixel = y_raw[mask]
+            y_crop_pixel = X_cropped[global_idx]
             rep_spectra_data.append({
                 "cluster_id": c_idx,
                 "pixel_index": global_idx,
@@ -985,7 +1074,12 @@ class RamanGlobalIntelligenceEngine:
         crop_range: Optional[List[float]] = None,
         threshold_snr: float = 3.0,
         cluster_models_override: Optional[Dict[int, List[dict]]] = None,
-        progress_callback = None
+        progress_callback = None,
+        r2_reliable_min: float = 0.85,
+        despike: bool = False,
+        despike_method: str = "whitaker_hayes",
+        despike_threshold: float = 7.0,
+        despike_window: int = 7
     ) -> dict:
         if not os.path.exists(self.h5_path):
             return {"success": False, "message": "HDF5 file not found"}
@@ -1022,7 +1116,11 @@ class RamanGlobalIntelligenceEngine:
                 baseline_params,
                 x_shift,
                 crop_range,
-                threshold_snr
+                threshold_snr,
+                despike,
+                despike_method,
+                despike_threshold,
+                despike_window
             ))
 
         # Parallel pooling
@@ -1128,7 +1226,7 @@ class RamanGlobalIntelligenceEngine:
                 continue
                 
             r2 = r2_map[i]
-            if r2 < 0.85:
+            if r2 < r2_reliable_min:
                 quality_classes[i] = 4  # Low confidence
                 continue
                 
@@ -1154,6 +1252,7 @@ class RamanGlobalIntelligenceEngine:
             snr_map=snr_map,
             quality_classes=quality_classes,
             snr_reliable_min=threshold_snr,
+            r2_reliable_min=r2_reliable_min,
         )
 
         reason_summary = {}

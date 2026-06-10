@@ -1717,6 +1717,10 @@ class FittingPixelRequest(BaseModel):
     baseline_params: Optional[dict] = None
     x_shift: float = 0.0
     crop_range: Optional[list[float]] = None
+    despike: bool = False
+    despike_method: str = "whitaker_hayes"
+    despike_threshold: float = 7.0
+    despike_window: int = 7
 
 @app.post("/api/fitting/fit-pixel")
 def fitting_fit_pixel(request: FittingPixelRequest):
@@ -1747,7 +1751,11 @@ def fitting_fit_pixel(request: FittingPixelRequest):
             baseline_method=request.baseline_method,
             baseline_params=request.baseline_params or {},
             x_shift=request.x_shift,
-            crop_range=crop_range_tup
+            crop_range=crop_range_tup,
+            despike=request.despike,
+            despike_method=request.despike_method,
+            despike_threshold=request.despike_threshold,
+            despike_window=request.despike_window
         )
         return result
     except Exception as e:
@@ -1924,6 +1932,10 @@ class RgiBuildModelRequest(BaseModel):
     n_components_nmf: int = 3
     n_clusters: int = 4
     normalization: str = "vector"
+    despike: bool = False
+    despike_method: str = "whitaker_hayes"
+    despike_threshold: float = 7.0
+    despike_window: int = 7
 
 class RgiFitRepresentativesRequest(BaseModel):
     vault_root: str
@@ -1934,6 +1946,10 @@ class RgiFitRepresentativesRequest(BaseModel):
     baseline_params: Optional[dict] = None
     x_shift: float = 0.0
     crop_range: Optional[list[float]] = None
+    despike: bool = False
+    despike_method: str = "whitaker_hayes"
+    despike_threshold: float = 7.0
+    despike_window: int = 7
 
 class RgiMapFitRequest(BaseModel):
     vault_root: str
@@ -1944,7 +1960,12 @@ class RgiMapFitRequest(BaseModel):
     x_shift: float = 0.0
     crop_range: Optional[list[float]] = None
     threshold_snr: float = 3.0
+    threshold_r2: float = 0.85
     cluster_models_override: Optional[dict] = None  # Mapping of string cluster_id -> list of peaks
+    despike: bool = False
+    despike_method: str = "whitaker_hayes"
+    despike_threshold: float = 7.0
+    despike_window: int = 7
 
 class RgiSaveRequest(BaseModel):
     vault_root: str
@@ -2076,6 +2097,68 @@ def rgi_load_results(request: RgiLoadRequest):
     except Exception as e:
         return {"success": False, "message": str(e)}
 
+@app.post("/api/rgi/load-scientific-maps")
+def rgi_load_scientific_maps(request: RgiLoadRequest):
+    import json
+    import numpy as np
+    vault_root_path = Path(request.vault_root)
+    path = vault_root_path / request.h5_relative_path
+    
+    if not path.exists():
+        return {"success": False, "message": "File not found"}
+        
+    try:
+        with h5py.File(path, "r") as f:
+            # 1. Check if scientific fits are directly available in H5 datasets
+            if "/analysis/rgi_v1/fits/scientific" in f:
+                sci_grp = f["/analysis/rgi_v1/fits/scientific"]
+                analysis_mask = [bool(x) for x in sci_grp["analysis_mask"][:]]
+                
+                pos_G = sci_grp["maps/pos_G"][:].tolist()
+                pos_2D = sci_grp["maps/pos_2D"][:].tolist()
+                
+                analysis_mask_type = sci_grp.attrs.get("analysis_mask_type", "interpretable_graphene")
+                if hasattr(analysis_mask_type, "decode"):
+                    analysis_mask_type = analysis_mask_type.decode("utf-8", "ignore")
+                else:
+                    analysis_mask_type = str(analysis_mask_type)
+                
+                return {
+                    "success": True,
+                    "analysis_mask": analysis_mask,
+                    "analysis_mask_type": analysis_mask_type,
+                    "pos_G": [None if np.isnan(v) or np.isinf(v) else float(v) for v in pos_G],
+                    "pos_2D": [None if np.isnan(v) or np.isinf(v) else float(v) for v in pos_2D],
+                }
+            
+            # 2. Fallback to saved_session JSON
+            if "/analysis/rgi_v1/saved_session" in f:
+                val = f["/analysis/rgi_v1/saved_session"][()]
+                if isinstance(val, bytes):
+                    json_str = val.decode("utf-8", "ignore")
+                elif hasattr(val, "decode"):
+                    json_str = val.decode("utf-8", "ignore")
+                else:
+                    json_str = str(val)
+                session_data = json.loads(json_str)
+                mfr = session_data.get("mapFitResult", {})
+                if mfr:
+                    pos_G = mfr.get("scientific_maps", {}).get("pos_G", {}).get("values", [])
+                    pos_2D = mfr.get("scientific_maps", {}).get("pos_2D", {}).get("values", [])
+                    analysis_mask = mfr.get("analysis_mask", [])
+                    analysis_mask_type = mfr.get("analysis_mask_type", "interpretable_graphene")
+                    return {
+                        "success": True,
+                        "analysis_mask": analysis_mask,
+                        "analysis_mask_type": analysis_mask_type,
+                        "pos_G": pos_G,
+                        "pos_2D": pos_2D,
+                    }
+                    
+        return {"success": False, "message": "No RGI calculation results found in HDF5 file."}
+    except Exception as e:
+        return {"success": False, "message": f"Failed to load scientific maps: {str(e)}"}
+
 @app.post("/api/rgi/build-map-model")
 def rgi_build_map_model(request: RgiBuildModelRequest):
     from scripts.rgi_engine import RamanGlobalIntelligenceEngine
@@ -2093,7 +2176,11 @@ def rgi_build_map_model(request: RgiBuildModelRequest):
             n_components_pca=request.n_components_pca,
             n_components_nmf=request.n_components_nmf,
             n_clusters=request.n_clusters,
-            normalization=request.normalization
+            normalization=request.normalization,
+            despike=request.despike,
+            despike_method=request.despike_method,
+            despike_threshold=request.despike_threshold,
+            despike_window=request.despike_window
         )
         return result
     except Exception as e:
@@ -2135,7 +2222,11 @@ def rgi_fit_representatives(request: RgiFitRepresentativesRequest):
             baseline_method=request.baseline_method,
             baseline_params=request.baseline_params or {},
             x_shift=request.x_shift,
-            crop_range=crop_range_tup
+            crop_range=crop_range_tup,
+            despike=request.despike,
+            despike_method=request.despike_method,
+            despike_threshold=request.despike_threshold,
+            despike_window=request.despike_window
         )
         result["pixel_index"] = pixel_index
         return result
@@ -2180,7 +2271,12 @@ def rgi_run_constrained_map_fit(request: RgiMapFitRequest):
             crop_range=request.crop_range,
             threshold_snr=request.threshold_snr,
             cluster_models_override=parsed_override,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            r2_reliable_min=request.threshold_r2,
+            despike=request.despike,
+            despike_method=request.despike_method,
+            despike_threshold=request.despike_threshold,
+            despike_window=request.despike_window
         )
         rgi_progress["active"] = False
         return result
@@ -2189,6 +2285,66 @@ def rgi_run_constrained_map_fit(request: RgiMapFitRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class RgiAnalyticsRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+    map_D_I: list[Optional[float]]
+    map_G_I: list[Optional[float]]
+    map_2D_I: list[Optional[float]]
+    map_2D_fwhm: list[Optional[float]]
+    mono_th: float = 1.5
+    damage_th: float = 0.3
+    min_intensity: float = 0.0
+    apply_snv: bool = False
+
+
+@app.post("/api/rgi/graphene-analytics")
+def get_rgi_graphene_analytics(request: RgiAnalyticsRequest):
+    import h5py
+    import numpy as np
+    from scripts.graphene_analytics import generate_rgi_analytics_base64
+    
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+        
+    try:
+        with h5py.File(path, "r") as f:
+            wavenumbers = f["/spectrum/wavenumbers"][:]
+            intensities = f["/spectrum/intensities"][:]
+            
+            # Map None/Null to np.nan
+            map_D_I = np.array([np.nan if v is None else float(v) for v in request.map_D_I])
+            map_G_I = np.array([np.nan if v is None else float(v) for v in request.map_G_I])
+            map_2D_I = np.array([np.nan if v is None else float(v) for v in request.map_2D_I])
+            map_2D_fwhm = np.array([np.nan if v is None else float(v) for v in request.map_2D_fwhm])
+            
+            b64_img = generate_rgi_analytics_base64(
+                wavenumbers=wavenumbers, 
+                intensities=intensities,
+                map_D_I=map_D_I,
+                map_G_I=map_G_I,
+                map_2D_I=map_2D_I,
+                map_2D_fwhm=map_2D_fwhm,
+                mono_th=request.mono_th,
+                damage_th=request.damage_th,
+                min_intensity=request.min_intensity,
+                apply_snv=request.apply_snv
+            )
+            
+            return {
+                "success": True,
+                "composite_base64": b64_img
+            }
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"RGI Graphene analytics failed: {str(e)}")
+
+
 
 
 if __name__ == "__main__":
