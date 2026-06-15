@@ -124,12 +124,15 @@ def build_fitting_model(peaks: List[dict]) -> Tuple[lmfit.CompositeModel, lmfit.
         # Define limits dynamic flags
         use_limits = pk.get("use_limits", True)
 
-        def add_param(p_key, backend_key, val, default_min=-np.inf, default_max=np.inf):
+        def add_param(p_key, backend_key, val, default_min=-np.inf, default_max=np.inf, scale_factor=1.0):
             is_fixed = pk.get("fixedParams", {}).get(p_key, False)
             expr = pk.get("exprParams", {}).get(p_key, "")
             
-            p_min = pk.get("minParams", {}).get(p_key, default_min)
-            p_max = pk.get("maxParams", {}).get(p_key, default_max)
+            raw_min = pk.get("minParams", {}).get(p_key)
+            raw_max = pk.get("maxParams", {}).get(p_key)
+            
+            p_min = (float(raw_min) / scale_factor) if raw_min is not None else default_min
+            p_max = (float(raw_max) / scale_factor) if raw_max is not None else default_max
             
             if not expr or not isinstance(expr, str) or expr.strip() == "":
                 expr = None
@@ -157,10 +160,12 @@ def build_fitting_model(peaks: List[dict]) -> Tuple[lmfit.CompositeModel, lmfit.
         else:
             if model_name == "Gaussian":
                 sigma_init = fwhm_init / 2.35482004503
+                scale_f = 2.35482004503
             else:
                 sigma_init = fwhm_init / 2.0
+                scale_f = 2.0
             add_param("center", "center", center, default_min=center_min, default_max=center_max)
-            add_param("fwhm_init", "sigma", sigma_init, default_min=2.0, default_max=50.0)
+            add_param("fwhm_init", "sigma", sigma_init, default_min=2.0, default_max=50.0, scale_factor=scale_f)
             add_param("amplitude", "amplitude", amplitude_val, default_min=0.0)
             if model_name == "Gaussian":
                 params.add(f"{prefix}fwhm", expr=f"2.35482004503 * {prefix}sigma")
@@ -250,7 +255,10 @@ def fit_spectrum(
     y_max = float(np.max(y_corr)) if np.max(y_corr) > 0 else 1.0
     for p_name in params:
         if "amplitude" in p_name or "_A" in p_name:
-            params[p_name].set(value=y_max * 0.5, min=0.0)
+            orig_min = params[p_name].min
+            params[p_name].set(value=y_max * 0.5)
+            if orig_min in (None, -np.inf):
+                params[p_name].set(min=0.0)
 
     try:
         result = model.fit(y_corr, params, x=x_proc, method="leastsq", max_nfev=1000)
@@ -344,7 +352,10 @@ def _fit_single_pixel_worker(args) -> dict:
         y_max = float(np.max(y_corr)) if np.max(y_corr) > 0 else 1.0
         for p_name in params:
             if "amplitude" in p_name or "_A" in p_name:
-                params[p_name].set(value=y_max * 0.5, min=0.0)
+                orig_min = params[p_name].min
+                params[p_name].set(value=y_max * 0.5)
+                if orig_min in (None, -np.inf):
+                    params[p_name].set(min=0.0)
 
         result = model.fit(y_corr, params, x=x_proc, method="leastsq", max_nfev=800)
         

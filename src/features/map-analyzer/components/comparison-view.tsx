@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { SCIENCE_ENGINE_URL } from '@/lib/desktop';
 import { 
     ZoomOut, Info, Save, RefreshCw, History, ChevronDown, 
-    Clock, FileText, Check, AlertCircle, Sparkles, X
+    Clock, FileText, Check, AlertCircle, Sparkles, X, Download, Sliders
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -75,6 +75,11 @@ export function ComparisonView({
     const [spectra, setSpectra] = useState<Record<string, any[]>>({});
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Normalization & shifting state
+    const [normalization, setNormalization] = useState<'none' | 'max' | 'snv' | 'dose'>('none');
+    const [shiftY, setShiftY] = useState<boolean>(false);
+    const [yOffsetPercent, setYOffsetPercent] = useState<number>(30);
 
     // Excitation laser reference lines visibility on G-2D plot
     const [visibleLasers, setVisibleLasers] = useState<Record<'532' | '632.8' | '785', boolean>>({
@@ -281,48 +286,131 @@ export function ComparisonView({
         return { sampleCode, composition: compositionStr };
     };
 
-    const formatLegendText = (file: VaultFile) => {
-        const meta = getSampleMetadata(file);
-        
-        let shortName = file.name;
-        if (shortName.startsWith(meta.sampleCode)) {
-            shortName = shortName.substring(meta.sampleCode.length);
-            if (shortName.startsWith('_')) shortName = shortName.substring(1);
-        }
-        if (shortName.startsWith('RAMAN_')) {
-            shortName = shortName.substring(6);
-        }
-        if (shortName.endsWith('.h5')) {
-            shortName = shortName.substring(0, shortName.length - 3);
-        }
-        if (shortName.length > 20) {
-            shortName = shortName.substring(0, 17) + '...';
-        }
-        
-        return `${meta.sampleCode} [${shortName}]${meta.composition ? ` | ${meta.composition}` : ''}`;
-    };
-
     const [hoverData, setHoverData] = useState<{ x: number; yPos: number; xPos: number; items: any[] } | null>(null);
     const [showHistory, setShowHistory] = useState(false);
 
     // Spectra traces selection
     const activeFiles = useMemo(() => compareFiles.filter(file => spectra[file.id]), [compareFiles, spectra]);
 
+    // Count how many active spectra belong to each sampleCode
+    const sampleCodeCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        activeFiles.forEach(file => {
+            const meta = getSampleMetadata(file);
+            counts[meta.sampleCode] = (counts[meta.sampleCode] || 0) + 1;
+        });
+        return counts;
+    }, [activeFiles, dbSamples]);
+
+    const formatLegendText = (file: VaultFile) => {
+        const meta = getSampleMetadata(file);
+        const count = sampleCodeCounts[meta.sampleCode] || 0;
+        
+        const baseName = meta.composition ? `${meta.sampleCode} - ${meta.composition}` : meta.sampleCode;
+        
+        if (count > 1) {
+            // Find spot number in the filename (e.g. Spot1, spot2)
+            const clean = file.name.replace(/\.h5$/i, '');
+            const parts = clean.split('_');
+            const spotToken = parts.find(p => /^spot\d+$/i.test(p.trim()));
+            if (spotToken) {
+                const num = spotToken.replace(/^spot/i, '');
+                return `${baseName} (Spot ${num})`;
+            } else {
+                let shortName = file.name;
+                if (shortName.startsWith(meta.sampleCode)) {
+                    shortName = shortName.substring(meta.sampleCode.length);
+                    if (shortName.startsWith('_')) shortName = shortName.substring(1);
+                }
+                if (shortName.startsWith('RAMAN_')) {
+                    shortName = shortName.substring(6);
+                }
+                if (shortName.endsWith('.h5')) {
+                    shortName = shortName.substring(0, shortName.length - 3);
+                }
+                if (shortName.length > 15) {
+                    shortName = shortName.substring(0, 12) + '...';
+                }
+                return `${baseName} [${shortName}]`;
+            }
+        }
+        
+        return baseName;
+    };
+
+    // Process spectra data based on normalization & shift options
+    const processedSpectra = useMemo(() => {
+        if (activeFiles.length === 0) return [];
+
+        // 1. Normalize/process each spectrum's Y values
+        const normalizedList = activeFiles.map((file, i) => {
+            const points = spectra[file.id] || [];
+            const x = points.map(p => p.x);
+            const rawY = points.map(p => p.y);
+
+            let processedY: number[] = [];
+            if (normalization === 'max') {
+                const maxY = Math.max(...rawY);
+                processedY = maxY > 0 ? rawY.map(v => v / maxY) : rawY;
+            } else if (normalization === 'snv') {
+                const mean = rawY.reduce((sum, val) => sum + val, 0) / rawY.length;
+                const variance = rawY.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / rawY.length;
+                const stdDev = Math.sqrt(variance);
+                processedY = stdDev > 0 ? rawY.map(v => (v - mean) / stdDev) : rawY.map(v => v - mean);
+            } else {
+                // 'none' or 'dose' (dose behaves as none for now)
+                processedY = [...rawY];
+            }
+
+            const min = Math.min(...processedY);
+            const max = Math.max(...processedY);
+            const range = max - min;
+
+            return {
+                file,
+                index: i,
+                x,
+                rawY,
+                processedY,
+                min,
+                max,
+                range
+            };
+        });
+
+        // 2. Calculate the maximum range of the normalized/processed spectra
+        const maxRange = normalizedList.reduce((maxR, item) => Math.max(maxR, item.range), 0);
+
+        // 3. Apply Y shift if enabled
+        const shiftStep = shiftY ? (yOffsetPercent / 100) * maxRange : 0;
+
+        return normalizedList.map((item, i) => {
+            const shiftAmount = i * shiftStep;
+            const finalY = item.processedY.map(v => v + shiftAmount);
+
+            return {
+                ...item,
+                shiftAmount,
+                finalY
+            };
+        });
+    }, [activeFiles, spectra, normalization, shiftY, yOffsetPercent]);
+
     // Plotly traces for standard spectra
     const plotlyData = useMemo(() => {
-        return activeFiles.map((file, i) => ({
-            x: spectra[file.id].map(p => p.x),
-            y: spectra[file.id].map(p => p.y),
+        return processedSpectra.map((item) => ({
+            x: item.x,
+            y: item.finalY,
             type: 'scatter' as const,
             mode: 'lines' as const,
-            name: formatLegendText(file),
+            name: formatLegendText(item.file),
             line: {
-                color: colors[i % colors.length],
+                color: colors[item.index % colors.length],
                 width: 2
             },
             hoverinfo: 'none' as const
         }));
-    }, [activeFiles, spectra]);
+    }, [processedSpectra]);
 
     const referenceOrigins = {
         '532': { G0: 1581.6, twoD0: 2669.7 },
@@ -608,7 +696,7 @@ export function ComparisonView({
     // Standard spectra Plotly configuration
     const plotlyLayout = useMemo(() => ({
         autosize: true,
-        margin: { l: 90, r: 30, b: 100, t: 40, pad: 4 },
+        margin: { l: 90, r: shiftY ? 180 : 30, b: 100, t: 40, pad: 4 },
         xaxis: {
             title: {
                 text: 'Raman Shift (cm⁻¹)',
@@ -625,7 +713,11 @@ export function ComparisonView({
         },
         yaxis: {
             title: {
-                text: 'Raman Intensity (a.u.)',
+                text: normalization === 'max'
+                    ? 'Raman Intensity (Normalized by Max)'
+                    : normalization === 'snv'
+                    ? 'Raman Intensity (SNV)'
+                    : 'Raman Intensity (a.u.)',
                 font: { family: 'Inter, sans-serif', size: 16, color: '#1e293b', weight: 'bold' }
             },
             gridcolor: '#f1f5f9',
@@ -646,9 +738,25 @@ export function ComparisonView({
         hovermode: 'x' as const,
         plot_bgcolor: 'white',
         paper_bgcolor: 'white',
-        showlegend: true,
-        uirevision: 'true' 
-    }) as any, []);
+        showlegend: !shiftY,
+        uirevision: 'true',
+        annotations: shiftY ? processedSpectra.map((item) => ({
+            xref: 'paper' as const,
+            yref: 'y' as const,
+            x: 1.01,
+            y: item.finalY[item.finalY.length - 1],
+            text: formatLegendText(item.file),
+            showarrow: false,
+            xanchor: 'left' as const,
+            yanchor: 'middle' as const,
+            font: {
+                family: 'Inter, sans-serif',
+                size: 11,
+                color: colors[item.index % colors.length],
+                weight: 'bold'
+            }
+        })) : []
+    }) as any, [normalization, shiftY, processedSpectra]);
 
     // Vector Plotly Layout configuration
     const plotlyVectorLayout = useMemo(() => {
@@ -793,6 +901,96 @@ export function ComparisonView({
         }
     }), []);
 
+    const downloadTxtSpectra = () => {
+        if (processedSpectra.length === 0) return;
+
+        // 1. Define common X axis (from the first spectrum)
+        const commonX = processedSpectra[0].x;
+        const headers = processedSpectra.map(spec => formatLegendText(spec.file));
+
+        // 2. Helper to interpolate Y values onto commonX grid if they differ
+        const interpolateY = (xTarget: number, xArr: number[], yArr: number[]): number => {
+            if (xArr.length === 0) return 0;
+            if (xTarget <= xArr[0]) return yArr[0];
+            if (xTarget >= xArr[xArr.length - 1]) return yArr[yArr.length - 1];
+            
+            let low = 0;
+            let high = xArr.length - 1;
+            while (high - low > 1) {
+                const mid = Math.floor((low + high) / 2);
+                if (xArr[mid] < xTarget) {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+            const x0 = xArr[low];
+            const x1 = xArr[high];
+            const y0 = yArr[low];
+            const y1 = yArr[high];
+            if (x1 === x0) return y0;
+            return y0 + (y1 - y0) * (xTarget - x0) / (x1 - x0);
+        };
+
+        // 3. Build the text content
+        let content = `#################################################################\n`;
+        content += `# PhD Nexus - Multi-Spectra Tabulated Data Export\n`;
+        content += `# Generated on: ${new Date().toLocaleString()}\n`;
+        content += `# Normalization: ${normalization === 'none' ? 'None/Raw' : normalization === 'max' ? 'Normalized to Max' : normalization === 'snv' ? 'Standard Normal Variate (SNV)' : 'Dose (Pending)'}\n`;
+        content += `# Y-Offset Shift: ${shiftY ? `${yOffsetPercent}%` : 'None/Overlaid'}\n`;
+        content += `#################################################################\n`;
+        content += `# AI & AGENT DATA EXTRACTION GUIDE (READ-ME):\n`;
+        content += `# - This file is a tab-separated values (TSV) dataset.\n`;
+        content += `# - Lines starting with '#' represent metadata headers and can be ignored during parsing.\n`;
+        content += `# - The data matrix begins immediately below the header line starting with '# Wavenumber'.\n`;
+        content += `# - Column 1 represents the common X-axis: Wavenumber (Raman Shift in cm-1).\n`;
+        content += `# - Columns 2 to N represent the Y-axis: Raman Intensity for each active spectrum.\n`;
+        content += `# - The data in this file matches the exact visual representation currently plotted on the screen\n`;
+        content += `#   (i.e., with any active normalization or Y-shifting applied).\n`;
+        content += `# - For spectra with slightly non-matching wavenumber grids, the values have been\n`;
+        content += `#   automatically aligned using linear interpolation onto Column 1.\n`;
+        content += `#\n`;
+        content += `# Example python loading snippet:\n`;
+        content += `#   import pandas as pd\n`;
+        content += `#   data = pd.read_csv('filename.txt', sep='\\t', comment='#')\n`;
+        content += `#   wavenumbers = data.iloc[:, 0]  # First column\n`;
+        content += `#   intensities = data.iloc[:, 1:]  # Remaining columns (one per spectrum)\n`;
+        content += `#################################################################\n`;
+
+        // Add headers row
+        content += `# Wavenumber (cm-1)\t` + headers.join('\t') + '\n';
+
+        // Add data rows
+        for (let i = 0; i < commonX.length; i++) {
+            const xVal = commonX[i];
+            let rowText = `${xVal.toFixed(3)}`;
+
+            processedSpectra.forEach((spec) => {
+                let yVal = 0;
+                // If the spectrum shares the exact same X grid, we can just read the index directly
+                if (spec.x.length === commonX.length && Math.abs(spec.x[i] - xVal) < 1e-4) {
+                    yVal = spec.finalY[i];
+                } else {
+                    // Otherwise, linearly interpolate
+                    yVal = interpolateY(xVal, spec.x, spec.finalY);
+                }
+                rowText += `\t${yVal.toFixed(6)}`;
+            });
+            
+            content += rowText + '\n';
+        }
+
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `Spectra_Comparison_Export_${new Date().toISOString().slice(0, 10)}.txt`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    };
+
     if (compareFiles.length === 0) {
         return (
             <div className="w-full h-full flex flex-col items-center justify-center bg-white text-slate-400 space-y-4">
@@ -920,6 +1118,84 @@ export function ComparisonView({
                     </button>
                 </div>
             </div>
+
+            {/* Sub-header for Spectra Controls */}
+            {tab === 'spectra' && (
+                <div className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-2.5 shrink-0 select-none z-10 shadow-sm flex-wrap gap-4">
+                    <div className="flex items-center gap-6">
+                        {/* Normalization Selector */}
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Normalización:</span>
+                            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200/60">
+                                {(
+                                    [
+                                        { id: 'none', label: 'Ninguno', disabled: false },
+                                        { id: 'max', label: 'Máximo', disabled: false },
+                                        { id: 'snv', label: 'SNV', disabled: false },
+                                        { id: 'dose', label: 'Dosis (Pendiente)', disabled: true }
+                                    ] as { id: 'none' | 'max' | 'snv' | 'dose'; label: string; disabled: boolean }[]
+                                ).map((opt) => (
+                                    <button
+                                        key={opt.id}
+                                        type="button"
+                                        disabled={opt.disabled}
+                                        onClick={() => setNormalization(opt.id)}
+                                        className={cn(
+                                            "px-2.5 py-1 text-xs font-bold rounded-md transition-all",
+                                            normalization === opt.id
+                                                ? "bg-white text-indigo-600 shadow-sm font-black"
+                                                : opt.disabled
+                                                ? "text-slate-350 cursor-not-allowed opacity-50"
+                                                : "text-slate-500 hover:text-slate-700"
+                                        )}
+                                        title={opt.disabled ? "Próximamente" : undefined}
+                                    >
+                                        {opt.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Y-offset shift controls */}
+                        <div className="flex items-center gap-3 border-l border-slate-200 pl-6">
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={shiftY}
+                                    onChange={(e) => setShiftY(e.target.checked)}
+                                    className="w-4 h-4 rounded bg-slate-900 border-slate-300 accent-indigo-600 cursor-pointer"
+                                />
+                                <span className="text-xs font-bold text-slate-600">Desplazar en Y</span>
+                            </label>
+
+                            {shiftY && (
+                                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
+                                    <Sliders size={14} className="text-slate-400" />
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="150"
+                                        value={yOffsetPercent}
+                                        onChange={(e) => setYOffsetPercent(Number(e.target.value))}
+                                        className="w-24 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 focus:outline-none"
+                                    />
+                                    <span className="text-[11px] font-mono text-slate-500 w-8 text-right">{yOffsetPercent}%</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Export Button */}
+                    <button
+                        onClick={downloadTxtSpectra}
+                        className="px-4 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5"
+                        title="Descargar todos los espectros en un archivo de texto tabulado"
+                    >
+                        <Download size={14} />
+                        Descargar .txt
+                    </button>
+                </div>
+            )}
             
             {loading && tab === 'spectra' && (
                 <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/60 backdrop-blur-sm">
@@ -954,10 +1230,29 @@ export function ComparisonView({
                                 {hoverData.items.map((item, idx) => (
                                     <div key={idx} className="flex items-center justify-between gap-4">
                                         <div className="flex items-center gap-2">
-                                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                                            <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
                                             <span className="text-xs font-bold text-slate-700">{item.id}</span>
                                         </div>
-                                        <span className="text-xs font-mono text-slate-600">{Math.round(item.y).toLocaleString()} <span className="text-[9px] text-slate-400">a.u.</span></span>
+                                        <div className="text-xs font-mono text-slate-600 flex items-center gap-1 justify-end">
+                                            {normalization !== 'none' ? (
+                                                <>
+                                                    <span>{item.y.toFixed(3)}</span>
+                                                    <span className="text-[9px] text-indigo-500 font-bold">
+                                                        {normalization === 'max' ? 'norm' : 'snv'}
+                                                    </span>
+                                                    {item.rawY !== null && (
+                                                        <span className="text-[9px] text-slate-400">
+                                                            ({Math.round(item.rawY).toLocaleString()} a.u.)
+                                                        </span>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span>{Math.round(item.y).toLocaleString()}</span>
+                                                    <span className="text-[9px] text-slate-400">a.u.</span>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -979,10 +1274,13 @@ export function ComparisonView({
                                 
                                 const items = data.points
                                     .map(p => {
-                                        const file = activeFiles[p.curveNumber];
+                                        const item = processedSpectra[p.curveNumber];
+                                        const file = item?.file;
+                                        const rawVal = item ? item.rawY[p.pointIndex] : null;
                                         return {
                                             id: file?.name.split('_')[0] || '?',
                                             y: p.y as number,
+                                            rawY: rawVal,
                                             color: (p as any).fullData.line.color
                                         };
                                     })
