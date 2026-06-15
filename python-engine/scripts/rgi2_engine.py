@@ -252,6 +252,19 @@ def _fit_pixel_with_priors(args: tuple) -> dict:
 
         for peak in peaks:
             safe_name = sanitize_prefix(peak.get("name", "peak"))
+            center_prior_value = prior_params.get(f"{safe_name}_center", {}).get("value")
+            if center_prior_value is None:
+                center_prior_value = peak.get("center")
+            
+            # Encontrar el máximo local en y_corr dentro de la región del pico para este espectro
+            local_max_seed = None
+            if center_prior_value is not None:
+                search_mask = (x_proc >= (center_prior_value - 15.0)) & (x_proc <= (center_prior_value + 15.0))
+                if np.any(search_mask):
+                    sub_x = x_proc[search_mask]
+                    sub_y = y_corr[search_mask]
+                    local_max_seed = float(sub_x[np.argmax(sub_y)])
+
             for suffix, config_key in (("center", "center"), ("sigma", "fwhm_init"), ("amplitude", "amplitude")):
                 p_name = f"{safe_name}_{suffix}"
                 if p_name not in params or params[p_name].expr is not None:
@@ -262,8 +275,17 @@ def _fit_pixel_with_priors(args: tuple) -> dict:
                         prior_value = float(peak.get(config_key)) / 2.0
                     else:
                         prior_value = peak.get(config_key)
-                if prior_value is not None:
-                    params[p_name].set(value=float(prior_value))
+
+                if suffix == "center" and local_max_seed is not None:
+                    params[p_name].set(value=local_max_seed)
+                    user_min = peak.get("minParams", {}).get("center")
+                    user_max = peak.get("maxParams", {}).get("center")
+                    fit_min = float(user_min) if user_min is not None else (local_max_seed - 10.0)
+                    fit_max = float(user_max) if user_max is not None else (local_max_seed + 10.0)
+                    params[p_name].set(min=fit_min, max=fit_max)
+                else:
+                    if prior_value is not None:
+                        params[p_name].set(value=float(prior_value))
 
         prior_names = [name for name in prior_params.keys() if name in params and params[name].expr is None]
         y_scale = max(float(np.std(y_corr)), 1.0)
@@ -279,6 +301,10 @@ def _fit_pixel_with_priors(args: tuple) -> dict:
                     continue
                 stderr = prior_params[name].get("stderr")
                 scale = abs(float(stderr)) if stderr not in (None, 0) else max(abs(float(prior_value)) * 0.05, 1.0)
+                # Si es un parámetro de posición (center) y la escala es demasiado pequeña (stderr muy bajo),
+                # establecemos un mínimo razonable (por ejemplo, 5.0 cm^-1) para evitar el bloqueo rígido del píxel.
+                if "center" in name and scale < 5.0:
+                    scale = 5.0
                 penalties.append(np.sqrt(lambda_cluster) * ((local_params[name].value - float(prior_value)) / scale))
             if not penalties:
                 return spec_resid
@@ -737,5 +763,6 @@ class RamanGlobalIntelligence2Engine:
             "reason_summary": reason_summary,
             "interpretation_summary": interpretation_summary,
             "results": summary_results,
+            "cluster_labels": [int(v) for v in labels],
             **scientific_results,
         }

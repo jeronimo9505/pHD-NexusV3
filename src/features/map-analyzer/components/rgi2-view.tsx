@@ -1,19 +1,24 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
     Activity,
+    AlertCircle,
     BarChart3,
     BookOpenText,
     BrainCircuit,
     CheckCircle2,
     Database,
+    Download,
+    Eye,
     Info,
     Loader2,
     Play,
+    RefreshCw,
     Save,
     ShieldCheck,
+    Sliders,
     SlidersHorizontal,
     Sparkles,
     X,
@@ -22,8 +27,43 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { FittingPeakConfig, FittingPeakTable, PEAK_COLORS } from './fitting-peak-table';
 import { SCIENCE_ENGINE_URL } from '@/lib/desktop';
+import { valToRgb, getCssGradient } from './colormaps';
 
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+
+const RESULT_VIEWS = [
+    { value: 'map',           label: 'Map' },
+    { value: 'metrics',       label: 'Metrics' },
+    { value: 'histograms',    label: 'Histograms' },
+    { value: 'relationships', label: 'Relationships' },
+    { value: 'vector',        label: 'Vector Plot' },
+    { value: 'graphene',      label: 'Graphene' },
+    { value: 'analytics',     label: 'Analytics' },
+    { value: 'inspect',       label: 'Inspect Fit' },
+] as const;
+
+type ResultView = typeof RESULT_VIEWS[number]['value'];
+
+const QUALITY_CLASS_LABELS_RGI2: Record<number, { label: string; color: string; desc: string }> = {
+    0: { label: 'Background / Substrate', color: '#64748b', desc: 'No graphene signal detected' },
+    1: { label: 'Defect-rich Graphene',   color: '#f59e0b', desc: 'High D-band intensity (ID/IG > 0.4)' },
+    2: { label: 'Monolayer Graphene',      color: '#6366f1', desc: 'Symmetric, narrow 2D band (FWHM < 32 cm⁻¹)' },
+    3: { label: 'Multilayer Graphene',     color: '#8b5cf6', desc: 'Broadened 2D band shape (FWHM >= 32 cm⁻¹)' },
+    4: { label: 'Low Confidence Fit',      color: '#ef4444', desc: 'Converged but poor fit quality (R² < 0.85)' },
+};
+
+const AXIS_RGI2 = {
+    gridcolor: '#1e293b', zerolinecolor: '#334155', color: '#94a3b8',
+    tickfont: { size: 10, color: '#94a3b8' },
+};
+
+const LAYOUT_BASE_RGI2 = {
+    paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#080d16',
+    font: { family: 'Inter, sans-serif', size: 10, color: '#94a3b8' },
+    margin: { l: 55, r: 20, t: 10, b: 40 },
+    xaxis: { ...AXIS_RGI2 },
+    yaxis: { ...AXIS_RGI2 },
+};
 
 type Stage = 1 | 2 | 3 | 4;
 type Status = 'idle' | 'modeling' | 'fitting_rep' | 'mapping' | 'saving';
@@ -182,6 +222,18 @@ export function Rgi2View({ vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1,
     const representativePlotRef = useRef<any>(null);
     const representativePlotContainerRef = useRef<HTMLDivElement | null>(null);
 
+    // Stage 4 result views
+    const [resultsView, setResultsView] = useState<ResultView>('map');
+    const [selectedHistogramKey, setSelectedHistogramKey] = useState<string>('pos_G');
+    const [scatterXKey, setScatterXKey] = useState<string>('pos_G');
+    const [scatterYKey, setScatterYKey] = useState<string>('pos_2D');
+
+    // Pixel Fit Inspector
+    const [selectedPixelIndex, setSelectedPixelIndex] = useState<number | null>(null);
+    const [pixelFitData, setPixelFitData] = useState<any | null>(null);
+    const [isLoadingPixelFit, setIsLoadingPixelFit] = useState<boolean>(false);
+    const [fitError, setFitError] = useState<string | null>(null);
+
     useEffect(() => {
         setActivePath(h5Path);
         setStage(1);
@@ -227,6 +279,12 @@ export function Rgi2View({ vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1,
                 setClusterFitData(session.clusterFitData ?? {});
                 setMapFitResult(session.mapFitResult ?? null);
                 setStage(session.mapFitResult ? 4 : session.modelData ? 2 : 1);
+                if (session.mapFitResult) {
+                    const mfr = session.mapFitResult;
+                    setSelectedHistogramKey(mfr.histograms?.pos_G ? 'pos_G' : Object.keys(mfr.histograms || {})[0] || 'pos_G');
+                    setScatterXKey(mfr.scientific_maps?.pos_G ? 'pos_G' : Object.keys(mfr.scientific_maps || {})[0] || 'pos_G');
+                    setScatterYKey(mfr.scientific_maps?.pos_2D ? 'pos_2D' : Object.keys(mfr.scientific_maps || {})[1] || 'pos_2D');
+                }
             } catch {
                 // Saved sessions are optional.
             }
@@ -236,6 +294,57 @@ export function Rgi2View({ vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1,
             cancelled = true;
         };
     }, [h5Path, vaultRoot]);
+
+    // Pixel Fit Inspector effect (fetches /api/fitting/fit-pixel when pixel is selected)
+    useEffect(() => {
+        if (selectedPixelIndex === null || !vaultRoot || !activePath || !mapFitResult) {
+            setPixelFitData(null);
+            setFitError(null);
+            return;
+        }
+        let active = true;
+        const fetchFit = async () => {
+            setIsLoadingPixelFit(true);
+            setFitError(null);
+            try {
+                const fitConfig = mapFitResult.fit_config || {};
+                const peaks = clusterPeaks[0] || fitConfig.peaks || [];
+                const res = await fetch(`${SCIENCE_ENGINE_URL}/api/fitting/fit-pixel`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        vault_root: vaultRoot,
+                        h5_relative_path: activePath,
+                        spectrum_index: selectedPixelIndex,
+                        peaks,
+                        baseline_method: fitConfig.baseline_method || baselineMethod,
+                        baseline_params: fitConfig.baseline_params || { lam: 1e5, p: 0.01, order: 2 },
+                        x_shift: fitConfig.x_shift || 0.0,
+                        crop_range: fitConfig.crop_range || [cropMin, cropMax],
+                        despike: fitConfig.despike ?? despike,
+                        despike_method: fitConfig.despike_method || despikeMethod,
+                        despike_threshold: fitConfig.despike_threshold ?? despikeThreshold,
+                        despike_window: fitConfig.despike_window ?? despikeWindow,
+                    })
+                });
+                const data = await res.json();
+                if (active) {
+                    if (res.ok && data.success !== false) {
+                        setPixelFitData(data);
+                    } else {
+                        setFitError(data.message || data.detail || 'Fitting failed to converge');
+                        setPixelFitData(data);
+                    }
+                }
+            } catch (err: any) {
+                if (active) setFitError(err.message || 'Connection failed');
+            } finally {
+                if (active) setIsLoadingPixelFit(false);
+            }
+        };
+        fetchFit();
+        return () => { active = false; };
+    }, [selectedPixelIndex, vaultRoot, activePath, mapFitResult, clusterPeaks, baselineMethod, despike, despikeMethod, despikeThreshold, despikeWindow, cropMin, cropMax]);
 
     const activePeaks = clusterPeaks[activeCluster] || [];
     const activeRepresentative = useMemo(() => {
@@ -280,6 +389,104 @@ export function Rgi2View({ vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1,
         const scientificKeys = Object.keys(mapFitResult.scientific_maps || {});
         return Array.from(new Set(['rgi2_confidence', 'cluster_probability', 'spatial_consistency', 'residual_structure', 'pos_G', 'pos_2D', 'ID_IG_height', ...resultKeys, ...scientificKeys]));
     }, [mapFitResult]);
+
+    // ── Scientific maps for Stage 4 visualisations ──────────────────────────
+    const scientificMapSeries = useMemo(() => {
+        if (!mapFitResult?.scientific_maps) return {} as Record<string, { label: string; values: Array<number | null> }>;
+        return mapFitResult.scientific_maps as Record<string, { label: string; values: Array<number | null> }>;
+    }, [mapFitResult]);
+
+    const histogramOptions = useMemo(() => {
+        return Object.entries(mapFitResult?.histograms || {}).map(([key, val]: [string, any]) => ({
+            key,
+            label: val.label || key.replace(/_/g, ' ')
+        }));
+    }, [mapFitResult]);
+
+    const relationshipMetricOptions = useMemo(() => {
+        return Object.entries(scientificMapSeries).map(([key, payload]) => ({
+            key,
+            label: payload.label || key.replace(/_/g, ' ')
+        }));
+    }, [scientificMapSeries]);
+
+    const histogramStats = useMemo(() => {
+        const key = selectedHistogramKey || histogramOptions[0]?.key;
+        return mapFitResult?.statistics?.[key] || null;
+    }, [mapFitResult, selectedHistogramKey, histogramOptions]);
+
+    const histogramTrace = useMemo(() => {
+        const key = selectedHistogramKey || histogramOptions[0]?.key;
+        const histogram = mapFitResult?.histograms?.[key];
+        if (!histogram || !histogram.bin_centers?.length) return [];
+        const traces: any[] = [{
+            type: 'bar' as const,
+            x: histogram.bin_centers,
+            y: histogram.counts,
+            marker: { color: histogram.bin_centers.map(() => '#10b981'), opacity: 0.75, line: { color: '#059669', width: 0.5 } },
+            name: histogram.label || key,
+            hovertemplate: '%{x:.3f}<br>Count: %{y}<extra></extra>',
+        }];
+        const st = mapFitResult?.statistics?.[key];
+        if (st?.mean != null && st?.std != null && st.std > 0 && histogram.bin_edges?.length > 1) {
+            const mean = st.mean as number;
+            const std = st.std as number;
+            const totalCount = (histogram.counts as number[]).reduce((a: number, b: number) => a + b, 0);
+            const binWidth = (histogram.bin_edges[histogram.bin_edges.length - 1] - histogram.bin_edges[0]) / (histogram.bin_edges.length - 1);
+            const xMin = histogram.bin_edges[0];
+            const xMax = histogram.bin_edges[histogram.bin_edges.length - 1];
+            const nPts = 120;
+            const xCurve: number[] = [];
+            const yCurve: number[] = [];
+            for (let i = 0; i <= nPts; i++) {
+                const xi = xMin + (i / nPts) * (xMax - xMin);
+                const gaussian = (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((xi - mean) / std) ** 2);
+                xCurve.push(xi);
+                yCurve.push(gaussian * totalCount * binWidth);
+            }
+            traces.push({ type: 'scatter', mode: 'lines', x: xCurve, y: yCurve, line: { color: '#f59e0b', width: 2 }, name: 'Normal fit', hovertemplate: '%{x:.3f}<br>Normal: %{y:.1f}<extra></extra>' });
+            const maxCount = Math.max(...(histogram.counts as number[]));
+            traces.push({ type: 'scatter', mode: 'lines', x: [mean, mean], y: [0, maxCount * 1.05], line: { color: '#f59e0b', width: 1.5, dash: 'dash' }, name: `Mean: ${mean.toFixed(3)}`, hoverinfo: 'skip' });
+        }
+        return traces;
+    }, [mapFitResult, selectedHistogramKey, histogramOptions]);
+
+    const relationshipTrace = useMemo(() => {
+        const xSeries = scientificMapSeries[scatterXKey]?.values || [];
+        const ySeries = scientificMapSeries[scatterYKey]?.values || [];
+        const reliableMask = mapFitResult?.analysis_mask || mapFitResult?.interpretable_mask || mapFitResult?.reliable_mask || [];
+        const x: number[] = [], y: number[] = [], text: string[] = [];
+        for (let i = 0; i < Math.min(xSeries.length, ySeries.length); i++) {
+            const xv = xSeries[i], yv = ySeries[i];
+            const reliable = reliableMask.length === 0 ? true : reliableMask[i];
+            if (reliable && typeof xv === 'number' && typeof yv === 'number' && Number.isFinite(xv) && Number.isFinite(yv)) {
+                x.push(xv); y.push(yv); text.push(`Pixel #${i}`);
+            }
+        }
+        return [{ type: 'scattergl' as const, mode: 'markers', x, y, text, hoverinfo: 'text+x+y', marker: { color: '#38bdf8', size: 7, opacity: 0.72, line: { color: '#0f172a', width: 0.5 } }, name: 'Analysis pixels' } as any];
+    }, [mapFitResult, scientificMapSeries, scatterXKey, scatterYKey]);
+
+    const correlationTrace = useMemo(() => {
+        const corr = mapFitResult?.correlations;
+        if (!corr?.pearson) return [];
+        return [{ type: 'heatmap' as const, z: corr.pearson, x: corr.labels, y: corr.labels, zmin: -1, zmax: 1, colorscale: 'RdBu', reversescale: true, hovertemplate: '%{y} vs %{x}<br>Pearson: %{z:.3f}<extra></extra>', colorbar: { tickfont: { color: '#94a3b8', size: 9 }, title: { text: 'r', font: { color: '#94a3b8', size: 9 } } } } as any];
+    }, [mapFitResult]);
+
+    const handlePixelClickRgi2 = useCallback((eventData: any) => {
+        if (!eventData?.points?.[0] || !mapFitResult) return;
+        const pt = eventData.points[0];
+        let col = Math.floor(pt.x), row = Math.floor(pt.y);
+        if (Array.isArray(pt.pointNumber)) { row = pt.pointNumber[0]; col = pt.pointNumber[1]; }
+        else if (Array.isArray(pt.pointIndex)) { row = pt.pointIndex[0]; col = pt.pointIndex[1]; }
+        else if (pt.pointNumber !== undefined && Number.isInteger(Number(pt.pointNumber))) {
+            const fi = Number(pt.pointNumber); row = Math.floor(fi / mapWidth); col = fi % mapWidth;
+        }
+        row = Math.max(0, Math.min(mapHeight - 1, Math.round(row)));
+        col = Math.max(0, Math.min(mapWidth - 1, Math.round(col)));
+        const idx = row * mapWidth + col;
+        const total = mapFitResult.n_spectra || nSpectra;
+        if (idx >= 0 && idx < total) setSelectedPixelIndex(idx);
+    }, [mapWidth, mapHeight, nSpectra, mapFitResult]);
 
     const representativeTrace = useMemo(() => {
         const traces: any[] = [];
@@ -722,6 +929,11 @@ export function Rgi2View({ vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1,
             }
             setMapFitResult(data);
             setSelectedMapKey(data.results?.rgi2_confidence ? 'rgi2_confidence' : 'r2');
+            setResultsView('map');
+            setSelectedHistogramKey(data.histograms?.pos_G ? 'pos_G' : Object.keys(data.histograms || {})[0] || 'pos_G');
+            setScatterXKey(data.scientific_maps?.pos_G ? 'pos_G' : Object.keys(data.scientific_maps || {})[0] || 'pos_G');
+            setScatterYKey(data.scientific_maps?.pos_2D ? 'pos_2D' : Object.keys(data.scientific_maps || {})[1] || 'pos_2D');
+            setSelectedPixelIndex(null);
             setStage(4);
             toast.success('RGI2 advanced fit completed');
         } catch (err: any) {
@@ -1139,44 +1351,175 @@ export function Rgi2View({ vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1,
 
                     {stage === 4 && (
                         <div className="h-full grid grid-rows-[auto_minmax(0,1fr)] gap-3">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-300">
-                                    <BarChart3 size={14} className="text-emerald-300" />
-                                    Scientific Review
-                                </div>
-                                <select className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs" value={selectedMapKey} onChange={e => setSelectedMapKey(e.target.value)}>
-                                    {mapKeys.map(key => <option key={key} value={key}>{key}</option>)}
-                                </select>
+                            <div className="flex items-center gap-1 bg-slate-950/60 border border-slate-800 rounded-xl p-1 shrink-0 overflow-x-auto">
+                                {RESULT_VIEWS.map(view => (
+                                    <button
+                                        key={view.value}
+                                        onClick={() => setResultsView(view.value)}
+                                        className={cn(
+                                            'px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shrink-0 whitespace-nowrap',
+                                            resultsView === view.value
+                                                ? 'bg-emerald-400 text-slate-950'
+                                                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                                        )}
+                                    >
+                                        {view.label}
+                                    </button>
+                                ))}
                             </div>
-                            <div className="grid grid-cols-[minmax(0,1fr)_300px] gap-3 min-h-0">
-                                <div className="rounded-lg border border-slate-800 bg-slate-950/60 overflow-hidden">
-                                    {mapTrace.length ? (
-                                        <Plot data={mapTrace as any} layout={{ autosize: true, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#020617', font: { color: '#94a3b8' }, margin: { l: 35, r: 20, t: 20, b: 30 } }} useResizeHandler className="w-full h-full" />
-                                    ) : (
-                                        <div className="h-full flex items-center justify-center text-sm text-slate-500">No RGI2 fit results</div>
-                                    )}
-                                </div>
-                                <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-3 overflow-y-auto">
-                                    <div className="grid grid-cols-2 gap-2 mb-3">
-                                        <Metric label="Success" value={mapFitResult?.success_count ?? '-'} />
-                                        <Metric label="Reliable" value={mapFitResult?.reliable_count ?? '-'} />
-                                        <Metric label="R2 Mean" value={mapFitResult?.r2_mean?.toFixed?.(4) ?? '-'} tone="cyan" />
-                                        <Metric label="Rescued" value={mapFitResult?.rescued_count ?? '-'} tone="amber" />
-                                    </div>
-                                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Fit Reasons</div>
-                                    <div className="space-y-1">
-                                        {Object.entries(mapFitResult?.reason_summary || {}).map(([key, value]) => (
-                                            <div key={key} className="flex items-center justify-between text-xs border border-slate-800 bg-slate-900/50 rounded px-2 py-1.5">
-                                                <span className="text-slate-300">{key}</span>
-                                                <span className="font-black text-emerald-300">{String(value)}</span>
+                            <div className="min-h-0 overflow-hidden">
+                                {resultsView === 'map' && (
+                                    <div className="h-full grid grid-cols-[minmax(0,1fr)_300px] gap-3">
+                                        <div className="flex flex-col gap-2 min-h-0">
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <select className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs flex-1" value={selectedMapKey} onChange={e => setSelectedMapKey(e.target.value)}>
+                                                    {mapKeys.map(key => <option key={key} value={key}>{key.replace(/_/g, ' ')}</option>)}
+                                                </select>
                                             </div>
-                                        ))}
+                                            <div className="flex-1 rounded-lg border border-slate-800 bg-slate-950/60 overflow-hidden">
+                                                {mapTrace.length ? (
+                                                    <Plot data={mapTrace as any} layout={{ autosize: true, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#020617', font: { color: '#94a3b8' }, margin: { l: 35, r: 20, t: 20, b: 30 }, xaxis: { showgrid: false }, yaxis: { showgrid: false, scaleanchor: 'x' } }} useResizeHandler onClick={handlePixelClickRgi2} className="w-full h-full" />
+                                                ) : (
+                                                    <div className="h-full flex items-center justify-center text-sm text-slate-500">No RGI2 fit results</div>
+                                                )}
+                                            </div>
+                                            {selectedMapKey === 'graphene_quality_class' && (
+                                                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] font-bold text-slate-500 shrink-0">
+                                                    {Object.entries(QUALITY_CLASS_LABELS_RGI2).map(([k, d]) => (
+                                                        <div key={k} className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded" style={{ backgroundColor: d.color }} /><span>{d.label.split(' ')[0]}</span></div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-3 overflow-y-auto">
+                                            <div className="grid grid-cols-2 gap-2 mb-3">
+                                                <Metric label="Success" value={mapFitResult?.success_count ?? '-'} />
+                                                <Metric label="Reliable" value={mapFitResult?.reliable_count ?? '-'} />
+                                                <Metric label="R2 Mean" value={mapFitResult?.r2_mean?.toFixed?.(4) ?? '-'} tone="cyan" />
+                                                <Metric label="Rescued" value={mapFitResult?.rescued_count ?? '-'} tone="amber" />
+                                            </div>
+                                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Fit Reasons</div>
+                                            <div className="space-y-1">
+                                                {Object.entries(mapFitResult?.reason_summary || {}).map(([key, value]) => (
+                                                    <div key={key} className="flex items-center justify-between text-xs border border-slate-800 bg-slate-900/50 rounded px-2 py-1.5">
+                                                        <span className="text-slate-300">{key}</span>
+                                                        <span className="font-black text-emerald-300">{String(value)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mt-4 mb-2">Interpretation</div>
+                                            <div className="text-xs text-slate-400 leading-relaxed">
+                                                {mapFitResult?.interpretation_summary?.notes?.join(' ') || 'Run RGI2 advanced fit to generate review notes.'}
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mt-4 mb-2">Interpretation</div>
-                                    <div className="text-xs text-slate-400 leading-relaxed">
-                                        {mapFitResult?.interpretation_summary?.notes?.join(' ') || 'Run RGI2 advanced fit to generate review notes.'}
+                                )}
+                                {resultsView === 'metrics' && (
+                                    <div className="h-full overflow-y-auto p-1">
+                                        {mapFitResult ? (
+                                            <Rgi2MetricsPanel result={mapFitResult} />
+                                        ) : (
+                                            <Rgi2EmptyState title="No fit data" body="Run the advanced fit to see scientific metrics." />
+                                        )}
                                     </div>
-                                </div>
+                                )}
+                                {resultsView === 'histograms' && (
+                                    <div className="h-full flex gap-4 min-h-0">
+                                        <div className="w-64 shrink-0 flex flex-col gap-4 bg-slate-950/40 border border-slate-800 rounded-xl p-4 overflow-y-auto">
+                                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Parameter</div>
+                                            <div className="flex flex-col gap-1">
+                                                {histogramOptions.map(opt => (
+                                                    <button key={opt.key} onClick={() => setSelectedHistogramKey(opt.key)}
+                                                        className={cn('px-3 py-2 rounded-lg text-xs font-bold text-left transition-all border', selectedHistogramKey === opt.key ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300' : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:text-white hover:border-slate-700')}>
+                                                        {opt.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {histogramStats && (
+                                                <div className="border-t border-slate-800 pt-3 space-y-2">
+                                                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-500">Statistics</div>
+                                                    {[['Mean', histogramStats.mean?.toFixed(4)], ['Median', histogramStats.median?.toFixed(4)], ['Std', histogramStats.std?.toFixed(4)], ['P10', histogramStats.p10?.toFixed(4)], ['P90', histogramStats.p90?.toFixed(4)], ['Count', histogramStats.reliable_count]].map(([l, v]) => (
+                                                        <div key={l as string} className="flex justify-between text-[10px]">
+                                                            <span className="text-slate-500 font-bold uppercase">{l}</span>
+                                                            <span className="font-mono text-slate-300">{v ?? '--'}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/40 overflow-hidden">
+                                            {histogramTrace.length ? (
+                                                <Plot data={histogramTrace as any} layout={{ ...LAYOUT_BASE_RGI2, xaxis: { ...AXIS_RGI2, title: { text: histogramOptions.find(o => o.key === selectedHistogramKey)?.label || selectedHistogramKey } }, yaxis: { ...AXIS_RGI2, title: { text: 'Count' } }, barmode: 'overlay', autosize: true }} useResizeHandler className="w-full h-full" config={{ displayModeBar: false, responsive: true }} />
+                                            ) : (
+                                                <Rgi2EmptyState title="No histogram data" body="The histogram for this parameter is not available yet." />
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                                {resultsView === 'relationships' && (
+                                    <div className="h-full grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 min-h-0">
+                                        <div className="flex flex-col gap-2 min-h-0">
+                                            <div className="flex gap-2 items-center shrink-0">
+                                                <div className="flex-1">
+                                                    <div className="text-[9px] font-bold text-slate-500 uppercase mb-1">X Axis</div>
+                                                    <select className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs" value={scatterXKey} onChange={e => setScatterXKey(e.target.value)}>
+                                                        {relationshipMetricOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="flex-1">
+                                                    <div className="text-[9px] font-bold text-slate-500 uppercase mb-1">Y Axis</div>
+                                                    <select className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs" value={scatterYKey} onChange={e => setScatterYKey(e.target.value)}>
+                                                        {relationshipMetricOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/40 overflow-hidden">
+                                                <Plot data={relationshipTrace as any} layout={{ ...LAYOUT_BASE_RGI2, xaxis: { ...AXIS_RGI2, title: { text: relationshipMetricOptions.find(o => o.key === scatterXKey)?.label || scatterXKey } }, yaxis: { ...AXIS_RGI2, title: { text: relationshipMetricOptions.find(o => o.key === scatterYKey)?.label || scatterYKey } }, autosize: true }} useResizeHandler className="w-full h-full" config={{ displayModeBar: false, responsive: true }} />
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col gap-2 min-h-0">
+                                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 shrink-0">Pearson Correlation Matrix</div>
+                                            <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/40 overflow-hidden">
+                                                {correlationTrace.length ? (
+                                                    <Plot data={correlationTrace as any} layout={{ autosize: true, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#080d16', font: { family: 'Inter, sans-serif', size: 9, color: '#94a3b8' }, margin: { l: 100, r: 20, t: 20, b: 100 } }} useResizeHandler className="w-full h-full" config={{ displayModeBar: false, responsive: true }} />
+                                                ) : (
+                                                    <Rgi2EmptyState title="No correlation data" body="Correlation matrix requires scientific maps with multiple parameters." />
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                {resultsView === 'vector' && (
+                                    <div className="h-full overflow-hidden">
+                                        <RgiVectorTabRgi2 result={mapFitResult} clusterLabels={modelData?.cluster_labels} nClusters={modelData?.n_clusters || nClusters} />
+                                    </div>
+                                )}
+                                {resultsView === 'graphene' && (
+                                    <div className="h-full overflow-hidden">
+                                        <RgiGrapheneTabRgi2 result={mapFitResult} mapWidth={mapWidth} mapHeight={mapHeight} nSpectra={nSpectra} stepSize={stepSize} />
+                                    </div>
+                                )}
+                                {resultsView === 'analytics' && (
+                                    <div className="h-full overflow-hidden">
+                                        <RgiAnalyticsTabRgi2 result={mapFitResult} vaultRoot={vaultRoot} h5Path={activePath} />
+                                    </div>
+                                )}
+                                {resultsView === 'inspect' && (
+                                    <div className="h-full overflow-hidden">
+                                        <RgiInspectTabRgi2
+                                            result={mapFitResult}
+                                            mapWidth={mapWidth}
+                                            mapHeight={mapHeight}
+                                            selectedPixelIndex={selectedPixelIndex}
+                                            setSelectedPixelIndex={setSelectedPixelIndex}
+                                            pixelFitData={pixelFitData}
+                                            isLoadingPixelFit={isLoadingPixelFit}
+                                            fitError={fitError}
+                                            selectedMapKey={selectedMapKey}
+                                            setSelectedMapKey={setSelectedMapKey}
+                                        />
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -1269,6 +1612,591 @@ export function Rgi2View({ vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1,
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage-4 helper components (adapted from rgi-view.tsx for RGI2 data shapes)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Rgi2EmptyState({ title, body }: { title: string; body: string }) {
+    return (
+        <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center border border-slate-900 rounded-xl bg-slate-950/40 p-8">
+            <AlertCircle size={22} className="text-amber-400 mb-3" />
+            <div className="text-xs font-black uppercase text-slate-300">{title}</div>
+            <p className="text-[10px] text-slate-500 max-w-md mt-2 leading-4">{body}</p>
+        </div>
+    );
+}
+
+function Rgi2MetricsPanel({ result }: { result: any }) {
+    const stats = result?.statistics || {};
+    const ratioKeys = ['ID_IG_height', 'AD_AG_area', 'I2D_IG_height', 'A2D_AG_area', 'FWHM_2D_FWHM_G'];
+    const detailKeys = ['pos_G', 'fwhm_G', 'area_G', 'height_G', 'pos_2D', 'fwhm_2D', 'area_2D', 'height_2D', 'ID_IG_height', 'I2D_IG_height'];
+
+    const fmt = (v: any, d = 4) => (typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : '--');
+
+    return (
+        <div className="flex flex-col gap-4 pb-4">
+            <div>
+                <h4 className="text-[11px] font-black text-slate-300 uppercase">Band Metrics</h4>
+                <p className="text-[9px] font-bold text-slate-500">{result?.n_spectra ?? 0} spectra — analysis mask applied</p>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-850 rounded-xl bg-slate-950/40">
+                <table className="w-full text-[10px]">
+                    <thead className="bg-slate-950 text-slate-500 uppercase">
+                        <tr>
+                            <th className="text-left px-3 py-2 font-black">Band</th>
+                            <th className="text-left px-3 py-2 font-black">Position</th>
+                            <th className="text-left px-3 py-2 font-black">FWHM</th>
+                            <th className="text-left px-3 py-2 font-black">Area</th>
+                            <th className="text-left px-3 py-2 font-black">Height</th>
+                            <th className="text-right px-3 py-2 font-black">Analysis Px</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {(['D', 'G', '2D'] as const).map(band => {
+                            const suffix = band;
+                            const pos = stats[`pos_${suffix}`];
+                            const fwhm = stats[`fwhm_${suffix}`];
+                            const area = stats[`area_${suffix}`];
+                            const height = stats[`height_${suffix}`];
+                            const cnt = Math.max(pos?.reliable_count || 0, fwhm?.reliable_count || 0);
+                            const cell = (s: any, unit?: string) => (
+                                <td className="px-3 py-3 align-top">
+                                    <div className="font-mono text-slate-200">{fmt(s?.mean)} ± {fmt(s?.std)}</div>
+                                    <div className="text-[9px] text-slate-500">median {fmt(s?.median)}{unit ? ` | ${unit}` : ''}</div>
+                                </td>
+                            );
+                            return (
+                                <tr key={band} className="border-t border-slate-900/80">
+                                    <td className="px-3 py-3 font-black text-emerald-400">{band}</td>
+                                    {cell(pos, 'cm⁻¹')}
+                                    {cell(fwhm, 'cm⁻¹')}
+                                    {cell(area)}
+                                    {cell(height)}
+                                    <td className="px-3 py-3 text-right font-mono text-slate-300">{cnt}</td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+
+            <div className="grid grid-cols-5 gap-2">
+                {ratioKeys.map(key => (
+                    <div key={key} className="border border-slate-850 rounded-lg bg-slate-950/40 p-3">
+                        <div className="text-[9px] font-black uppercase tracking-wider text-slate-500 truncate">{stats[key]?.label || key}</div>
+                        <div className="text-xs font-black text-cyan-400 mt-1">{fmt(stats[key]?.mean)} ± {fmt(stats[key]?.std)}</div>
+                        <div className="text-[9px] text-slate-500 mt-0.5">median {fmt(stats[key]?.median)}</div>
+                    </div>
+                ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+                {detailKeys.map(key => (
+                    <div key={key} className="border border-slate-850 rounded-lg bg-slate-950/30 p-3">
+                        <div className="flex justify-between gap-3">
+                            <div className="text-[10px] font-black uppercase text-slate-400">{stats[key]?.label || key}</div>
+                            <div className="text-[9px] font-mono text-emerald-400">{stats[key]?.reliable_count || 0} px</div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 mt-2 text-[9px]">
+                            {[['Mean', fmt(stats[key]?.mean)], ['Median', fmt(stats[key]?.median)], ['Std', fmt(stats[key]?.std)], ['P10', fmt(stats[key]?.p10)], ['P90', fmt(stats[key]?.p90)], ['NaN', stats[key]?.nan_count ?? '--']].map(([l, v]) => (
+                                <div key={l} className="bg-slate-950/50 border border-slate-900 rounded-md p-2">
+                                    <div className="font-black uppercase text-slate-600">{l}</div>
+                                    <div className="font-mono text-slate-300 mt-0.5">{v}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// ── Vector Plot (Strain / Doping Decoupling) ─────────────────────────────────
+function RgiVectorTabRgi2({ result, clusterLabels, nClusters }: { result: any; clusterLabels?: number[]; nClusters?: number }) {
+    const referenceOrigins = {
+        '532':   { G0: 1581.6, twoD0: 2669.7,  label: '532 nm (Green)' },
+        '632.8': { G0: 1581.6, twoD0: 2637.25, label: '632.8 nm (He-Ne Red)' },
+        '785':   { G0: 1581.6, twoD0: 2603.7,  label: '785 nm (NIR)' },
+    } as const;
+
+    const rawG   = result?.scientific_maps?.pos_G?.values   || [];
+    const raw2D  = result?.scientific_maps?.pos_2D?.values  || [];
+    const mask   = result?.analysis_mask || result?.interpretable_mask || result?.reliable_mask || [];
+
+    const [colorByCluster, setColorByCluster] = useState(false);
+
+    const CLUSTER_COLORS = [
+        '#38bdf8', // Cluster 0: cyan
+        '#a78bfa', // Cluster 1: purple
+        '#34d399', // Cluster 2: green
+        '#fb923c', // Cluster 3: orange
+        '#ec4899', // Cluster 4: pink
+        '#eab308', // Cluster 5: yellow
+        '#f43f5e', // Cluster 6: rose
+        '#94a3b8', // Cluster 7: slate/grey
+    ];
+
+    const { validG, valid2D, validClusterIds } = useMemo(() => {
+        const g: number[] = [], d: number[] = [];
+        const c: number[] = [];
+        const labels = clusterLabels || result?.cluster_labels || [];
+        for (let i = 0; i < Math.min(rawG.length, raw2D.length); i++) {
+            const gv = rawG[i], dv = raw2D[i];
+            const ok = mask.length === 0 ? true : mask[i] === true;
+            if (ok && gv != null && Number.isFinite(gv) && dv != null && Number.isFinite(dv)) {
+                g.push(gv);
+                d.push(dv);
+                c.push(labels[i] ?? 0);
+            }
+        }
+        return { validG: g, valid2D: d, validClusterIds: c };
+    }, [rawG, raw2D, mask, clusterLabels, result]);
+
+    const stats = useMemo(() => {
+        if (!validG.length || !valid2D.length) return null;
+        const meanG  = validG.reduce((s, v) => s + v, 0) / validG.length;
+        const mean2D = valid2D.reduce((s, v) => s + v, 0) / valid2D.length;
+        const stdG   = Math.sqrt(validG.reduce((s, v) => s + (v - meanG) ** 2, 0) / validG.length);
+        const std2D  = Math.sqrt(valid2D.reduce((s, v) => s + (v - mean2D) ** 2, 0) / valid2D.length);
+        let autoLaser: '532' | '632.8' | '785' = '532';
+        if (mean2D < 2620) autoLaser = '785';
+        else if (mean2D < 2655) autoLaser = '632.8';
+        return { meanG, mean2D, stdG, std2D, autoLaser };
+    }, [validG, valid2D]);
+
+    const [selectedLaser, setSelectedLaser] = useState<'532' | '632.8' | '785'>(stats?.autoLaser ?? '632.8');
+    useEffect(() => { if (stats?.autoLaser) setSelectedLaser(stats.autoLaser); }, [stats?.autoLaser]);
+
+    const { G0, twoD0 } = referenceOrigins[selectedLaser];
+
+    const pixelMetrics = useMemo(() => {
+        if (!validG.length || !valid2D.length) return null;
+        const strains: number[] = [], dopings: number[] = [];
+        for (let i = 0; i < validG.length; i++) {
+            const dG = validG[i] - G0, d2D = valid2D[i] - twoD0;
+            strains.push((0.7 * dG - d2D) / 90.0);
+            dopings.push((dG + 60.0 * ((0.7 * dG - d2D) / 90.0)) / 4.5);
+        }
+        const meanStrain = strains.reduce((s, v) => s + v, 0) / strains.length;
+        const meanDoping = dopings.reduce((s, v) => s + v, 0) / dopings.length;
+        const stdStrain  = Math.sqrt(strains.reduce((s, v) => s + (v - meanStrain) ** 2, 0) / strains.length);
+        const stdDoping  = Math.sqrt(dopings.reduce((s, v) => s + (v - meanDoping) ** 2, 0) / dopings.length);
+        return { meanStrain, stdStrain, meanDoping, stdDoping };
+    }, [validG, valid2D, G0, twoD0]);
+
+    const plotlyData = useMemo(() => {
+        if (!validG.length || !valid2D.length || !stats) return [];
+        const traces: any[] = [];
+        const G_min = 1580, G_max = 1600;
+        const strains = [0.2, 0.1, 0.0, -0.1, -0.2, -0.3, -0.4, -0.5, -0.6];
+        strains.forEach(eps => {
+            traces.push({ x: [G_min, G_max], y: [G_min, G_max].map(x => twoD0 - 90 * eps + 0.7 * (x - G0)), mode: 'lines', line: { color: eps === 0 ? '#3b82f6' : '#1e293b', width: eps === 0 ? 1.5 : 0.8, dash: eps === 0 ? 'solid' : 'dash' }, showlegend: false, hoverinfo: 'none' });
+            traces.push({ x: [1595], y: [twoD0 - 90 * eps + 0.7 * (1595 - G0) + 0.8], mode: 'text', text: [`${eps > 0 ? '+' : ''}${eps.toFixed(1)}`], textfont: { size: 8, color: eps === 0 ? '#3b82f6' : '#475569' }, showlegend: false, hoverinfo: 'none' });
+        });
+        const dopings = [0, 2, 4, 6, 8, 10, 12, 14, 16];
+        dopings.forEach(dop => {
+            traces.push({ x: [G_min, G_max], y: [G_min, G_max].map(x => twoD0 - 6.75 * dop + 2.2 * (x - G0)), mode: 'lines', line: { color: dop === 0 ? '#64748b' : '#0f172a', width: dop === 0 ? 1.2 : 0.6, dash: dop === 0 ? 'solid' : 'dot' }, showlegend: false, hoverinfo: 'none' });
+            const labelX = (twoD0 - 9 - twoD0 + 6.75 * dop) / 2.2 + G0;
+            if (labelX >= G_min && labelX <= G_max) traces.push({ x: [labelX], y: [twoD0 - 10.2], mode: 'text', text: [`${dop}`], textfont: { size: 8, color: dop === 0 ? '#94a3b8' : '#334155' }, showlegend: false, hoverinfo: 'none' });
+        });
+        traces.push({
+            x: validG,
+            y: valid2D,
+            type: 'scattergl',
+            mode: 'markers',
+            name: 'Pixels',
+            showlegend: false,
+            text: validClusterIds.map(cid => `Cluster ${cid}`),
+            hovertemplate: 'G: %{x:.2f} cm⁻¹<br>2D: %{y:.2f} cm⁻¹<br>%{text}<extra></extra>',
+            marker: {
+                color: colorByCluster
+                    ? validClusterIds.map(cid => CLUSTER_COLORS[cid % CLUSTER_COLORS.length])
+                    : '#06b6d4',
+                size: 4,
+                opacity: colorByCluster ? 0.45 : 0.22,
+            }
+        });
+        traces.push({ x: [stats.meanG], y: [stats.mean2D], error_x: { type: 'data', array: [stats.stdG], visible: true, color: '#f43f5e', thickness: 2, width: 4 }, error_y: { type: 'data', array: [stats.std2D], visible: true, color: '#f43f5e', thickness: 2, width: 4 }, type: 'scatter', mode: 'markers', name: 'Mean', marker: { color: '#f43f5e', size: 10, line: { color: 'white', width: 2 } } });
+        return traces;
+    }, [validG, valid2D, stats, G0, twoD0, colorByCluster, validClusterIds]);
+
+    if (!validG.length || !valid2D.length || !stats || !pixelMetrics) {
+        return <Rgi2EmptyState title="Not enough fitted pixels" body="Vector plot requires both pos_G and pos_2D map datasets." />;
+    }
+
+    return (
+        <div className="flex-1 w-full h-full flex gap-4 bg-[#050910] text-slate-300 p-4 overflow-hidden">
+            <div className="w-64 shrink-0 flex flex-col gap-4 bg-slate-950/40 border border-slate-800 rounded-2xl p-4 overflow-y-auto">
+                <div className="flex items-center gap-2"><Sliders size={14} className="text-cyan-400" /><span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Calibration</span></div>
+                <div className="flex flex-col gap-1">
+                    {(['532', '632.8', '785'] as const).map(wl => (
+                        <button key={wl} onClick={() => setSelectedLaser(wl)}
+                            className={cn('w-full px-3 py-2 rounded-xl text-xs font-bold transition-all border flex justify-between items-center', selectedLaser === wl ? 'bg-cyan-950/40 border-cyan-500/50 text-cyan-400' : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:text-white')}>
+                            <span>{referenceOrigins[wl].label}</span>
+                            {stats.autoLaser === wl && <span className="text-[8px] bg-cyan-900/60 text-cyan-300 px-1.5 py-0.5 rounded font-black uppercase">Auto</span>}
+                        </button>
+                    ))}
+                </div>
+                <div className="flex flex-col gap-2 pt-2 border-t border-slate-900">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase">Vector Styling</div>
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-400 hover:text-slate-200 select-none">
+                        <input
+                            type="checkbox"
+                            checked={colorByCluster}
+                            onChange={e => setColorByCluster(e.target.checked)}
+                            className="rounded border-slate-800 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0 w-3.5 h-3.5"
+                        />
+                        <span>Color by Cluster</span>
+                    </label>
+                    {colorByCluster && (
+                        <div className="flex flex-col gap-1 mt-1 pt-1.5 border-t border-slate-900/50">
+                            <div className="text-[8px] font-bold text-slate-500 uppercase">Cluster Legend</div>
+                            <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-1">
+                                {Array.from({ length: nClusters || 6 }).map((_, cid) => (
+                                    <div key={cid} className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                                        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: CLUSTER_COLORS[cid % CLUSTER_COLORS.length] }} />
+                                        <span className="truncate">Cluster {cid}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <div className="flex flex-col gap-2 pt-2 border-t border-slate-900">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase">Decoupling Stats</div>
+                    <div className="bg-slate-950/60 border border-slate-900 rounded-xl p-3">
+                        <span className="text-[8px] font-bold text-slate-500 uppercase">Avg Strain (ε)</span>
+                        <div className="text-sm font-black text-cyan-400 font-mono">{pixelMetrics.meanStrain >= 0 ? '+' : ''}{(pixelMetrics.meanStrain * 100).toFixed(3)}%</div>
+                        <div className="text-[8px] text-slate-500">± {(pixelMetrics.stdStrain * 100).toFixed(3)}% ({pixelMetrics.meanStrain >= 0 ? 'tensile' : 'compressive'})</div>
+                    </div>
+                    <div className="bg-slate-950/60 border border-slate-900 rounded-xl p-3">
+                        <span className="text-[8px] font-bold text-slate-500 uppercase">Avg Doping (n)</span>
+                        <div className="text-sm font-black text-slate-200 font-mono">{pixelMetrics.meanDoping.toFixed(3)}</div>
+                        <div className="text-[8px] text-slate-500">± {pixelMetrics.stdDoping.toFixed(3)} × 10¹² cm⁻²</div>
+                    </div>
+                </div>
+            </div>
+            <div className="flex-1 min-h-0 bg-slate-950/30 border border-slate-800 rounded-2xl overflow-hidden flex flex-col">
+                <div className="p-3 border-b border-slate-900/80 flex justify-between items-center">
+                    <div>
+                        <h4 className="text-[10px] font-black text-slate-300 uppercase">Strain & Doping Decoupling</h4>
+                        <p className="text-[8px] text-slate-500">{validG.length} mapped pixels · Reference: {selectedLaser} nm</p>
+                    </div>
+                </div>
+                <div className="flex-1 min-h-0 bg-[#050910]">
+                    <Plot data={plotlyData} layout={{ autosize: true, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#080d16', font: { family: 'Inter, sans-serif', size: 10, color: '#94a3b8' }, margin: { l: 55, r: 25, t: 20, b: 45 }, xaxis: { gridcolor: '#1e293b', color: '#94a3b8', range: [1580, 1600], title: { text: 'G band position (cm⁻¹)' } }, yaxis: { gridcolor: '#1e293b', color: '#94a3b8', range: [twoD0 - 20, twoD0 + 35], title: { text: '2D band position (cm⁻¹)' } }, legend: { font: { color: '#94a3b8', size: 9 }, bgcolor: 'rgba(15,23,42,0.85)', bordercolor: '#1e293b', borderwidth: 1 } } as any} config={{ displayModeBar: false, responsive: true }} useResizeHandler style={{ width: '100%', height: '100%' }} />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ── Graphene Canvas Maps ─────────────────────────────────────────────────────
+function RgiGrapheneTabRgi2({ result, mapWidth, mapHeight, nSpectra, stepSize }: { result: any; mapWidth: number; mapHeight: number; nSpectra: number; stepSize: number }) {
+    const sci = result?.scientific_maps as Record<string, { label: string; values: Array<number | null> }> || {};
+    const get = (key: string) => sci[key]?.values || [];
+    const data_D = get('height_D'), data_G = get('height_G'), data_2D = get('height_2D');
+    const ratio_2D_G = get('I2D_IG_height'), fwhm_2D = get('fwhm_2D'), ratio_D_G = get('ID_IG_height');
+    return (
+        <div className="w-full h-full overflow-auto p-2">
+            <div className="grid grid-cols-3 grid-rows-2 gap-4 w-full h-full min-h-[600px]">
+                <Rgi2GrapheneCanvas title="D Band Height" dataArr={data_D} w={mapWidth} h={mapHeight} nSpectra={nSpectra} stepSize={stepSize} cmap="Reds" vmin={0} vmax={null} colorbarLabel="Height" />
+                <Rgi2GrapheneCanvas title="G Band Height" dataArr={data_G} w={mapWidth} h={mapHeight} nSpectra={nSpectra} stepSize={stepSize} cmap="Greens" vmin={0} vmax={null} colorbarLabel="Height" />
+                <Rgi2GrapheneCanvas title="2D Band Height" dataArr={data_2D} w={mapWidth} h={mapHeight} nSpectra={nSpectra} stepSize={stepSize} cmap="Blues" vmin={0} vmax={null} colorbarLabel="Height" />
+                <Rgi2GrapheneCanvas title="I(2D)/I(G)" subtitle="monolayer indicator" dataArr={ratio_2D_G} w={mapWidth} h={mapHeight} nSpectra={nSpectra} stepSize={stepSize} cmap="custom2DG" vmin={0} vmax={3.5} colorbarLabel="Ratio" />
+                <Rgi2GrapheneCanvas title="FWHM(2D)" subtitle="crystal quality" dataArr={fwhm_2D} w={mapWidth} h={mapHeight} nSpectra={nSpectra} stepSize={stepSize} cmap="viridis" vmin={0} vmax={120} colorbarLabel="cm⁻¹" />
+                <Rgi2GrapheneCanvas title="I(D)/I(G)" subtitle="defects" dataArr={ratio_D_G} w={mapWidth} h={mapHeight} nSpectra={nSpectra} stepSize={stepSize} cmap="customDGdefects" vmin={0} vmax={1} colorbarLabel="Ratio" />
+            </div>
+        </div>
+    );
+}
+
+function Rgi2GrapheneCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize = 1, cmap, vmin, vmax, colorbarLabel }: any) {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || !dataArr) return;
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d'); if (!ctx) return;
+        const img = ctx.createImageData(w, h);
+        let min = vmin ?? 0, max = vmax ?? 1;
+        if (vmax === null) {
+            let sum = 0, cnt = 0;
+            for (let i = 0; i < dataArr.length; i++) { const v = dataArr[i]; if (v !== null && v > 0) { sum += v; cnt++; } }
+            max = (cnt > 0 ? sum / cnt : 1) * 1.25;
+        }
+        for (let i = 0; i < nSpectra; i++) {
+            const v = dataArr[i]; const x = i % w, y = Math.floor(i / w); const px = (y * w + x) * 4;
+            if (v === null || v <= 0 || isNaN(v)) { img.data[px] = 11; img.data[px+1] = 15; img.data[px+2] = 25; img.data[px+3] = 255; }
+            else { const [r, g, b] = valToRgb(v, min, max, cmap); img.data[px] = r; img.data[px+1] = g; img.data[px+2] = b; img.data[px+3] = 255; }
+        }
+        ctx.putImageData(img, 0, 0);
+    }, [dataArr, w, h, nSpectra, cmap, vmin, vmax]);
+
+    let dispMax = vmax ?? 1, dispMin = vmin ?? 0;
+    if (vmax === null && dataArr) { let s = 0, c = 0; for (const v of dataArr) if (v !== null && v > 0) { s += v; c++; } dispMax = (c > 0 ? s / c : 1) * 1.25; }
+
+    return (
+        <div className="flex flex-col w-full h-full bg-[#050910] border border-slate-850 rounded-xl p-2 items-center justify-center select-none hover:border-slate-700 transition-colors">
+            <div className="text-center mb-2">
+                <div className="text-xs font-black text-slate-200">{title}</div>
+                {subtitle && <div className="text-[9px] font-bold text-slate-500 mt-0.5">{subtitle}</div>}
+            </div>
+            <div className="flex-1 min-h-0 flex items-center justify-center w-full my-1">
+                <div className="relative border border-slate-800" style={{ height: '100%', aspectRatio: `${w}/${h}` }}>
+                    <div className="absolute left-[100%] top-0 bottom-0 pl-1.5 flex flex-row h-full">
+                        <div className="w-2 border border-slate-800 h-full" style={{ background: `linear-gradient(to top, ${getCssGradient(cmap)})` }} />
+                        <div className="flex flex-col justify-between text-[7px] font-bold text-slate-400 ml-1 relative w-6">
+                            {[0,1,2,3,4,5,6].map(i => {
+                                const val = dispMax - (i * (dispMax - dispMin) / 6);
+                                return <span key={i} className="absolute -translate-y-1/2 whitespace-nowrap" style={{ top: `${(i * 100) / 6}%` }}>{val.toFixed(1)}</span>;
+                            })}
+                        </div>
+                        {colorbarLabel && <div className="relative flex-1 w-full ml-1"><span className="absolute top-1/2 left-0 -translate-y-1/2 origin-left -rotate-90 text-[8px] font-black text-slate-500 uppercase whitespace-nowrap">{colorbarLabel}</span></div>}
+                    </div>
+                    <canvas ref={canvasRef} className="w-full h-full object-fill block absolute inset-0 z-10" />
+                </div>
+            </div>
+            <div className="text-center mt-4"><span className="text-[9px] font-black text-slate-500 uppercase">X (µm)</span></div>
+        </div>
+    );
+}
+
+// ── Analytics (server-side composite image) ───────────────────────────────────
+function RgiAnalyticsTabRgi2({ result, vaultRoot, h5Path }: { result: any; vaultRoot: string; h5Path: string }) {
+    const [monoTh, setMonoTh] = useState(1.5);
+    const [damageTh, setDamageTh] = useState(0.3);
+    const [applySnv, setApplySnv] = useState(false);
+    const [b64Image, setB64Image] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+
+    const load = useCallback(async () => {
+        if (!vaultRoot || !h5Path || !result) return;
+        setLoading(true); setB64Image(null);
+        try {
+            const sci = result.scientific_maps || {};
+            const getVal = (key: string) => (sci[key]?.values || result.results?.[key] || []).map((v: any) => v === null ? null : parseFloat(v));
+            const res = await fetch(`${SCIENCE_ENGINE_URL}/api/rgi/graphene-analytics`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vault_root: vaultRoot, h5_relative_path: h5Path, map_D_I: getVal('height_D'), map_G_I: getVal('height_G'), map_2D_I: getVal('height_2D'), map_2D_fwhm: getVal('fwhm_2D'), mono_th: monoTh, damage_th: damageTh, apply_snv: applySnv }),
+            });
+            const data = await res.json();
+            if (data?.success && data.composite_base64) setB64Image(data.composite_base64);
+            else toast.error('Failed to generate analytics image');
+        } catch (err: any) { toast.error(err.message || 'Analytics failed'); }
+        finally { setLoading(false); }
+    }, [vaultRoot, h5Path, result, monoTh, damageTh, applySnv]);
+
+    useEffect(() => { load(); }, [load]);
+
+    return (
+        <div className="flex-1 w-full h-full flex gap-4 bg-[#050910] text-slate-300 p-4 overflow-hidden">
+            <div className="w-64 shrink-0 bg-slate-950/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4">
+                <div className="flex items-center gap-2"><SlidersHorizontal size={14} className="text-emerald-400" /><span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Analytics Tuning</span></div>
+                <div className="flex flex-col gap-1.5">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-400"><span>Mono Threshold</span><span className="font-mono text-emerald-400">{monoTh.toFixed(2)}</span></div>
+                    <input type="range" min="0.5" max="3.0" step="0.05" value={monoTh} onChange={e => setMonoTh(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-900 rounded-lg accent-emerald-500" />
+                    <div className="text-[8px] text-slate-500">I(2D)/I(G) threshold for monolayer classification.</div>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-400"><span>Damage Threshold</span><span className="font-mono text-red-400">{damageTh.toFixed(2)}</span></div>
+                    <input type="range" min="0.05" max="1.0" step="0.05" value={damageTh} onChange={e => setDamageTh(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-900 rounded-lg accent-red-500" />
+                    <div className="text-[8px] text-slate-500">I(D)/I(G) threshold for defective classification.</div>
+                </div>
+                <label className="flex items-center justify-between bg-slate-900/40 border border-slate-800 rounded-xl p-3 cursor-pointer">
+                    <div><span className="text-[10px] font-bold text-slate-300">SNV Norm</span><div className="text-[8px] text-slate-500">Standard Normal Variate</div></div>
+                    <button onClick={() => setApplySnv(v => !v)} className={cn('w-8 h-4 rounded-full p-0.5 transition-colors', applySnv ? 'bg-emerald-500' : 'bg-slate-800')}>
+                        <div className={cn('w-3 h-3 bg-white rounded-full shadow transition-transform', applySnv ? 'translate-x-4' : 'translate-x-0')} />
+                    </button>
+                </label>
+                <div className="mt-auto flex flex-col gap-2">
+                    <button onClick={load} disabled={loading} className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-xl font-bold text-xs flex items-center justify-center gap-2">
+                        <RefreshCw size={12} className={cn(loading && 'animate-spin')} /> Refresh
+                    </button>
+                    <button onClick={() => { if (!b64Image) return; const a = document.createElement('a'); a.href = `data:image/png;base64,${b64Image}`; a.download = 'rgi2_analytics.png'; a.click(); }}
+                        disabled={!b64Image || loading} className={cn('w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2', b64Image && !loading ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-950 border border-slate-900 text-slate-600 cursor-not-allowed')}>
+                        <Download size={12} /> Export HQ Report
+                    </button>
+                </div>
+            </div>
+            <div className="flex-1 bg-slate-950/30 border border-slate-800 rounded-2xl flex items-center justify-center overflow-hidden">
+                {loading ? (<div className="flex flex-col items-center gap-3"><RefreshCw className="w-10 h-10 text-emerald-400 animate-spin" /><div className="text-sm font-extrabold text-slate-200">Computing RGI2 Analytics...</div></div>)
+                    : b64Image ? (<img src={`data:image/png;base64,${b64Image}`} alt="Analytics" className="w-full h-full object-contain rounded-xl p-4" />)
+                    : (<div className="flex flex-col items-center gap-3 text-slate-500"><AlertCircle className="w-12 h-12 opacity-20" /><div className="text-xs font-bold uppercase">No analytics yet</div></div>)}
+            </div>
+        </div>
+    );
+}
+
+// ── Pixel Fit Inspector ───────────────────────────────────────────────────────
+function RgiInspectTabRgi2({ result, mapWidth, mapHeight, selectedPixelIndex, setSelectedPixelIndex, pixelFitData, isLoadingPixelFit, fitError, selectedMapKey, setSelectedMapKey }: {
+    result: any; mapWidth: number; mapHeight: number;
+    selectedPixelIndex: number | null; setSelectedPixelIndex: (idx: number | null) => void;
+    pixelFitData: any; isLoadingPixelFit: boolean; fitError: string | null;
+    selectedMapKey: string; setSelectedMapKey: (k: string) => void;
+}) {
+    const [showRaw, setShowRaw] = useState(true);
+    const [showBaseline, setShowBaseline] = useState(true);
+    const [showComponents, setShowComponents] = useState(true);
+
+    const sci = useMemo(() => (result?.scientific_maps as Record<string, { label: string; values: Array<number | null> }>) || {}, [result]);
+    const scientificOptions = useMemo(() => Object.entries(sci).map(([key, p]) => ({ key, label: p.label || key.replace(/_/g, ' ') })), [sci]);
+
+    // Build map heatmap
+    const mapTrace2 = useMemo(() => {
+        if (!result) return [];
+        const z: number[][] = [], text: string[][] = [];
+        const total = result.n_spectra || 0;
+        for (let y = 0; y < mapHeight; y++) {
+            const row: number[] = [], tRow: string[] = [];
+            for (let x = 0; x < mapWidth; x++) {
+                const idx = y * mapWidth + x;
+                if (idx >= total) { row.push(NaN); tRow.push(''); continue; }
+                const val = selectedMapKey === 'r2' ? result.r2?.[idx]
+                    : selectedMapKey === 'snr' ? result.snr?.[idx]
+                    : selectedMapKey === 'rmse' ? result.rmse?.[idx]
+                    : sci[selectedMapKey]?.values?.[idx] ?? result.results?.[selectedMapKey]?.[idx];
+                row.push(val != null ? val : NaN);
+                tRow.push(`Pixel #${idx} (${x},${y})\nValue: ${val != null ? val.toFixed(3) : 'NaN'}`);
+            }
+            z.push(row); text.push(tRow);
+        }
+        return [{ z, text, type: 'heatmap', hoverinfo: 'text', colorscale: 'Viridis', showscale: true, colorbar: { tickfont: { color: '#94a3b8', size: 9 } } } as any];
+    }, [result, selectedMapKey, mapWidth, mapHeight, sci]);
+
+    const miniMapTraces = useMemo(() => {
+        const traces = [...mapTrace2];
+        if (selectedPixelIndex !== null) {
+            traces.push({ x: [selectedPixelIndex % mapWidth], y: [Math.floor(selectedPixelIndex / mapWidth)], type: 'scatter', mode: 'markers', hoverinfo: 'skip', showlegend: false, marker: { symbol: 'square-open', size: 10, line: { color: '#00ffff', width: 2 } } });
+        }
+        return traces;
+    }, [mapTrace2, selectedPixelIndex, mapWidth]);
+
+    const handleMapClick = useCallback((ev: any) => {
+        if (!ev?.points?.[0]) return;
+        const pt = ev.points[0];
+        let col = Math.floor(pt.x), row = Math.floor(pt.y);
+        if (Array.isArray(pt.pointNumber)) { row = pt.pointNumber[0]; col = pt.pointNumber[1]; }
+        row = Math.max(0, Math.min(mapHeight - 1, Math.round(row)));
+        col = Math.max(0, Math.min(mapWidth - 1, Math.round(col)));
+        const idx = row * mapWidth + col;
+        if (idx >= 0 && idx < (result?.n_spectra || 0)) setSelectedPixelIndex(idx);
+    }, [mapWidth, mapHeight, result, setSelectedPixelIndex]);
+
+    // Pixel fit traces
+    const plotTraces = useMemo(() => {
+        if (!pixelFitData?.original) return [];
+        const traces: any[] = [];
+        const origX = pixelFitData.original.map((p: any) => p.x);
+        if (showRaw) traces.push({ x: origX, y: pixelFitData.original.map((p: any) => p.y), mode: 'lines', name: 'Raw', line: { color: '#64748b', width: 1.2, dash: 'dot' } });
+        if (showBaseline && pixelFitData.baseline) traces.push({ x: origX, y: pixelFitData.baseline.map((p: any) => p.y), mode: 'lines', name: 'Baseline', line: { color: '#f97316', width: 1.2 } });
+        if (pixelFitData.corrected) traces.push({ x: origX, y: pixelFitData.corrected.map((p: any) => p.y), mode: 'lines', name: 'Corrected', line: { color: '#10b981', width: 1.8 } });
+        if (pixelFitData.best_fit) traces.push({ x: origX, y: pixelFitData.best_fit.map((p: any) => p.y), mode: 'lines', name: 'Best Fit', line: { color: '#6366f1', width: 2 } });
+        if (showComponents && pixelFitData.components) {
+            Object.entries(pixelFitData.components).forEach(([name, pts], idx) => {
+                const color = PEAK_COLORS[idx % PEAK_COLORS.length];
+                traces.push({ x: (pts as any[]).map(p => p.x), y: (pts as any[]).map(p => p.y), mode: 'lines', fill: 'tozeroy', fillcolor: `${color}10`, name: name.replace(/_/g, ' '), line: { color, width: 1.2 } });
+            });
+        }
+        return traces;
+    }, [pixelFitData, showRaw, showBaseline, showComponents]);
+
+    // Summary stats for inspect tab
+    const nTotal = result?.n_spectra || 0;
+    const failed = useMemo(() => Array.from({ length: nTotal }, (_, i) => !(result?.success_map?.[i])).filter(Boolean).length, [result, nTotal]);
+    const passed = nTotal - failed;
+
+    return (
+        <div className="flex-1 w-full h-full flex flex-col gap-3 bg-[#050910] text-slate-300 p-4 overflow-hidden min-h-[500px]">
+            <div className="grid grid-cols-4 gap-3 shrink-0">
+                {[['Failed', failed, 'red'], ['Passed', passed, 'green'], ['Total', nTotal, 'slate'], ['R2 Min', result?.r2_mean?.toFixed(4) ?? '-', 'cyan']].map(([l, v, t]) => (
+                    <div key={l as string} className={cn('rounded-xl border px-3 py-2', { red: 'border-red-900/50 text-red-400', green: 'border-emerald-900/50 text-emerald-400', slate: 'border-slate-800 text-slate-300', cyan: 'border-cyan-900/50 text-cyan-400' }[t as string])}>
+                        <div className="text-[8px] font-black uppercase opacity-60">{l}</div>
+                        <div className="mt-0.5 text-xs font-black font-mono">{String(v)}</div>
+                    </div>
+                ))}
+            </div>
+            <div className="flex-1 flex gap-4 min-h-0 border border-slate-850 rounded-2xl bg-slate-900/10 overflow-hidden">
+                <div className="w-[400px] border-r border-slate-850 flex flex-col bg-slate-950/20 shrink-0 overflow-hidden p-4 gap-3">
+                    <div className="text-[10px] font-black uppercase text-slate-400 flex justify-between shrink-0">
+                        <span>Pixel Selector Map</span>
+                        {selectedPixelIndex !== null && <span className="text-cyan-400 font-mono">X:{selectedPixelIndex % mapWidth} Y:{Math.floor(selectedPixelIndex / mapWidth)}</span>}
+                    </div>
+                    <select className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 outline-none shrink-0" value={selectedMapKey} onChange={e => setSelectedMapKey(e.target.value)}>
+                        <option value="r2">R² Quality</option>
+                        <option value="snr">SNR</option>
+                        <option value="rmse">RMSE</option>
+                        {scientificOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                    </select>
+                    <div className="flex-1 min-h-0 border border-slate-850 rounded-xl overflow-hidden bg-[#050910]">
+                        <Plot data={miniMapTraces} layout={{ autosize: true, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#020617', font: { color: '#94a3b8' }, margin: { l: 30, r: 55, t: 10, b: 20 }, xaxis: { showgrid: false }, yaxis: { showgrid: false, scaleanchor: 'x' } }} config={{ displayModeBar: false, responsive: true }} useResizeHandler style={{ width: '100%', height: '100%' }} onClick={handleMapClick} />
+                    </div>
+                </div>
+                <div className="flex-1 flex flex-col bg-slate-950/10 overflow-hidden p-4">
+                    {selectedPixelIndex === null ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-xs text-slate-500 gap-2"><Eye size={24} className="text-slate-700 animate-pulse" />Select a pixel to inspect its fit.</div>
+                    ) : isLoadingPixelFit ? (
+                        <div className="flex-1 flex items-center justify-center gap-2 text-xs text-slate-400"><Loader2 size={24} className="animate-spin text-cyan-500" />Fitting spectrum #{selectedPixelIndex}...</div>
+                    ) : fitError && !pixelFitData ? (
+                        <div className="flex-1 flex flex-col items-center justify-center gap-2 p-6 text-xs text-red-400"><AlertCircle size={24} /><span className="font-extrabold uppercase">Solver Error</span><p className="text-slate-500 text-[10px] max-w-sm text-center">{fitError}</p></div>
+                    ) : pixelFitData ? (
+                        <div className="flex-1 flex overflow-hidden gap-4 min-h-0">
+                            <div className="flex-1 flex flex-col min-w-0">
+                                <div className="flex items-center justify-between mb-2 gap-3 shrink-0">
+                                    <div className="text-[10px] font-black text-slate-200 uppercase">Spectrum #{selectedPixelIndex}</div>
+                                    <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-xl">
+                                        <label className="flex items-center gap-1.5 text-[9px] uppercase font-bold text-slate-400 cursor-pointer">
+                                            <input type="checkbox" checked={showRaw} onChange={e => setShowRaw(e.target.checked)} className="w-3 h-3" />
+                                            Raw
+                                        </label>
+                                        <label className="flex items-center gap-1.5 text-[9px] uppercase font-bold text-slate-400 cursor-pointer">
+                                            <input type="checkbox" checked={showBaseline} onChange={e => setShowBaseline(e.target.checked)} className="w-3 h-3" />
+                                            Baseline
+                                        </label>
+                                        <label className="flex items-center gap-1.5 text-[9px] uppercase font-bold text-slate-400 cursor-pointer">
+                                            <input type="checkbox" checked={showComponents} onChange={e => setShowComponents(e.target.checked)} className="w-3 h-3" />
+                                            Components
+                                        </label>
+                                    </div>
+                                </div>
+                                <div className="flex-1 min-h-0 border border-slate-900 rounded-xl overflow-hidden bg-[#050910]">
+                                    <Plot data={plotTraces} layout={{ autosize: true, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#080d16', font: { family: 'Inter, sans-serif', size: 10, color: '#94a3b8' }, margin: { l: 45, r: 15, t: 15, b: 35 }, xaxis: { gridcolor: '#1e293b', color: '#94a3b8', autorange: true }, yaxis: { gridcolor: '#1e293b', color: '#94a3b8', autorange: true } }} config={{ displayModeBar: false, responsive: true }} useResizeHandler style={{ width: '100%', height: '100%' }} />
+                                </div>
+                            </div>
+                            {pixelFitData.parameters && (
+                                <div className="w-56 flex flex-col border border-slate-900 bg-slate-950/20 rounded-xl overflow-hidden shrink-0">
+                                    <div className="bg-slate-900/40 px-3 py-2 border-b border-slate-900 flex justify-between items-center shrink-0">
+                                        <span className="text-[9px] font-black text-slate-400 uppercase">Parameters</span>
+                                        {pixelFitData.metrics?.r_squared != null && <span className="text-[10px] font-mono text-cyan-400">R²: {pixelFitData.metrics.r_squared.toFixed(4)}</span>}
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto text-[10px] bg-[#03060c]">
+                                        <table className="w-full text-left">
+                                            <thead className="sticky top-0 bg-slate-950 border-b border-slate-900 text-[8px] font-bold text-slate-500 uppercase">
+                                                <tr><th className="p-2">Name</th><th className="p-2 text-right">Value</th><th className="p-2 text-right">±</th></tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-900 font-mono text-slate-400">
+                                                {pixelFitData.parameters.map((p: any) => (
+                                                    <tr key={p.name} className="hover:bg-slate-900/30">
+                                                        <td className="p-2 font-sans text-slate-300 truncate max-w-[90px]" title={p.name}>{p.name.replace(/_/g, ' ')}</td>
+                                                        <td className="p-2 text-right text-slate-200">{p.value != null ? p.value.toFixed(2) : '-'}</td>
+                                                        <td className="p-2 text-right text-slate-600 text-[9px]">{p.stderr != null ? `±${p.stderr.toFixed(2)}` : '—'}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    ) : null}
+                </div>
+            </div>
         </div>
     );
 }
