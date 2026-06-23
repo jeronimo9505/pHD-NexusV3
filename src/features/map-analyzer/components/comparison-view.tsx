@@ -81,6 +81,16 @@ export function ComparisonView({
     const [shiftY, setShiftY] = useState<boolean>(false);
     const [yOffsetPercent, setYOffsetPercent] = useState<number>(30);
 
+    // R6G analysis state
+    const [showAnalysis, setShowAnalysis] = useState(false);
+    const [analysisData, setAnalysisData] = useState<any>(null);
+    const [analyzing, setAnalyzing] = useState(false);
+
+    // All spectra distribution cloud state
+    const [showAllSpectra, setShowAllSpectra] = useState<boolean>(false);
+    const [allSpectra, setAllSpectra] = useState<Record<string, { wavenumbers: number[]; spectra: number[][] }>>({});
+    const [loadingAll, setLoadingAll] = useState<boolean>(false);
+
     // Excitation laser reference lines visibility on G-2D plot
     const [visibleLasers, setVisibleLasers] = useState<Record<'532' | '632.8' | '785', boolean>>({
         '532': true,
@@ -186,6 +196,53 @@ export function ComparisonView({
         
         return () => { isMounted = false; };
     }, [compareFiles, vaultRoot]);
+
+    // Fetch all individual spectra for all active files when toggle is active
+    useEffect(() => {
+        if (!showAllSpectra || compareFiles.length === 0) return;
+
+        let isMounted = true;
+        
+        async function fetchAllSpectra() {
+            // Only fetch for files that are not already loaded in allSpectra
+            const filesToFetch = compareFiles.filter(file => !allSpectra[file.id]);
+            if (filesToFetch.length === 0) return;
+
+            setLoadingAll(true);
+            try {
+                const newAllSpectra = { ...allSpectra };
+                await Promise.all(filesToFetch.map(async (file) => {
+                    const res = await fetch(`${SCIENCE_ENGINE_URL}/api/map/all-spectra`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            vault_root: vaultRoot,
+                            h5_relative_path: file.h5_relative_path
+                        })
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.success) {
+                            newAllSpectra[file.id] = {
+                                wavenumbers: data.wavenumbers,
+                                spectra: data.spectra
+                            };
+                        }
+                    }
+                }));
+                if (isMounted) {
+                    setAllSpectra(newAllSpectra);
+                }
+            } catch (err) {
+                console.error("Error loading all spectra:", err);
+            } finally {
+                if (isMounted) setLoadingAll(false);
+            }
+        }
+
+        fetchAllSpectra();
+        return () => { isMounted = false; };
+    }, [showAllSpectra, compareFiles, vaultRoot, allSpectra]);
 
     // Fetch RGI scientific results (G/2D positions & mask) for vector plot
     useEffect(() => {
@@ -396,21 +453,77 @@ export function ComparisonView({
         });
     }, [activeFiles, spectra, normalization, shiftY, yOffsetPercent]);
 
+    // Sum of spectra count of all active files
+    const totalActiveSpectra = useMemo(() => {
+        return activeFiles.reduce((sum, file) => sum + (file.n_spectra || 1), 0);
+    }, [activeFiles]);
+
     // Plotly traces for standard spectra
     const plotlyData = useMemo(() => {
-        return processedSpectra.map((item) => ({
-            x: item.x,
-            y: item.finalY,
-            type: 'scatter' as const,
-            mode: 'lines' as const,
-            name: formatLegendText(item.file),
-            line: {
-                color: colors[item.index % colors.length],
-                width: 2
-            },
-            hoverinfo: 'none' as const
-        }));
-    }, [processedSpectra]);
+        const traces: any[] = [];
+
+        // 1. Add individual spectra first (if enabled and loaded) to render them in the background
+        if (showAllSpectra) {
+            processedSpectra.forEach((item) => {
+                const fileData = allSpectra[item.file.id];
+                if (fileData) {
+                    const { wavenumbers, spectra: rawSpectra } = fileData;
+                    rawSpectra.forEach((rawY) => {
+                        // Normalize rawY using the same method
+                        let processedY: number[] = [];
+                        if (normalization === 'max') {
+                            const maxY = Math.max(...rawY);
+                            processedY = maxY > 0 ? rawY.map(v => v / maxY) : rawY;
+                        } else if (normalization === 'snv') {
+                            const mean = rawY.reduce((sum, val) => sum + val, 0) / rawY.length;
+                            const variance = rawY.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / rawY.length;
+                            const stdDev = Math.sqrt(variance);
+                            processedY = stdDev > 0 ? rawY.map(v => (v - mean) / stdDev) : rawY.map(v => v - mean);
+                        } else {
+                            processedY = [...rawY];
+                        }
+
+                        // Shift Y
+                        const finalY = processedY.map(v => v + item.shiftAmount);
+
+                        traces.push({
+                            x: wavenumbers,
+                            y: finalY,
+                            type: 'scatter' as const,
+                            mode: 'lines' as const,
+                            line: {
+                                color: colors[item.index % colors.length],
+                                width: 0.8
+                            },
+                            opacity: 0.28,
+                            showlegend: false,
+                            hoverinfo: 'skip' as const,
+                            name: `${formatLegendText(item.file)} (indiv)`
+                        });
+                    });
+                }
+            });
+        }
+
+        // 2. Add representative spectra (drawn on top)
+        processedSpectra.forEach((item) => {
+            traces.push({
+                x: item.x,
+                y: item.finalY,
+                type: 'scatter' as const,
+                mode: 'lines' as const,
+                name: formatLegendText(item.file),
+                line: {
+                    color: colors[item.index % colors.length],
+                    width: showAllSpectra ? 2.5 : 2.0
+                },
+                hoverinfo: 'none' as const,
+                customdata: Array(item.x.length).fill(item.file.id)
+            });
+        });
+
+        return traces;
+    }, [processedSpectra, showAllSpectra, allSpectra, normalization]);
 
     const referenceOrigins = {
         '532': { G0: 1581.6, twoD0: 2669.7 },
@@ -991,6 +1104,85 @@ export function ComparisonView({
         URL.revokeObjectURL(url);
     };
 
+    const runR6GAnalysis = async () => {
+        if (compareFiles.length === 0) return;
+        setAnalyzing(true);
+        setError(null);
+        try {
+            const res = await fetch(`${SCIENCE_ENGINE_URL}/api/analysis/r6g-statistics`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    vault_root: vaultRoot,
+                    files: compareFiles.map(file => ({
+                        id: file.id,
+                        h5_relative_path: file.h5_relative_path,
+                        name: file.name,
+                        group: customLabels[file.id] || file.sample_name || file.name.split('_')[0]
+                    }))
+                })
+            });
+            if (!res.ok) throw new Error("Fallo al obtener análisis del motor científico");
+            const data = await res.json();
+            if (data.success) {
+                setAnalysisData(data);
+                setShowAnalysis(true);
+            } else {
+                throw new Error(data.message || "Error en el análisis de picos");
+            }
+        } catch (err: any) {
+            setError(err.message || "Error ejecutando el análisis de bandas");
+        } finally {
+            setAnalyzing(false);
+        }
+    };
+
+    const downloadAnalysisReport = () => {
+        if (!analysisData) return;
+        
+        let content = `============================================================\n`;
+        content += `REPORT DE ANÁLISIS DE BANDAS R6G Y RSD%\n`;
+        content += `Generado el: ${new Date().toLocaleString()}\n`;
+        content += `Vault Root: ${vaultRoot}\n`;
+        content += `============================================================\n\n`;
+        
+        content += `1. ESTADÍSTICAS AGRUPADAS POR TIPO DE SUSTRATO / GRUPO\n`;
+        content += `------------------------------------------------------------\n`;
+        Object.entries(analysisData.groups).forEach(([gName, gData]: [string, any]) => {
+            content += `Grupo: ${gName}\n`;
+            Object.entries(gData).forEach(([pk, pkData]: [string, any]) => {
+                content += `  Banda ~${pk} cm-1 (n=${pkData.count} espectros):\n`;
+                content += `    Posición Media:  ${pkData.mean_pos.toFixed(4)} ± ${pkData.std_pos.toFixed(4)} cm-1 (RSD% = ${pkData.rsd_pos.toFixed(4)}%)\n`;
+                content += `    Intensidad Media: ${pkData.mean_int.toFixed(1)} ± ${pkData.std_int.toFixed(1)} a.u. (RSD% = ${pkData.rsd_int.toFixed(2)}%)\n`;
+            });
+            content += `\n`;
+        });
+        
+        content += `2. DETALLE DE ESTADÍSTICAS POR ARCHIVO / SPOT\n`;
+        content += `------------------------------------------------------------\n`;
+        analysisData.files.forEach((file: any) => {
+            content += `Archivo: ${file.name}\n`;
+            content += `Grupo: ${file.group}\n`;
+            content += `Resolución (Paso): ${file.resolution.toFixed(4)} cm-1 | N Espectros: ${file.n_spectra}\n`;
+            Object.entries(file.peaks).forEach(([pk, pkData]: [string, any]) => {
+                content += `  Banda ~${pk} cm-1:\n`;
+                content += `    Posición Media:  ${pkData.mean_pos.toFixed(4)} ± ${pkData.std_pos.toFixed(4)} cm-1 (RSD% = ${pkData.rsd_pos.toFixed(4)}%)\n`;
+                content += `    Intensidad Media: ${pkData.mean_int.toFixed(1)} ± ${pkData.std_int.toFixed(1)} a.u. (RSD% = ${pkData.rsd_int.toFixed(2)}%)\n`;
+            });
+            content += `\n`;
+        });
+        
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `Reporte_Analisis_R6G_RSD_${new Date().toISOString().slice(0, 10)}.txt`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    };
+
     if (compareFiles.length === 0) {
         return (
             <div className="w-full h-full flex flex-col items-center justify-center bg-white text-slate-400 space-y-4">
@@ -1183,17 +1375,51 @@ export function ComparisonView({
                                 </div>
                             )}
                         </div>
+
+                        {/* Toggle all spectra */}
+                        <div className="flex items-center gap-2 border-l border-slate-200 pl-6">
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={showAllSpectra}
+                                    onChange={(e) => setShowAllSpectra(e.target.checked)}
+                                    className="w-4 h-4 rounded bg-slate-900 border-slate-300 accent-indigo-600 cursor-pointer"
+                                />
+                                <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+                                    Ver todos los espectros
+                                    {totalActiveSpectra > 0 && (
+                                        <span className="bg-indigo-50 text-indigo-600 text-[10px] px-1.5 py-0.5 rounded-full font-black">
+                                            {totalActiveSpectra} ss.
+                                        </span>
+                                    )}
+                                </span>
+                            </label>
+                            {loadingAll && (
+                                <RefreshCw size={12} className="animate-spin text-indigo-500 ml-1" />
+                            )}
+                        </div>
                     </div>
 
                     {/* Export Button */}
-                    <button
-                        onClick={downloadTxtSpectra}
-                        className="px-4 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5"
-                        title="Descargar todos los espectros en un archivo de texto tabulado"
-                    >
-                        <Download size={14} />
-                        Descargar .txt
-                    </button>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={runR6GAnalysis}
+                            disabled={analyzing}
+                            className="px-4 py-1.5 bg-violet-600 hover:bg-violet-750 text-white rounded-lg text-xs font-bold transition-colors shadow-md flex items-center gap-1.5"
+                            title="Analizar posición e intensidad de las bandas de rodamina y calcular RSD%"
+                        >
+                            {analyzing ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                            Analizar R6G (RSD%)
+                        </button>
+                        <button
+                            onClick={downloadTxtSpectra}
+                            className="px-4 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5"
+                            title="Descargar todos los espectros en un archivo de texto tabulado"
+                        >
+                            <Download size={14} />
+                            Descargar .txt
+                        </button>
+                    </div>
                 </div>
             )}
             
@@ -1273,8 +1499,10 @@ export function ComparisonView({
                                 const rect = containerRef.current.getBoundingClientRect();
                                 
                                 const items = data.points
+                                    .filter(p => p.customdata !== undefined)
                                     .map(p => {
-                                        const item = processedSpectra[p.curveNumber];
+                                        const fileId = p.customdata as string;
+                                        const item = processedSpectra.find(s => s.file.id === fileId);
                                         const file = item?.file;
                                         const rawVal = item ? item.rawY[p.pointIndex] : null;
                                         return {
@@ -1494,6 +1722,135 @@ export function ComparisonView({
                                 <div className="bg-white border border-slate-200/80 rounded-lg p-2 mt-2 shadow-sm text-[8.5px] italic text-slate-400 font-medium select-none">
                                     Punto de origen: grafeno suspendido prístino a (1582.0, 2676.9) cm⁻¹.
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showAnalysis && analysisData && (
+                <div className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-6 overflow-y-auto">
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-100">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="text-violet-600 animate-pulse" size={18} />
+                                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">
+                                    Análisis de Bandas R6G e Uniformidad RSD%
+                                </h3>
+                            </div>
+                            <button 
+                                onClick={() => setShowAnalysis(false)}
+                                className="text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-150 p-1.5 transition-colors"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        
+                        {/* Modal Body */}
+                        <div className="flex-1 p-6 overflow-y-auto space-y-6">
+                            {/* Alert Context */}
+                            <div className="p-4 bg-violet-50/60 border border-violet-100 rounded-xl flex gap-3 text-xs text-violet-850">
+                                <Info size={16} className="text-violet-600 shrink-0 mt-0.5" />
+                                <div className="space-y-1.5 leading-relaxed">
+                                    <p className="font-bold">Información del Ajuste de Picos:</p>
+                                    <p>
+                                        Se analizó la posición e intensidad neta de los picos en cada espectro individual ajustando una función <strong>Lorentziana</strong> en los rangos <strong>[595 - 625] cm⁻¹</strong> y <strong>[755 - 790] cm⁻¹</strong>. El paso espectral (resolución) y las desviaciones se calculan sobre el conjunto de espectros de cada mapa.
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Tabla General */}
+                            <div className="space-y-3">
+                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                                    Tabla General de Estadísticas de Picos
+                                </h4>
+                                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white overflow-x-auto">
+                                    <table className="w-full text-left border-collapse text-xs min-w-[800px]">
+                                        <thead>
+                                            <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold">
+                                                <th className="p-3">Muestra / Archivo</th>
+                                                <th className="p-3">Grupo / Sustrato</th>
+                                                <th className="p-3 text-center">Banda</th>
+                                                <th className="p-3 text-center">Resolución</th>
+                                                <th className="p-3 text-center">Nº Espectros</th>
+                                                <th className="p-3">Posición Media (cm⁻¹)</th>
+                                                <th className="p-3 text-center">RSD% Posición</th>
+                                                <th className="p-3">Intensidad Media (a.u.)</th>
+                                                <th className="p-3 text-center">RSD% Intensidad</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 font-medium">
+                                            {analysisData.files.map((file: any) => {
+                                                const peakEntries = Object.entries(file.peaks);
+                                                const rowSpan = peakEntries.length;
+                                                return peakEntries.map(([pk, pkData]: [string, any], pIdx) => (
+                                                    <tr key={`${file.id}-${pk}`} className="hover:bg-slate-50/50">
+                                                        {pIdx === 0 && (
+                                                            <td className="p-3 font-bold text-slate-800 align-middle" rowSpan={rowSpan}>
+                                                                <div className="max-w-[180px] truncate" title={file.name}>
+                                                                    {file.name.replace(/\.h5$/i, '')}
+                                                                </div>
+                                                            </td>
+                                                        )}
+                                                        {pIdx === 0 && (
+                                                            <td className="p-3 text-slate-500 font-semibold align-middle" rowSpan={rowSpan}>
+                                                                {file.group}
+                                                            </td>
+                                                        )}
+                                                        <td className="p-3 text-center text-indigo-600 font-black align-middle">
+                                                            ~{pk} cm⁻¹
+                                                        </td>
+                                                        {pIdx === 0 && (
+                                                            <td className="p-3 text-center font-mono text-slate-500 align-middle" rowSpan={rowSpan}>
+                                                                {file.resolution.toFixed(4)} cm⁻¹
+                                                            </td>
+                                                        )}
+                                                        {pIdx === 0 && (
+                                                            <td className="p-3 text-center font-mono text-slate-400 align-middle" rowSpan={rowSpan}>
+                                                                {file.n_spectra}
+                                                            </td>
+                                                        )}
+                                                        <td className="p-3 font-mono text-slate-700 align-middle">
+                                                            {pkData.mean_pos.toFixed(3)} ± {pkData.std_pos.toFixed(3)}
+                                                        </td>
+                                                        <td className="p-3 text-center font-mono font-bold text-slate-700 align-middle">
+                                                            {pkData.rsd_pos.toFixed(4)}%
+                                                        </td>
+                                                        <td className="p-3 font-mono text-slate-700 align-middle">
+                                                            {Math.round(pkData.mean_int).toLocaleString()} ± {Math.round(pkData.std_int).toLocaleString()}
+                                                        </td>
+                                                        <td className="p-3 text-center font-mono font-bold text-violet-750 align-middle">
+                                                            {pkData.rsd_int.toFixed(2)}%
+                                                        </td>
+                                                    </tr>
+                                                ));
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {/* Modal Footer */}
+                        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between shrink-0">
+                            <span className="text-[10px] text-slate-400 font-bold">
+                                PhD Nexus Core Science Engine • Ajuste Lorentziano de Picos
+                            </span>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={downloadAnalysisReport}
+                                    className="px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5"
+                                >
+                                    <Download size={14} />
+                                    Descargar Reporte .txt
+                                </button>
+                                <button
+                                    onClick={() => setShowAnalysis(false)}
+                                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors shadow-md"
+                                >
+                                    Cerrar
+                                </button>
                             </div>
                         </div>
                     </div>
