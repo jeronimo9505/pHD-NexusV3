@@ -80,7 +80,14 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
         const visibleModules = currentGroup?.visible_modules;
         if (visibleModules && Array.isArray(visibleModules)) {
             links = links.filter(link => {
-                const moduleKey = link.label.toLowerCase().replace(/\s+/g, '-');
+                const label = link.label;
+                const moduleKey = label.toLowerCase().replace(/\s+/g, '-');
+                
+                // Settings is always visible to group managers (owners, supervisors, labmanagers)
+                if (label === 'Settings' && (isOwner || role === 'supervisor' || role === 'labmanager')) {
+                    return true;
+                }
+                
                 // Even if allowed by group, web clients can never see map-analyzer
                 if (moduleKey === 'map-analyzer' && !isDesktopClient) {
                     return false;
@@ -90,6 +97,12 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
         } else {
             links = links.filter(link => {
                 const label = link.label;
+                
+                // Settings is always visible to group managers (owners, supervisors, labmanagers)
+                if (label === 'Settings' && (isOwner || role === 'supervisor' || role === 'labmanager')) {
+                    return true;
+                }
+                
                 if (isDesktopClient) {
                     return label === 'Samples' || label === 'Map Analyzer';
                 } else {
