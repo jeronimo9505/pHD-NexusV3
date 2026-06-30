@@ -246,7 +246,7 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
                                 </div>
                                 <div className="border-t border-slate-700">
                                     <Link
-                                        href="/dashboard"
+                                        href="/dashboard?noredirect=true"
                                         onClick={() => setShowGroups(false)}
                                         className="flex items-center gap-3 px-3 py-2.5 text-emerald-400 hover:bg-slate-700/50 transition-colors"
                                     >
@@ -259,7 +259,7 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
                     </div>
                 ) : (
                     <Link
-                        href="/dashboard"
+                        href="/dashboard?noredirect=true"
                         title="Switch Group"
                         className="flex justify-center p-3 rounded-lg hover:bg-slate-800 transition-colors mb-2"
                     >
