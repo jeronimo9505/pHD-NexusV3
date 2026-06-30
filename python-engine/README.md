@@ -42,16 +42,22 @@ open http://127.0.0.1:8765/docs
 | Lightnovo | `.mrspectra` | `readers/lightnovo.py` |
 | *More coming* | `.csv`, `.spc`, `.sp` | *TBD* |
 
-### Lightnovo `.mrspectra` Metadata Ingestion
-The `.mrspectra` files are raw binary float32 files without embedded metadata. The Science Engine automatically looks for a companion `.md` markdown file in the same directory. To auto-fill metadata, create a markdown table containing any of these keys:
-* **Laser Power**: `LaserPower_mW` (or any key containing `power`). Supports automatic unit detection and conversion.
-* **Accumulations / Repetitions**: `RepetitionCount`, `RepetitionsCount` (or any key containing `repetition`, `accumulations`, or `acquisitions`).
-* **Laser Wavelength**: `LaserWavelength_nm` (or containing `laserwavelength` / `laser` / `wavelength`).
-* **Exposure / Acquisition Time**: `Exposure_ms` (or containing `exposure` / `time`).
-* **Objective**: `Objective` (or containing `objective`).
-* **Device Serial**: `DeviceSN` (or containing `devicesn` / `sn` / `serial`).
-* **Laser Current**: `LaserCurrent_mA` (or containing `current`).
-* **Gain**: `GainMultiplier` (or containing `gain`).
+### Carga de archivos Lightnovo
+
+Lightnovo genera mediciones como una pareja de archivos: `NOMBRE.json` y `NOMBRE.mrspectra`. El `.json` contiene metadatos, ejes, unidades y la forma del arreglo; el `.mrspectra` contiene las intensidades Raman como `float32` little-endian. Si el usuario selecciona solo uno de los dos, la aplicación busca automáticamente el archivo complementario con el mismo nombre base en la misma carpeta. Antes de reconstruir la matriz, se valida que `producto(Shape) * 4` coincida con el tamaño del `.mrspectra`.
+
+#### Fallback (Metadatos por Markdown / Nombre de archivo)
+Si no se encuentra un archivo `.json` complementario:
+* El cargador intentará parsear los parámetros del nombre de archivo.
+* Se buscará un archivo `.md` de acompañamiento en el mismo directorio. Si contiene una tabla con el nombre del espectro, se autocompletarán los siguientes metadatos:
+  * **Laser Power**: `LaserPower_mW`
+  * **Accumulations / Repetitions**: `RepetitionCount`
+  * **Laser Wavelength**: `LaserWavelength_nm`
+  * **Exposure / Acquisition Time**: `Exposure_ms`
+  * **Objective**: `Objective`
+  * **Device Serial**: `DeviceSN`
+  * **Laser Current**: `LaserCurrent_mA`
+  * **Gain**: `GainMultiplier`
 
 ## HDF5 File Structure
 

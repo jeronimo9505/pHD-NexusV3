@@ -366,6 +366,11 @@ export function CharacterizationModal({
                         if (meta.accumulations) setOrAddField('Accumulations', meta.accumulations, '');
                         if (meta.objective) setOrAddField('Objective', meta.objective, 'x');
                         if (meta.spots) setOrAddField('Spots', meta.spots, 'ixj');
+                        if (meta.x_size_um !== undefined && meta.y_size_um !== undefined) {
+                            setOrAddField('Size', `${Math.round(meta.y_size_um)}x${Math.round(meta.x_size_um)}`, 'µm');
+                        } else if (meta.x_size_um !== undefined) {
+                            setOrAddField('Size', `${Math.round(meta.x_size_um)}`, 'µm');
+                        }
                         if (meta.device_sn) setOrAddField('Device SN', meta.device_sn, '');
                         if (meta.laser_current_mA) setOrAddField('Laser Current', meta.laser_current_mA, 'mA');
                         if (meta.gain_multiplier) setOrAddField('Gain Multiplier', meta.gain_multiplier, '');
@@ -482,6 +487,11 @@ export function CharacterizationModal({
                     if (meta.accumulations) setOrAddField('Accumulations', meta.accumulations, '');
                     if (meta.objective) setOrAddField('Objective', meta.objective, 'x');
                     if (meta.spots) setOrAddField('Spots', meta.spots, 'ixj');
+                    if (meta.x_size_um !== undefined && meta.y_size_um !== undefined) {
+                        setOrAddField('Size', `${Math.round(meta.y_size_um)}x${Math.round(meta.x_size_um)}`, 'µm');
+                    } else if (meta.x_size_um !== undefined) {
+                        setOrAddField('Size', `${Math.round(meta.x_size_um)}`, 'µm');
+                    }
                     if (meta.device_sn) setOrAddField('Device SN', meta.device_sn, '');
                     if (meta.laser_current_mA) setOrAddField('Laser Current', meta.laser_current_mA, 'mA');
                     if (meta.gain_multiplier) setOrAddField('Gain Multiplier', meta.gain_multiplier, '');

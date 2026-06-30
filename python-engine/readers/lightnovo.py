@@ -144,10 +144,153 @@ def parse_markdown_metadata(dir_path: Path, target_name: str) -> dict:
 def read_mrspectra(path: Path) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """
     Parse a Lightnovo Raman .mrspectra file.
-    Expects data in float32 little-endian, shaped as Y x X x Channel x SpectralPoint (2 channels, 1101 points).
+    If a companion .json file exists, it uses it to extract metadata, shape, and axes.
+    Otherwise, it falls back to filename/markdown parsing and automatic shape inference.
     """
+    import json
+    
+    path = Path(path)
     raw = np.fromfile(path, dtype="<f4")
     
+    json_path = path.with_suffix(".json")
+    
+    metadata = {}
+    
+    if json_path.exists():
+        try:
+            with open(json_path, "r", encoding="utf-8", errors="replace") as f:
+                json_data = json.load(f)
+                
+            dims = json_data.get("spectraDimensions", {})
+            shape = [int(x) for x in dims.get("Shape", [])]
+            labels = list(dims.get("Labels", []))
+            units = list(dims.get("Units", []))
+            axes_coords = dims.get("AxesCoords", [])
+            
+            expected_size = int(np.prod(shape))
+            if raw.size != expected_size:
+                raise ValueError(
+                    f"File size ({raw.size} floats) does not match shape {shape} ({expected_size} floats) declared in JSON."
+                )
+                
+            data = raw.reshape(shape)
+            
+            # Extract Wavenumbers
+            if "Wavenumber" in labels:
+                wn_idx = labels.index("Wavenumber")
+                wavenumbers = np.array(axes_coords[wn_idx], dtype=np.float32)
+            else:
+                n_points = shape[-1]
+                wavenumbers = np.arange(n_points, dtype=np.float32)
+                
+            # Extract Intensities (slicing Channel 0 if present)
+            ch_idx = labels.index("Channel") if "Channel" in labels else -1
+            if ch_idx != -1:
+                slices = [slice(None)] * len(shape)
+                slices[ch_idx] = 0
+                data_sliced = data[tuple(slices)]
+                remaining_labels = [labels[i] for i in range(len(labels)) if i != ch_idx]
+            else:
+                data_sliced = data
+                remaining_labels = labels
+                
+            if "Wavenumber" in remaining_labels:
+                wn_in_sliced_idx = remaining_labels.index("Wavenumber")
+                dim_order = [i for i in range(len(remaining_labels)) if i != wn_in_sliced_idx] + [wn_in_sliced_idx]
+                data_transposed = data_sliced.transpose(dim_order)
+                intensities = data_transposed.reshape(-1, data_transposed.shape[-1])
+            else:
+                intensities = data_sliced.reshape(-1, data_sliced.shape[-1])
+                
+            # Populate metadata from JSON
+            laser_settings = json_data.get("LaserSettings", {})
+            if laser_settings:
+                metadata["device_sn"] = str(laser_settings.get("DeviceSN", ""))
+                metadata["laser_wavelength_nm"] = laser_settings.get("LaserWavelength_nm")
+                exposure_ms = laser_settings.get("Exposure_ms")
+                if exposure_ms is not None:
+                    metadata["exposure_ms"] = float(exposure_ms)
+                    metadata["integration_time_s"] = float(exposure_ms) / 1000.0
+                metadata["gain_multiplier"] = laser_settings.get("GainMultiplier")
+                metadata["raw_gain"] = laser_settings.get("RawGain")
+                metadata["laser_current_mA"] = laser_settings.get("LaserCurrent_mA")
+                laser_power_mw = laser_settings.get("LaserPower_mW")
+                if laser_power_mw is not None:
+                    metadata["laser_power_mw"] = float(laser_power_mw)
+                    metadata["laser_power_uw"] = float(laser_power_mw) * 1000.0
+                metadata["accumulations"] = laser_settings.get("RepetitionCount")
+                
+            metadata["started_timestamp"] = json_data.get("startedTimestamp", "")
+            metadata["finished_timestamp"] = json_data.get("finishedTimestamp", "")
+            metadata["scan_completed"] = bool(json_data.get("scanCompleted", False))
+            if metadata.get("started_timestamp"):
+                metadata["measured_at"] = metadata["started_timestamp"]
+                
+            # Spatial dimensions
+            y_idx = labels.index("Y") if "Y" in labels else -1
+            x_idx = labels.index("X") if "X" in labels else -1
+            
+            if y_idx != -1 and x_idx != -1:
+                map_height = shape[y_idx]
+                map_width = shape[x_idx]
+                metadata["map_height"] = map_height
+                metadata["map_width"] = map_width
+                metadata["spots"] = f"{map_height}x{map_width}"
+                metadata["n_spectra"] = map_height * map_width
+                
+                # Also store coordinates in metadata
+                y_coords = axes_coords[y_idx]
+                x_coords = axes_coords[x_idx]
+                metadata["y_coords"] = y_coords
+                metadata["x_coords"] = x_coords
+                
+                # Compute physical sizes and steps
+                if len(x_coords) > 0:
+                    x_size_mm = float(max(x_coords) - min(x_coords))
+                    metadata["x_size_mm"] = x_size_mm
+                    metadata["x_size_um"] = x_size_mm * 1000.0
+                    if len(x_coords) > 1:
+                        x_step_mm = x_size_mm / (len(x_coords) - 1)
+                        metadata["x_step_mm"] = x_step_mm
+                        metadata["x_step_um"] = x_step_mm * 1000.0
+                    else:
+                        metadata["x_step_mm"] = 0.0
+                        metadata["x_step_um"] = 0.0
+                        
+                if len(y_coords) > 0:
+                    y_size_mm = float(max(y_coords) - min(y_coords))
+                    metadata["y_size_mm"] = y_size_mm
+                    metadata["y_size_um"] = y_size_mm * 1000.0
+                    if len(y_coords) > 1:
+                        y_step_mm = y_size_mm / (len(y_coords) - 1)
+                        metadata["y_step_mm"] = y_step_mm
+                        metadata["y_step_um"] = y_step_mm * 1000.0
+                    else:
+                        metadata["y_step_mm"] = 0.0
+                        metadata["y_step_um"] = 0.0
+            else:
+                metadata["n_spectra"] = intensities.shape[0]
+                metadata["spots"] = f"{intensities.shape[0]}x1"
+                
+            metadata["total_points"] = len(wavenumbers)
+            metadata["wavenumber_min"] = float(np.min(wavenumbers))
+            metadata["wavenumber_max"] = float(np.max(wavenumbers))
+            metadata["source_format"] = "mrspectra"
+            
+            # Merge dimensions for reference
+            metadata["spectra_dimensions"] = {
+                "shape": shape,
+                "labels": labels,
+                "units": units
+            }
+            
+            return wavenumbers, intensities, metadata
+            
+        except Exception as e:
+            # Log error and fall back
+            print(f"Error parsing companion JSON file {json_path}: {e}")
+            
+    # --- FALLBACK TO NO-JSON LOGIC ---
     n_channels = 2
     n_points = 1101
     values_per_pixel = n_channels * n_points
