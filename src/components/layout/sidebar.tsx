@@ -59,7 +59,7 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
     const isSysAdmin = systemRole === 'admin';
     const currentGroup = groups.find(g => g.id === groupId);
 
-    const links = [
+    let links = [
         { href: `/${groupId}/dashboard`, label: 'Dashboard', icon: Home },
         { href: `/${groupId}/logbook`, label: 'Logbook', icon: NotebookPen },
         { href: `/${groupId}/drive-reports`, label: 'Drive Reports', icon: FileText },
@@ -73,6 +73,17 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
 
     if (isDesktopClient) {
         links.splice(3, 0, { href: `/${groupId}/map-analyzer`, label: 'Map Analyzer', icon: Map });
+    }
+
+    if (!isSysAdmin) {
+        links = links.filter(link => {
+            const label = link.label;
+            if (isDesktopClient) {
+                return label === 'Samples' || label === 'Map Analyzer';
+            } else {
+                return label === 'Samples';
+            }
+        });
     }
 
     const handleSignOut = async () => {
@@ -137,8 +148,8 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
                     );
                 })}
 
-                {/* Nexus AI — only for group owner */}
-                {isOwner && (
+                {/* Nexus AI — only for group owner who is also system admin */}
+                {(isOwner && isSysAdmin) && (
                     <>
                         <div className={cn("border-t border-slate-800 my-2", collapsed && "mx-1")} />
                         <Link
