@@ -15,6 +15,7 @@ import os
 
 from readers.witec import read_witec_txt
 from readers.matlab import read_matlab_mat
+from readers.lightnovo import read_mrspectra
 from processor import convert_to_h5, generate_preview, get_representative_spectrum
 import h5py
 import numpy as np
@@ -81,6 +82,7 @@ class IngestResponse(BaseModel):
     wavenumber_range: Optional[list] = None
     n_points: Optional[int] = None
     n_spectra: Optional[int] = None
+    metadata: Optional[dict] = None
     message: str
 
 
@@ -134,7 +136,7 @@ async def ingest_file(request: IngestRequest):
     
     # Check if we should do generic copy (no H5 conversion)
     is_raman = request.technique and request.technique.lower() in ["raman", "sers"]
-    should_do_generic = request.is_generic or not is_raman or ext not in [".txt", ".mat"]
+    should_do_generic = request.is_generic or not is_raman or ext not in [".txt", ".mat", ".mrspectra"]
 
     if should_do_generic:
         from processor import copy_file_to_vault
@@ -157,6 +159,8 @@ async def ingest_file(request: IngestRequest):
             wavenumbers, intensities, metadata = read_witec_txt(source_path)
         elif ext == ".mat":
             wavenumbers, intensities, metadata = read_matlab_mat(source_path)
+        elif ext == ".mrspectra":
+            wavenumbers, intensities, metadata = read_mrspectra(source_path)
         else:
             # This shouldn't be reached due to should_do_generic check above, but for safety:
             raise HTTPException(status_code=400, detail=f"Unsupported spectral format: {ext}")
@@ -174,13 +178,18 @@ async def ingest_file(request: IngestRequest):
         "laser_wavelength_nm": request.laser_wavelength_nm or metadata.get("laser_wavelength_nm", 0),
         "laser_power_uw": request.laser_power_uw or metadata.get("laser_power_uw", 0.0),
         "integration_time_s": request.integration_time_s or metadata.get("integration_time_s", 0.0),
-        "accumulations": request.accumulations or 1,
+        "accumulations": request.accumulations if request.accumulations is not None and request.accumulations > 1 else metadata.get("accumulations", request.accumulations or 1),
         "technique": request.technique or "raman",
         "source_format": ext.lstrip("."),
         "original_filename": source_path.name,
         "measured_at": request.measured_at or "",
         "parameters": request.parameters or {},
     }
+
+    # Merge other parsed metadata keys
+    for k, v in metadata.items():
+        if k not in full_metadata and v is not None:
+            full_metadata[k] = v
 
     # Convert to HDF5 and organize in vault
     try:
@@ -206,6 +215,7 @@ async def ingest_file(request: IngestRequest):
         wavenumber_range=[float(wavenumbers.min()), float(wavenumbers.max())],
         n_points=len(wavenumbers),
         n_spectra=1 if intensities.ndim == 1 else intensities.shape[0],
+        metadata=full_metadata,
         message=f"Successfully ingested {source_path.name} → {relative_path}"
     )
 
@@ -330,6 +340,7 @@ async def ingest_group_files(request: IngestGroupRequest):
         wavenumber_range=[float(target_wn.min()), float(target_wn.max())],
         n_points=len(target_wn),
         n_spectra=n_total_spectra,
+        metadata=full_metadata,
         message=f"Successfully grouped and ingested {len(request.file_paths)} files into {relative_path}"
     )
 

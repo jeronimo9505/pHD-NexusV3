@@ -260,7 +260,7 @@ export function CharacterizationModal({
                 multiple: true,
                 title: 'Select Raw Data File(s)',
                 filters: (type === 'Raman' || type === 'SERS') 
-                    ? [{ name: 'Data Files', extensions: ['txt', 'mat', 'csv', 'h5', 'hdf5'] }]
+                    ? [{ name: 'Data Files', extensions: ['txt', 'mat', 'csv', 'h5', 'hdf5', 'mrspectra'] }]
                     : undefined
             });
             if (selected) {
@@ -335,6 +335,47 @@ export function CharacterizationModal({
                     points: result.n_points,
                     spectra: result.n_spectra
                 };
+
+                if (result.metadata) {
+                    const meta = result.metadata;
+                    if (meta.equipment && !equipment) {
+                        setEquipment(meta.equipment);
+                    }
+                    setDataFields(prev => {
+                        const updated = [...prev];
+                        const setOrAddField = (key: string, val: any, unit: string) => {
+                            if (val === undefined || val === null || val === '') return;
+                            const cleanKey = key.toLowerCase().replace(/[\s_-]/g, '');
+                            const idx = updated.findIndex(f => f.key.toLowerCase().replace(/[\s_-]/g, '') === cleanKey);
+                            if (idx >= 0) {
+                                if (!updated[idx].value) {
+                                    updated[idx].value = String(val);
+                                    if (unit) updated[idx].unit = unit;
+                                }
+                            } else {
+                                updated.push({ key, value: String(val), unit });
+                            }
+                        };
+                        
+                        if (meta.analyte) setOrAddField('Analyte', meta.analyte, '');
+                        if (meta.laser_wavelength_nm) setOrAddField('Laser', meta.laser_wavelength_nm, 'nm');
+                        if (meta.laser_power_mw) setOrAddField('Power', meta.laser_power_mw, 'mW');
+                        else if (meta.laser_power_uw) setOrAddField('Power', meta.laser_power_uw, 'µW');
+                        if (meta.integration_time_s) setOrAddField('Acquisition Time', meta.integration_time_s, 's');
+                        else if (meta.exposure_ms) setOrAddField('Acquisition Time', meta.exposure_ms / 1000, 's');
+                        if (meta.accumulations) setOrAddField('Accumulations', meta.accumulations, '');
+                        if (meta.objective) setOrAddField('Objective', meta.objective, 'x');
+                        if (meta.spots) setOrAddField('Spots', meta.spots, 'ixj');
+                        if (meta.device_sn) setOrAddField('Device SN', meta.device_sn, '');
+                        if (meta.laser_current_mA) setOrAddField('Laser Current', meta.laser_current_mA, 'mA');
+                        if (meta.gain_multiplier) setOrAddField('Gain Multiplier', meta.gain_multiplier, '');
+                        
+                        if (updated.length > 1 && updated[0].key === '' && updated[0].value === '') {
+                            updated.shift();
+                        }
+                        return updated;
+                    });
+                }
             }
 
             setH5RelativePaths(Array.from(new Set(newH5Paths)));
@@ -410,6 +451,48 @@ export function CharacterizationModal({
             setFileMetadata(newMeta);
 
             if (result.preview_base64) setSpectrumPreviewB64(result.preview_base64);
+
+            if (result.metadata) {
+                const meta = result.metadata;
+                if (meta.equipment && !equipment) {
+                    setEquipment(meta.equipment);
+                }
+                setDataFields(prev => {
+                    const updated = [...prev];
+                    const setOrAddField = (key: string, val: any, unit: string) => {
+                        if (val === undefined || val === null || val === '') return;
+                        const cleanKey = key.toLowerCase().replace(/[\s_-]/g, '');
+                        const idx = updated.findIndex(f => f.key.toLowerCase().replace(/[\s_-]/g, '') === cleanKey);
+                        if (idx >= 0) {
+                            if (!updated[idx].value) {
+                                updated[idx].value = String(val);
+                                if (unit) updated[idx].unit = unit;
+                            }
+                        } else {
+                            updated.push({ key, value: String(val), unit });
+                        }
+                    };
+                    
+                    if (meta.analyte) setOrAddField('Analyte', meta.analyte, '');
+                    if (meta.laser_wavelength_nm) setOrAddField('Laser', meta.laser_wavelength_nm, 'nm');
+                    if (meta.laser_power_mw) setOrAddField('Power', meta.laser_power_mw, 'mW');
+                    else if (meta.laser_power_uw) setOrAddField('Power', meta.laser_power_uw, 'µW');
+                    if (meta.integration_time_s) setOrAddField('Acquisition Time', meta.integration_time_s, 's');
+                    else if (meta.exposure_ms) setOrAddField('Acquisition Time', meta.exposure_ms / 1000, 's');
+                    if (meta.accumulations) setOrAddField('Accumulations', meta.accumulations, '');
+                    if (meta.objective) setOrAddField('Objective', meta.objective, 'x');
+                    if (meta.spots) setOrAddField('Spots', meta.spots, 'ixj');
+                    if (meta.device_sn) setOrAddField('Device SN', meta.device_sn, '');
+                    if (meta.laser_current_mA) setOrAddField('Laser Current', meta.laser_current_mA, 'mA');
+                    if (meta.gain_multiplier) setOrAddField('Gain Multiplier', meta.gain_multiplier, '');
+                    
+                    if (updated.length > 1 && updated[0].key === '' && updated[0].value === '') {
+                        updated.shift();
+                    }
+                    return updated;
+                });
+            }
+
             setIngestStatus('success');
             toast.success(`Ingested and grouped ${localFilePaths.length} files into 1 file: ${result.h5_relative_path.split('/').pop()}`);
         } catch (err: any) {
