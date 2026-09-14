@@ -1926,8 +1926,6 @@ def fitting_auto_detect(request: FittingAutoDetectRequest):
     return {"success": True, "peaks": detected}
 
 
-<<<<<<< HEAD
-=======
 class R6GAnalysisFile(BaseModel):
     id: str
     h5_relative_path: str
@@ -2122,7 +2120,6 @@ def get_r6g_analysis_statistics(request: R6GAnalysisRequest):
     }
 
 
->>>>>>> v3/main
 @app.post("/api/fitting/save-config")
 def fitting_save_config(request: FittingFitRequest):
     import json

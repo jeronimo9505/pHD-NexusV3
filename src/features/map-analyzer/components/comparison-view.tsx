@@ -1104,8 +1104,6 @@ export function ComparisonView({
         URL.revokeObjectURL(url);
     };
 
-<<<<<<< HEAD
-=======
     const runR6GAnalysis = async () => {
         if (compareFiles.length === 0) return;
         setAnalyzing(true);
@@ -1185,7 +1183,6 @@ export function ComparisonView({
         URL.revokeObjectURL(url);
     };
 
->>>>>>> v3/main
     if (compareFiles.length === 0) {
         return (
             <div className="w-full h-full flex flex-col items-center justify-center bg-white text-slate-400 space-y-4">
@@ -1378,19 +1375,6 @@ export function ComparisonView({
                                 </div>
                             )}
                         </div>
-<<<<<<< HEAD
-                    </div>
-
-                    {/* Export Button */}
-                    <button
-                        onClick={downloadTxtSpectra}
-                        className="px-4 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5"
-                        title="Descargar todos los espectros en un archivo de texto tabulado"
-                    >
-                        <Download size={14} />
-                        Descargar .txt
-                    </button>
-=======
 
                         {/* Toggle all spectra */}
                         <div className="flex items-center gap-2 border-l border-slate-200 pl-6">
@@ -1436,7 +1420,6 @@ export function ComparisonView({
                             Descargar .txt
                         </button>
                     </div>
->>>>>>> v3/main
                 </div>
             )}
             
@@ -1516,15 +1499,10 @@ export function ComparisonView({
                                 const rect = containerRef.current.getBoundingClientRect();
                                 
                                 const items = data.points
-<<<<<<< HEAD
-                                    .map(p => {
-                                        const item = processedSpectra[p.curveNumber];
-=======
                                     .filter(p => p.customdata !== undefined)
                                     .map(p => {
                                         const fileId = p.customdata as string;
                                         const item = processedSpectra.find(s => s.file.id === fileId);
->>>>>>> v3/main
                                         const file = item?.file;
                                         const rawVal = item ? item.rawY[p.pointIndex] : null;
                                         return {
@@ -1749,9 +1727,6 @@ export function ComparisonView({
                     </div>
                 </div>
             )}
-<<<<<<< HEAD
-=======
-
             {showAnalysis && analysisData && (
                 <div className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-6 overflow-y-auto">
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -1880,7 +1855,6 @@ export function ComparisonView({
                     </div>
                 </div>
             )}
->>>>>>> v3/main
         </div>
     );
 }
