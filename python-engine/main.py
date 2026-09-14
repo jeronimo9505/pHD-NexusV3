@@ -15,6 +15,7 @@ import os
 
 from readers.witec import read_witec_txt
 from readers.matlab import read_matlab_mat
+from readers.lightnovo import read_mrspectra
 from processor import convert_to_h5, generate_preview, get_representative_spectrum
 import h5py
 import numpy as np
@@ -81,6 +82,7 @@ class IngestResponse(BaseModel):
     wavenumber_range: Optional[list] = None
     n_points: Optional[int] = None
     n_spectra: Optional[int] = None
+    metadata: Optional[dict] = None
     message: str
 
 
@@ -134,7 +136,7 @@ async def ingest_file(request: IngestRequest):
     
     # Check if we should do generic copy (no H5 conversion)
     is_raman = request.technique and request.technique.lower() in ["raman", "sers"]
-    should_do_generic = request.is_generic or not is_raman or ext not in [".txt", ".mat"]
+    should_do_generic = request.is_generic or not is_raman or ext not in [".txt", ".mat", ".mrspectra"]
 
     if should_do_generic:
         from processor import copy_file_to_vault
@@ -157,6 +159,8 @@ async def ingest_file(request: IngestRequest):
             wavenumbers, intensities, metadata = read_witec_txt(source_path)
         elif ext == ".mat":
             wavenumbers, intensities, metadata = read_matlab_mat(source_path)
+        elif ext == ".mrspectra":
+            wavenumbers, intensities, metadata = read_mrspectra(source_path)
         else:
             # This shouldn't be reached due to should_do_generic check above, but for safety:
             raise HTTPException(status_code=400, detail=f"Unsupported spectral format: {ext}")
@@ -174,13 +178,18 @@ async def ingest_file(request: IngestRequest):
         "laser_wavelength_nm": request.laser_wavelength_nm or metadata.get("laser_wavelength_nm", 0),
         "laser_power_uw": request.laser_power_uw or metadata.get("laser_power_uw", 0.0),
         "integration_time_s": request.integration_time_s or metadata.get("integration_time_s", 0.0),
-        "accumulations": request.accumulations or 1,
+        "accumulations": request.accumulations if request.accumulations is not None and request.accumulations > 1 else metadata.get("accumulations", request.accumulations or 1),
         "technique": request.technique or "raman",
         "source_format": ext.lstrip("."),
         "original_filename": source_path.name,
         "measured_at": request.measured_at or "",
         "parameters": request.parameters or {},
     }
+
+    # Merge other parsed metadata keys
+    for k, v in metadata.items():
+        if k not in full_metadata and v is not None:
+            full_metadata[k] = v
 
     # Convert to HDF5 and organize in vault
     try:
@@ -206,6 +215,7 @@ async def ingest_file(request: IngestRequest):
         wavenumber_range=[float(wavenumbers.min()), float(wavenumbers.max())],
         n_points=len(wavenumbers),
         n_spectra=1 if intensities.ndim == 1 else intensities.shape[0],
+        metadata=full_metadata,
         message=f"Successfully ingested {source_path.name} → {relative_path}"
     )
 
@@ -330,6 +340,7 @@ async def ingest_group_files(request: IngestGroupRequest):
         wavenumber_range=[float(target_wn.min()), float(target_wn.max())],
         n_points=len(target_wn),
         n_spectra=n_total_spectra,
+        metadata=full_metadata,
         message=f"Successfully grouped and ingested {len(request.file_paths)} files into {relative_path}"
     )
 
@@ -862,6 +873,42 @@ def get_map_representative_spectrum(request: RepSpectrumRequest):
         "success": True,
         "data": [{"x": float(pt["x"]), "y": float(pt["y"])} for pt in rep_specs]
     }
+
+class AllSpectraRequest(BaseModel):
+    vault_root: str
+    h5_relative_path: str
+
+@app.post("/api/map/all-spectra")
+def get_map_all_spectra(request: AllSpectraRequest):
+    """
+    Returns all individual spectra of a single HDF5 file.
+    """
+    import h5py
+    from pathlib import Path
+    
+    path = Path(request.vault_root) / request.h5_relative_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="HDF5 file not found")
+        
+    try:
+        with h5py.File(path, "r") as f:
+            if "spectrum" not in f:
+                raise HTTPException(status_code=404, detail="Spectrum dataset not found in HDF5 file")
+            wavenumbers = f["/spectrum/wavenumbers"][:].tolist()
+            intensities = f["/spectrum/intensities"][:]
+            
+            if intensities.ndim == 1:
+                all_y = [intensities.tolist()]
+            else:
+                all_y = intensities.tolist()
+                
+            return {
+                "success": True,
+                "wavenumbers": wavenumbers,
+                "spectra": all_y
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read all spectra: {str(e)}")
 
 class PipelinePreviewRequest(BaseModel):
     vault_root: str
@@ -1879,6 +1926,203 @@ def fitting_auto_detect(request: FittingAutoDetectRequest):
     return {"success": True, "peaks": detected}
 
 
+<<<<<<< HEAD
+=======
+class R6GAnalysisFile(BaseModel):
+    id: str
+    h5_relative_path: str
+    name: str
+    group: str
+
+class R6GAnalysisRequest(BaseModel):
+    vault_root: str
+    files: list[R6GAnalysisFile]
+
+@app.post("/api/analysis/r6g-statistics")
+def get_r6g_analysis_statistics(request: R6GAnalysisRequest):
+    import h5py
+    import glob
+    import scipy.optimize as opt
+    
+    vault_root = Path(request.vault_root)
+    peak_ranges = {
+        "611": (595, 625),
+        "774": (755, 790)
+    }
+
+    def lorentzian(x, amp, center, fwhm, background):
+        gamma = fwhm / 2.0
+        return background + amp * (gamma**2) / ((x - center)**2 + gamma**2)
+
+    def fit_peak_lorentzian(x, y, search_range):
+        mask = (x >= search_range[0]) & (x <= search_range[1])
+        x_sub = x[mask]
+        y_sub = y[mask]
+        
+        if len(x_sub) < 4:
+            return None, None
+            
+        bg_guess = np.min(y_sub)
+        amp_guess = np.max(y_sub) - bg_guess
+        idx_max = np.argmax(y_sub)
+        center_guess_sub = x_sub[idx_max]
+        fwhm_guess = 10.0
+        
+        p0 = [amp_guess, center_guess_sub, fwhm_guess, bg_guess]
+        bounds = (
+            [0.0, search_range[0], 1.0, 0.0],
+            [amp_guess * 10, search_range[1], 40.0, np.max(y_sub)]
+        )
+        
+        try:
+            popt, _ = opt.curve_fit(lorentzian, x_sub, y_sub, p0=p0, bounds=bounds, maxfev=2000)
+            return float(popt[1]), float(popt[0])
+        except:
+            center = fit_peak_parabolic(x_sub, y_sub)
+            intensity = float(np.max(y_sub) - np.min(y_sub))
+            return center, intensity
+
+    def fit_peak_parabolic(x_sub, y_sub):
+        if len(x_sub) < 3:
+            return None
+        idx_max = np.argmax(y_sub)
+        if idx_max == 0 or idx_max == len(y_sub) - 1:
+            return float(x_sub[idx_max])
+            
+        x_fit = x_sub[idx_max-1 : idx_max+2]
+        y_fit = y_sub[idx_max-1 : idx_max+2]
+        
+        coeffs = np.polyfit(x_fit, y_fit, 2)
+        a, b, c = coeffs
+        if a < 0:
+            return float(-b / (2 * a))
+        else:
+            return float(x_sub[idx_max])
+
+    all_file_stats = []
+    grouped_vals = {}
+
+    for f_info in request.files:
+        rel_path = f_info.h5_relative_path
+        abs_path = vault_root / rel_path
+        
+        if not abs_path.exists():
+            folder = Path(rel_path).parent
+            name_pattern = Path(rel_path).name
+            clean_pattern = name_pattern.replace("70W", "*").replace("50x50m", "*").replace("70µW", "*").replace("70W", "*")
+            matching_files = glob.glob(str(vault_root / folder / clean_pattern))
+            if matching_files:
+                abs_path = Path(matching_files[0])
+            else:
+                continue
+
+        try:
+            with h5py.File(abs_path, "r") as f:
+                wavenumbers = f["/spectrum/wavenumbers"][:]
+                intensities = f["/spectrum/intensities"][:]
+                
+            diffs = np.diff(wavenumbers)
+            avg_step = float(np.mean(diffs))
+            
+            results = {"611_pos": [], "611_int": [], "774_pos": [], "774_int": []}
+            
+            if intensities.ndim == 1:
+                intensities = intensities.reshape(1, -1)
+                
+            n_spectra = intensities.shape[0]
+            
+            for i in range(n_spectra):
+                y = intensities[i]
+                
+                # Peak 611
+                p611, int611 = fit_peak_lorentzian(wavenumbers, y, peak_ranges["611"])
+                if p611 is not None and int611 is not None:
+                    results["611_pos"].append(p611)
+                    results["611_int"].append(int611)
+                    
+                # Peak 774
+                p774, int774 = fit_peak_lorentzian(wavenumbers, y, peak_ranges["774"])
+                if p774 is not None and int774 is not None:
+                    results["774_pos"].append(p774)
+                    results["774_int"].append(int774)
+            
+            file_summary = {
+                "id": f_info.id,
+                "name": f_info.name,
+                "group": f_info.group,
+                "resolution": avg_step,
+                "n_spectra": n_spectra,
+                "peaks": {}
+            }
+            
+            for pk in ["611", "774"]:
+                pos = results[f"{pk}_pos"]
+                ints = results[f"{pk}_int"]
+                
+                if pos:
+                    m_pos = float(np.mean(pos))
+                    s_pos = float(np.std(pos))
+                    rsd_pos = float((s_pos / m_pos) * 100) if m_pos > 0 else 0.0
+                    
+                    m_int = float(np.mean(ints))
+                    s_int = float(np.std(ints))
+                    rsd_int = float((s_int / m_int) * 100) if m_int > 0 else 0.0
+                    
+                    file_summary["peaks"][pk] = {
+                        "mean_pos": m_pos,
+                        "std_pos": s_pos,
+                        "rsd_pos": rsd_pos,
+                        "mean_int": m_int,
+                        "std_int": s_int,
+                        "rsd_int": rsd_int
+                    }
+                    
+                    g = f_info.group
+                    if g not in grouped_vals:
+                        grouped_vals[g] = {"611_pos": [], "611_int": [], "774_pos": [], "774_int": []}
+                    grouped_vals[g][f"{pk}_pos"].extend(pos)
+                    grouped_vals[g][f"{pk}_int"].extend(ints)
+                    
+            all_file_stats.append(file_summary)
+            
+        except Exception as e:
+            print(f"Error analyzing file {abs_path}: {e}")
+            continue
+
+    grouped_summary = {}
+    for g_name, data in grouped_vals.items():
+        g_summary = {}
+        for pk in ["611", "774"]:
+            pos = data[f"{pk}_pos"]
+            ints = data[f"{pk}_int"]
+            if pos:
+                m_pos = float(np.mean(pos))
+                s_pos = float(np.std(pos))
+                rsd_pos = float((s_pos / m_pos) * 100) if m_pos > 0 else 0.0
+                
+                m_int = float(np.mean(ints))
+                s_int = float(np.std(ints))
+                rsd_int = float((s_int / m_int) * 100) if m_int > 0 else 0.0
+                
+                g_summary[pk] = {
+                    "count": len(pos),
+                    "mean_pos": m_pos,
+                    "std_pos": s_pos,
+                    "rsd_pos": rsd_pos,
+                    "mean_int": m_int,
+                    "std_int": s_int,
+                    "rsd_int": rsd_int
+                }
+        grouped_summary[g_name] = g_summary
+
+    return {
+        "success": True,
+        "files": all_file_stats,
+        "groups": grouped_summary
+    }
+
+
+>>>>>>> v3/main
 @app.post("/api/fitting/save-config")
 def fitting_save_config(request: FittingFitRequest):
     import json

@@ -51,3 +51,5 @@ __pycache__/
 debug_webhook.ts
 Nueva carpeta/
 .gemini/
+scratch/test_vault/
+*.h5

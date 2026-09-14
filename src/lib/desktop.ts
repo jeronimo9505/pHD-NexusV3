@@ -51,6 +51,7 @@ export type IngestResponse = {
     wavenumber_range?: [number, number];
     n_points?: number;
     n_spectra?: number;
+    metadata?: Record<string, any>;
     message: string;
 };
 

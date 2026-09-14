@@ -23,7 +23,7 @@ export default async function GroupLayout(props: GroupLayoutProps) {
         getSystemRole(supabase, userId),
         userId
             ? supabase.from('group_members')
-                .select('group_id, groups(id, name, code)')
+                .select('group_id, groups(id, name, code, visible_modules)')
                 .eq('user_id', userId)
                 .order('created_at', { ascending: false })
             : Promise.resolve({ data: [] }),
@@ -46,7 +46,7 @@ export default async function GroupLayout(props: GroupLayoutProps) {
     }
 
     // Deduplicate groups by id
-    const groupsMap = new Map<string, { id: string; name: string; code: string }>();
+    const groupsMap = new Map<string, { id: string; name: string; code: string; visible_modules?: string[] | null }>();
     if (membershipsData.data) {
         for (const m of membershipsData.data as any[]) {
             if (m.groups && !groupsMap.has(m.groups.id)) {

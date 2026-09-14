@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS groups (
     description TEXT,
     code TEXT UNIQUE NOT NULL,
     created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+    visible_modules TEXT[],
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

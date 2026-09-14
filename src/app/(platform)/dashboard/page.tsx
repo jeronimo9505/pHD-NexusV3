@@ -3,7 +3,14 @@ import { redirect } from "next/navigation";
 import { DashboardClient } from "./DashboardClient";
 import { getAllGroupsAction } from "@/features/groups/actions";
 
-export default async function DashboardRoot() {
+interface PageProps {
+    searchParams: Promise<{ noredirect?: string }>;
+}
+
+export default async function DashboardRoot({ searchParams }: PageProps) {
+    const params = await searchParams;
+    const noRedirect = params?.noredirect === 'true';
+
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -25,8 +32,9 @@ export default async function DashboardRoot() {
     // User's active groups
     const myGroups = (allGroups ?? []).filter(g => g.memberStatus === 'active');
 
-    // Auto-redirect to default group if set and user is an active member
-    if (defaultGroupId && myGroups.some(g => g.id === defaultGroupId)) {
+    // Auto-redirect to default group if set and user is an active member,
+    // UNLESS noredirect=true is specified.
+    if (!noRedirect && defaultGroupId && myGroups.some(g => g.id === defaultGroupId)) {
         redirect(`/${defaultGroupId}/dashboard`);
     }
 

@@ -33,6 +33,7 @@ interface GroupInfo {
     id: string;
     name: string;
     code: string;
+    visible_modules?: string[] | null;
 }
 
 interface SidebarProps {
@@ -59,7 +60,7 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
     const isSysAdmin = systemRole === 'admin';
     const currentGroup = groups.find(g => g.id === groupId);
 
-    const links = [
+    let links = [
         { href: `/${groupId}/dashboard`, label: 'Dashboard', icon: Home },
         { href: `/${groupId}/logbook`, label: 'Logbook', icon: NotebookPen },
         { href: `/${groupId}/drive-reports`, label: 'Drive Reports', icon: FileText },
@@ -73,6 +74,42 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
 
     if (isDesktopClient) {
         links.splice(3, 0, { href: `/${groupId}/map-analyzer`, label: 'Map Analyzer', icon: Map });
+    }
+
+    if (!isSysAdmin) {
+        const visibleModules = currentGroup?.visible_modules;
+        if (visibleModules && Array.isArray(visibleModules)) {
+            links = links.filter(link => {
+                const label = link.label;
+                const moduleKey = label.toLowerCase().replace(/\s+/g, '-');
+                
+                // Settings is always visible to group managers (owners, supervisors, labmanagers)
+                if (label === 'Settings' && (isOwner || role === 'supervisor' || role === 'labmanager')) {
+                    return true;
+                }
+                
+                // Even if allowed by group, web clients can never see map-analyzer
+                if (moduleKey === 'map-analyzer' && !isDesktopClient) {
+                    return false;
+                }
+                return visibleModules.includes(moduleKey);
+            });
+        } else {
+            links = links.filter(link => {
+                const label = link.label;
+                
+                // Settings is always visible to group managers (owners, supervisors, labmanagers)
+                if (label === 'Settings' && (isOwner || role === 'supervisor' || role === 'labmanager')) {
+                    return true;
+                }
+                
+                if (isDesktopClient) {
+                    return label === 'Samples' || label === 'Map Analyzer';
+                } else {
+                    return label === 'Samples';
+                }
+            });
+        }
     }
 
     const handleSignOut = async () => {
@@ -137,8 +174,8 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
                     );
                 })}
 
-                {/* Nexus AI — only for group owner */}
-                {isOwner && (
+                {/* Nexus AI — only for group owner who is also system admin */}
+                {(isOwner && isSysAdmin) && (
                     <>
                         <div className={cn("border-t border-slate-800 my-2", collapsed && "mx-1")} />
                         <Link
@@ -235,7 +272,7 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
                                 </div>
                                 <div className="border-t border-slate-700">
                                     <Link
-                                        href="/dashboard"
+                                        href="/dashboard?noredirect=true"
                                         onClick={() => setShowGroups(false)}
                                         className="flex items-center gap-3 px-3 py-2.5 text-emerald-400 hover:bg-slate-700/50 transition-colors"
                                     >
@@ -248,7 +285,7 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
                     </div>
                 ) : (
                     <Link
-                        href="/dashboard"
+                        href="/dashboard?noredirect=true"
                         title="Switch Group"
                         className="flex justify-center p-3 rounded-lg hover:bg-slate-800 transition-colors mb-2"
                     >

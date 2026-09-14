@@ -104,8 +104,8 @@ export async function createLogbookAction(input: {
             // Helper to update IDs based on new prefix to avoid unique constraint violations
             const updateIds = (val: string | null) => {
                 if (!val || !oldPrefix) return val;
-                if (val.startsWith(`${oldPrefix}-`)) {
-                    return val.replace(`${oldPrefix}-`, `${input.prefix}-`);
+                if (val.startsWith(oldPrefix)) {
+                    return input.prefix + val.slice(oldPrefix.length);
                 }
                 return val;
             };
@@ -119,6 +119,7 @@ export async function createLogbookAction(input: {
                     name: s.name,
                     description: s.description,
                     parent_id: s.parent_id ? (oldToNewIdMap[s.parent_id] || null) : null,
+                    level: s.level,
                     type: s.type,
                     status: s.status,
                     attributes: s.attributes,
@@ -286,10 +287,10 @@ export async function createSampleAction(input: CreateSampleInput, logbookId: st
         const parentCode = parent?.sample_code || `${LOGBOOK_PREFIX}?`;
         level = (parent?.level ?? 0) + 1;
 
-        // Count siblings of this parent
-        const { count: siblingCount } = await supabase
+        // Fetch sibling samples to find the next unused index safely (preventing collisions if siblings are deleted)
+        const { data: siblingSamples } = await supabase
             .from('samples')
-            .select('*', { count: 'exact', head: true })
+            .select('sample_code')
             .eq('parent_id', input.parent_id);
 
         let genPrefix = 'c';
@@ -299,17 +300,29 @@ export async function createSampleAction(input: CreateSampleInput, logbookId: st
             genPrefix = `${level - 1}g`;
         }
 
-        const nextIndex = (siblingCount || 0) + 1;
+        const regex = new RegExp(`-${genPrefix}(\\d+)$`);
+        const indexes = (siblingSamples || [])
+            .map(s => {
+                const match = s.sample_code?.match(regex);
+                return match ? parseInt(match[1], 10) : 0;
+            });
+        const nextIndex = Math.max(...indexes, 0) + 1;
         sampleCode = `${parentCode}-${genPrefix}${nextIndex}`;
     } else {
-        // Stock (root): LOGBOOK_PREFIX + next count
-        const { count: rootCount } = await supabase
+        // Stock (root): LOGBOOK_PREFIX + next count (calculated robustly using max index to prevent collisions)
+        const { data: rootSamples } = await supabase
             .from('samples')
-            .select('*', { count: 'exact', head: true })
+            .select('sample_code')
             .eq('logbook_id', logbookId)
             .is('parent_id', null);
 
-        const nextIndex = (rootCount || 0) + 1;
+        const regex = new RegExp(`^${LOGBOOK_PREFIX}(\\d+)$`);
+        const indexes = (rootSamples || [])
+            .map(s => {
+                const match = s.sample_code?.match(regex);
+                return match ? parseInt(match[1], 10) : 0;
+            });
+        const nextIndex = Math.max(...indexes, 0) + 1;
         sampleCode = `${LOGBOOK_PREFIX}${nextIndex}`;
     }
 
@@ -320,6 +333,7 @@ export async function createSampleAction(input: CreateSampleInput, logbookId: st
         name: name,
         sample_code: sampleCode,
         parent_id: input.parent_id,
+        level: level,
         type: input.type,
         status: 'active',
         attributes: input.attributes,
