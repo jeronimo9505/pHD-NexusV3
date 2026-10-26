@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getUser } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 
 export async function createCalendarEventAction(data: {
@@ -17,7 +17,7 @@ export async function createCalendarEventAction(data: {
     attendees?: string[];
 }) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { error, data: created } = await supabase
@@ -69,7 +69,7 @@ export async function updateCalendarEventAction(
     }
 ) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { error } = await supabase

@@ -1,5 +1,7 @@
 "use client";
 
+import dynamic from 'next/dynamic';
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
     Search, 
@@ -42,7 +44,7 @@ import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import { ScientificText } from '@/components/ScientificText';
-import NotionLogbook from './NotionLogbook';
+const NotionLogbook = dynamic(() => import('./NotionLogbook'));
 
 const scrollbarStyles = `
   .custom-scroll::-webkit-scrollbar { width: 4px; }
@@ -72,13 +74,13 @@ function MediaGallery({ files, onImageClick, onDeleteMedia }: { files: any[], on
                         <div onClick={() => onImageClick(url, isVideo ? 'video' : 'image')} className="w-full h-full">
                             {isVideo ? (
                                 <div className="w-full h-full bg-black/40 flex items-center justify-center relative">
-                                    <video className="w-full h-full object-cover opacity-50"><source src={url} type="video/mp4" /></video>
+                                    <video preload="none" className="w-full h-full object-cover opacity-50"><source src={url} type="video/mp4" /></video>
                                     <div className="absolute inset-0 flex items-center justify-center">
                                         <div className="w-10 h-10 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 hover:scale-110 transition-transform"><Play size={18} className="text-white fill-white ml-0.5" /></div>
                                     </div>
                                 </div>
                             ) : (
-                                <img src={url} className="w-full h-full object-cover opacity-90 group-hover/media:opacity-100 transition-all" />
+                                <img loading="lazy" decoding="async" alt="Logbook attachment" src={url} className="w-full h-full object-cover opacity-90 group-hover/media:opacity-100 transition-all" />
                             )}
                         </div>
                         <button onClick={(e) => { e.stopPropagation(); onDeleteMedia(f.parent_entry_id); }} className="absolute top-2.5 right-2.5 p-2 bg-black/70 backdrop-blur-md rounded-full text-white/40 hover:text-red-400 opacity-0 group-hover/media:opacity-100 transition-all z-10 border border-white/10"><Trash2 size={12} /></button>

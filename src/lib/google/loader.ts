@@ -1,66 +1,39 @@
-export const loadGoogleScripts = () => {
-    if (typeof window === 'undefined') return Promise.resolve();
+let scriptsPromise: Promise<void> | null = null;
 
-    // Singleton promise to prevent multiple loads
-    if ((window as any)._googleScriptsLoadingPromise) {
-        return (window as any)._googleScriptsLoadingPromise;
-    }
-
-    const loadPromise = new Promise<void>((resolve, reject) => {
-        // Check if already loaded
-        if ((window as any).gapi && (window as any).google?.accounts) {
-            resolve();
-            return;
-        }
-
-        let gapiLoaded = false;
-        let gisLoaded = false;
-
-        const checkDone = () => {
-            if (gapiLoaded && gisLoaded) resolve();
+function loadScript(src: string, isReady: () => boolean): Promise<void> {
+    if (isReady()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        let settled = false;
+        const finish = (error?: Error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            script.onload = null;
+            script.onerror = null;
+            if (error) { script.remove(); reject(error); }
+            else resolve();
         };
-
-        // Load GAPI
-        if (!(window as any).gapi) {
-            const script = document.createElement('script');
-            script.src = 'https://apis.google.com/js/api.js';
-            script.async = true;
-            script.defer = true;
-            script.onload = () => {
-                gapiLoaded = true;
-                checkDone();
-            };
-            script.onerror = (e) => {
-                console.error("GAPI load error", e);
-                reject(e);
-            };
-            document.body.appendChild(script);
-        } else {
-            gapiLoaded = true;
-        }
-
-        // Load GIS
-        if (!(window as any).google?.accounts) {
-            const script = document.createElement('script');
-            script.src = 'https://accounts.google.com/gsi/client';
-            script.async = true;
-            script.defer = true;
-            script.onload = () => {
-                gisLoaded = true;
-                checkDone();
-            };
-            script.onerror = (e) => {
-                console.error("GIS load error", e);
-                reject(e);
-            };
-            document.body.appendChild(script);
-        } else {
-            gisLoaded = true;
-        }
-
-        checkDone();
+        const timer = setTimeout(() => finish(new Error('Google scripts timed out')), 15_000);
+        script.src = src;
+        script.async = true;
+        script.defer = true;
+        script.onload = () => finish(isReady() ? undefined : new Error('Google API unavailable'));
+        script.onerror = () => finish(new Error('Could not load Google API'));
+        document.body.appendChild(script);
     });
+}
 
-    (window as any)._googleScriptsLoadingPromise = loadPromise;
-    return loadPromise;
-};
+export function loadGoogleScripts(): Promise<void> {
+    if (typeof window === 'undefined') return Promise.resolve();
+    if (scriptsPromise) return scriptsPromise;
+    scriptsPromise = Promise.all([
+        loadScript('https://apis.google.com/js/api.js', () => Boolean((window as any).gapi)),
+        loadScript('https://accounts.google.com/gsi/client', () => Boolean((window as any).google?.accounts)),
+    ]).then(() => undefined).catch(error => {
+        // A transient outage must not poison every later attempt in this tab.
+        scriptsPromise = null;
+        throw error;
+    });
+    return scriptsPromise;
+}

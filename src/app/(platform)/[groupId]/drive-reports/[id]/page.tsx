@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { ReportDetail } from "@/features/drive-reports/components/report-detail";
 import { notFound } from "next/navigation";
 import { DriveReport } from "@/features/drive-reports/types";
@@ -28,7 +28,7 @@ export default async function ReportDetailPage({
         notFound();
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     return (
         <ReportDetail

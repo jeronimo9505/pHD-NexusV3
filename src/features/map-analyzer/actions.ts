@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
 export async function getRamanWorkspacesAction(groupId: string) {
@@ -26,7 +26,7 @@ export async function saveRamanWorkspaceAction(input: {
     const supabase = await createClient();
     
     // Get current user for created_by
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     
     const payload: any = {
         group_id: input.group_id,
@@ -98,7 +98,7 @@ export async function savePipelineTemplateAction(input: {
     id?: string;
 }) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     const payload: any = {
         group_id: input.group_id,

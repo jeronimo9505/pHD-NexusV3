@@ -218,7 +218,7 @@ export function ActivityLogModal({ isOpen, onClose, groupId }: ActivityLogModalP
                                             </p>
                                             {detail && (
                                                 <div className="mt-2 text-xs text-slate-500 bg-white border border-slate-100 rounded-lg p-2.5 italic">
-                                                    "{detail}"
+                                                    &quot;{detail}&quot;
                                                 </div>
                                             )}
                                         </div>

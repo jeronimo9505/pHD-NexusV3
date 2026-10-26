@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { logActivity } from "@/lib/activity-log";
@@ -96,7 +96,7 @@ export async function getGoogleOAuthUrlAction(clientOrigin?: string, isPopup: bo
 
 export async function logVisitAction(groupId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     if (!user) return { error: "Unauthorized" };
 

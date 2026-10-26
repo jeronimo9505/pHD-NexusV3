@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { getRegularReportAction } from "@/features/regular-reports/actions";
 import { ReportDetail } from "@/features/regular-reports/components/report-detail";
 import { notFound } from "next/navigation";
@@ -10,7 +10,7 @@ export default async function ReportDetailPage({
 }) {
     const { groupId, id } = await params;
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     const { data: report, error } = await getRegularReportAction(id);
 

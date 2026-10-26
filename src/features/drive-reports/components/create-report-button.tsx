@@ -1,11 +1,13 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import { useState, useRef, useEffect } from 'react';
-import { CreateReportModal } from './create-report-modal';
+const CreateReportModal = dynamic(() => import('./create-report-modal').then(module => module.CreateReportModal));
 import { Plus, FileText, Presentation, StickyNote, ChevronDown, Link2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReportType } from '../types';
-import { DriveFileSelectorModal } from './drive-file-selector-modal';
+const DriveFileSelectorModal = dynamic(() => import('./drive-file-selector-modal').then(module => module.DriveFileSelectorModal));
 import { toast } from 'sonner';
 import { createDriveReportAction } from '../actions';
 
@@ -184,20 +186,20 @@ export function CreateReportButton({
                 )}
             </div>
 
-            <CreateReportModal
+            {isOpen && (<CreateReportModal
                 groupId={groupId}
                 isOpen={isOpen}
                 onClose={() => setIsOpen(false)}
                 driveSettings={driveSettings}
                 initialType={selectedType}
-            />
+            />)}
 
-            <DriveFileSelectorModal
+            {isLinkingFile && (<DriveFileSelectorModal
                 isOpen={isLinkingFile}
                 onClose={() => setIsLinkingFile(false)}
                 onSelect={handleFileSelected}
                 driveSettings={driveSettings}
-            />
+            />)}
         </>
     );
 }

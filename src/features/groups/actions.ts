@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { redirect } from "next/navigation";
@@ -29,7 +29,7 @@ export async function createGroupAction(formData: FormData) {
         return { error: 'Validation failed' };
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     // Generate a random code (simple implementation for now)
@@ -70,7 +70,7 @@ export async function joinGroupAction(formData: FormData) {
     const validation = joinGroupSchema.safeParse({ code });
     if (!validation.success) return { error: 'Invalid code' };
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     // Find group
@@ -122,7 +122,7 @@ export async function updateGroupAction(formData: FormData) {
     if (!validation.success) return { error: 'Validation failed' };
 
     // Auth Check
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     // RBAC Check (Must be admin)
@@ -168,7 +168,7 @@ export async function updateMemberRoleAction(formData: FormData) {
     if (!validation.success) return { error: 'Validation failed' };
 
     // Auth & Permission Check (Ideally refactor this into a reusable checks function)
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { data: currentUserMember } = await supabase.from('group_members')
@@ -200,7 +200,7 @@ export async function removeMemberAction(formData: FormData) {
     if (!groupId || !userId) return { error: 'Missing data' };
 
     // Auth & Permission Check
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { data: currentUserMember } = await supabase.from('group_members')
@@ -257,7 +257,7 @@ export async function updateDriveSettingsAction(formData: FormData) {
     if (!validation.success) return { error: 'Validation failed' };
 
     // Auth Check
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     // RBAC Check
@@ -311,7 +311,7 @@ export async function updateAISettingsAction(formData: FormData) {
     if (!validation.success) return { error: 'Validation failed' };
 
     // Auth Check
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     // RBAC Check
@@ -343,7 +343,7 @@ export async function updateAISettingsAction(formData: FormData) {
 // ─── SEARCH PLATFORM USERS (for invite) ──────────────────────────
 export async function searchPlatformUsersAction(searchQuery: string, groupId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     // Permission check
@@ -380,7 +380,7 @@ export async function searchPlatformUsersAction(searchQuery: string, groupId: st
 // ─── INVITE MEMBER TO GROUP ──────────────────────────────────────
 export async function inviteMemberAction(groupId: string, targetUserId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     // Permission check
@@ -419,7 +419,7 @@ export async function inviteMemberAction(groupId: string, targetUserId: string) 
 // ─── DEFAULT GROUP PREFERENCE ─────────────────────────────────────
 export async function setDefaultGroupAction(groupId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { error } = await supabase
@@ -434,7 +434,7 @@ export async function setDefaultGroupAction(groupId: string) {
 
 export async function clearDefaultGroupAction() {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { error } = await supabase
@@ -450,7 +450,7 @@ export async function clearDefaultGroupAction() {
 // ─── GROUP DISCOVERY ──────────────────────────────────────────────
 export async function getAllGroupsAction() {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized', data: [] };
 
     // Fetch all groups with owner profile
@@ -485,7 +485,7 @@ export async function getAllGroupsAction() {
 // ─── REQUEST TO JOIN ──────────────────────────────────────────────
 export async function requestJoinGroupAction(groupId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     // Check not already member/pending
@@ -515,7 +515,7 @@ export async function requestJoinGroupAction(groupId: string) {
 // ─── APPROVE / REJECT JOIN REQUEST ────────────────────────────────
 export async function approveJoinRequestAction(memberId: string, groupId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { error } = await supabase
@@ -531,7 +531,7 @@ export async function approveJoinRequestAction(memberId: string, groupId: string
 
 export async function rejectJoinRequestAction(memberId: string, groupId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { error } = await supabase
@@ -547,7 +547,7 @@ export async function rejectJoinRequestAction(memberId: string, groupId: string)
 
 export async function updateGroupModulesAction(groupId: string, visibleModules: string[]) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     // Check manager or system admin permissions

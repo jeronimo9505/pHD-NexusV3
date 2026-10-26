@@ -1,11 +1,13 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import { useState, useMemo } from 'react';
 import { KnowledgeItem } from '../actions';
 import { toggleStarAction, deleteKnowledgeItemAction } from '../actions';
 import { ResourceCard } from './resource-card';
 import { ResourceRow } from './resource-row';
-import { CreateResourceDialog } from './create-resource-dialog';
+const CreateResourceDialog = dynamic(() => import('./create-resource-dialog').then(module => module.CreateResourceDialog));
 import { SyncDriveButton } from './sync-drive-button';
 import {
     Search, LayoutGrid, List, Plus, Star, FolderClosed, Library,

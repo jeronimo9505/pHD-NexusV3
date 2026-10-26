@@ -1,5 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
-import { getGroupRole, isGroupOwner, isGroupAdmin, getSystemRole } from "@/lib/auth/roles";
+import { createClient, getUser } from "@/lib/supabase/server";
+import { getGroupRole, isGroupAdmin, getSystemRole } from "@/lib/auth/roles";
 import { redirect } from "next/navigation";
 import { EditGroupForm } from "@/features/groups/components/edit-group-form";
 import { MemberList } from "@/features/groups/components/member-list";
@@ -18,19 +18,17 @@ export default async function GroupSettingsPage({
     const { groupId } = await params;
 
     // All members can access settings now
-    const role = await getGroupRole(groupId);
+    const [role, systemRole, supabase, user] = await Promise.all([getGroupRole(groupId), getSystemRole(), createClient(), getUser()]);
     if (!role) {
         redirect(`/dashboard`);
     }
 
-    const supabase = await createClient();
     const { data: group } = await supabase.from('groups').select('*').eq('id', groupId).single();
     if (!group) return <div>Group not found</div>;
 
     // Check admin-level permissions
-    const isOwner = await isGroupOwner(groupId);
+    const isOwner = group.created_by === user?.id;
     const canManage = isGroupAdmin(role) || isOwner;
-    const systemRole = await getSystemRole();
     const isSysAdmin = systemRole === 'admin';
 
     const driveSettings = group.drive_settings as { clientId?: string; apiKey?: string; folderId?: string } | undefined;

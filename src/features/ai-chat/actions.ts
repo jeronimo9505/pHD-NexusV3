@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { isGroupOwner } from "@/lib/auth/roles";
 import { GoogleGenerativeAI, FunctionDeclaration, SchemaType, Content } from "@google/generative-ai";
 import { revalidatePath } from "next/cache";
@@ -9,7 +9,7 @@ import { revalidatePath } from "next/cache";
 
 export async function getChatSessionsAction(groupId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { data, error } = await supabase
@@ -26,7 +26,7 @@ export async function getChatSessionsAction(groupId: string) {
 
 export async function getChatMessagesAction(sessionId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { data, error } = await supabase
@@ -41,7 +41,7 @@ export async function getChatMessagesAction(sessionId: string) {
 
 export async function createChatSessionAction(groupId: string, title: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { data, error } = await supabase
@@ -56,7 +56,7 @@ export async function createChatSessionAction(groupId: string, title: string) {
 
 export async function deleteChatSessionAction(sessionId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { error } = await supabase
@@ -409,7 +409,7 @@ export async function sendAIChatMessageAction(input: {
 
     // 1. Auth & owner check
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const isOwner = await isGroupOwner(groupId);

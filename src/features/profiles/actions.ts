@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -20,7 +20,7 @@ export async function updateProfileAction(formData: FormData) {
     const validation = profileSchema.safeParse(rawData);
     if (!validation.success) return { error: 'Validation failed' };
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { error } = await supabase.from('profiles').update({

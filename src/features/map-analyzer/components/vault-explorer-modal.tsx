@@ -1132,7 +1132,7 @@ export function VaultExplorerModal({
                                             </div>
                                             <h3 className="text-lg font-black text-slate-300 uppercase tracking-widest">No Saved Comparisons</h3>
                                             <p className="text-xs font-bold text-slate-400 mt-2 max-w-xs mx-auto italic">
-                                                Save your current analysis using the "Save Current" button in the discovery header to see it here later.
+                                                Save your current analysis using the &quot;Save Current&quot; button in the discovery header to see it here later.
                                             </p>
                                         </div>
                                     )}

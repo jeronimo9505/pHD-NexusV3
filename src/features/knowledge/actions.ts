@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { logActivity } from "@/lib/activity-log";
 
@@ -79,7 +79,7 @@ export async function createKnowledgeItemAction(item: {
     resource_type?: string;
 }) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { error } = await supabase.from('knowledge_items').insert({
@@ -162,7 +162,7 @@ export async function togglePinAction(id: string, currentStatus: boolean, groupI
 // ─── SYNC FROM DRIVE ─────────────────────────────────────────────────
 export async function syncKnowledgeItemsAction(groupId: string, items: KnowledgeItem[]) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     if (!user) return { error: 'Unauthorized' };
 

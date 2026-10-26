@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
+import { getGroupSummary } from '@/lib/supabase/queries';
 import { ReportList } from "@/features/drive-reports/components/report-list";
 import { CreateReportButton } from "@/features/drive-reports/components/create-report-button";
 import { FileText } from "lucide-react";
@@ -13,11 +14,11 @@ export default async function DriveReportsPage({
     const supabase = await createClient();
 
     // Fetch current user
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) throw new Error('Unauthorized');
 
     // Fetch reports with author profile and comment count
-    const { data: reports } = await supabase
+    const [{ data: reports, error }, group] = await Promise.all([supabase
         .from('drive_reports')
         .select(`
             *,
@@ -31,14 +32,8 @@ export default async function DriveReportsPage({
             )
         `)
         .eq('group_id', groupId)
-        .order('created_at', { ascending: false });
-
-    // Fetch group settings
-    const { data: group } = await supabase
-        .from('groups')
-        .select('drive_settings')
-        .eq('id', groupId)
-        .single();
+        .order('created_at', { ascending: false }), getGroupSummary(groupId)]);
+    if (error) throw new Error('Could not load reports');
 
     const driveSettings = group?.drive_settings as { clientId?: string; apiKey?: string; folderId?: string } | undefined;
 

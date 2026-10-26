@@ -651,7 +651,7 @@ export function DeconvolutionView({ vaultRoot, h5Path, mapWidth, mapHeight, nSpe
               {templateInfo && (
                 <div className="p-2.5 bg-indigo-900/10 border border-indigo-900/20 rounded-xl">
                   <div className="text-[8px] font-bold text-indigo-500 uppercase mb-1">Activo: {templateInfo.label}</div>
-                  <p className="text-[10px] text-slate-500 leading-relaxed italic">"{templateInfo.description}"</p>
+                  <p className="text-[10px] text-slate-500 leading-relaxed italic">&quot;{templateInfo.description}&quot;</p>
                 </div>
               )}
 

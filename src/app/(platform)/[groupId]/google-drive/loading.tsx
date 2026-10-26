@@ -26,7 +26,7 @@ export default function GoogleDriveLoading() {
                     <div key={i} className="flex items-center gap-4 py-3 border-b border-slate-50">
                         <div className="w-8 h-8 bg-slate-100 rounded animate-pulse" />
                         <div className="flex-1">
-                            <div className="h-4 bg-slate-100 rounded animate-pulse" style={{ width: `${40 + Math.random() * 40}%` }} />
+                            <div className="h-4 bg-slate-100 rounded animate-pulse" style={{ width: `${40 + (i * 13) % 40}%` }} />
                         </div>
                         <div className="h-4 w-24 bg-slate-50 rounded animate-pulse" />
                         <div className="h-4 w-20 bg-slate-50 rounded animate-pulse" />

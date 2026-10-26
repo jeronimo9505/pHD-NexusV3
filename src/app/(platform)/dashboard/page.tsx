@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { DashboardClient } from "./DashboardClient";
 import { getAllGroupsAction } from "@/features/groups/actions";
@@ -12,7 +12,7 @@ export default async function DashboardRoot({ searchParams }: PageProps) {
     const noRedirect = params?.noredirect === 'true';
 
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     if (!user) redirect('/login');
 

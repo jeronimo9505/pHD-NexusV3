@@ -481,7 +481,7 @@ export default function NotionLogbook({ groupId }: NotionLogbookProps) {
                             <div className="flex items-center gap-2">
                                 {selectedText && (
                                     <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md font-medium tracking-tight animate-in fade-in slide-in-from-right-1 duration-200">
-                                        "{selectedText.substring(0, 15)}..." seleccionado
+                                        &quot;{selectedText.substring(0, 15)}...&quot; seleccionado
                                     </span>
                                 )}
                                 <div className="flex items-center gap-1 bg-gradient-to-r from-blue-600/10 to-indigo-600/10 p-0.5 border border-indigo-500/20 rounded-xl shadow-lg">
@@ -544,7 +544,7 @@ export default function NotionLogbook({ groupId }: NotionLogbookProps) {
                                         {contentVal ? (
                                             <ScientificText text={contentVal} />
                                         ) : (
-                                            <span className="italic text-white/10 text-[14px]">Documento vacío. Cambia a "Editar" para empezar.</span>
+                                            <span className="italic text-white/10 text-[14px]">Documento vacío. Cambia a &quot;Editar&quot; para empezar.</span>
                                         )}
                                     </div>
                                 </div>

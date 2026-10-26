@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { cookies } from "next/headers";
@@ -44,7 +44,7 @@ export async function getTasksAction(groupId: string) {
     const supabase = await createClient();
 
     // Fetch tasks
-    const { data: tasks, error } = await supabase
+    const [{ data: tasks, error }, { data: group }] = await Promise.all([supabase
         .from('tasks')
         .select(`
             *,
@@ -53,7 +53,9 @@ export async function getTasksAction(groupId: string) {
             comments:task_comments(count)
         `)
         .eq('group_id', groupId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }),
+        supabase.from('groups').select('kanban_columns').eq('id', groupId).single(),
+    ]);
 
     if (error) {
         console.error("Error fetching tasks:", error);
@@ -67,13 +69,6 @@ export async function getTasksAction(groupId: string) {
         subtasks: (t.subtasks as Subtask[]) || [],
         comments_count: t.comments?.[0]?.count || 0,
     }));
-
-    // Fetch group columns
-    const { data: group } = await supabase
-        .from('groups')
-        .select('kanban_columns')
-        .eq('id', groupId)
-        .single();
 
     return {
         data: formattedTasks as Task[],
@@ -114,7 +109,7 @@ export async function moveTasksToStatusAction(groupId: string, oldStatus: string
 
 export async function createTaskAction(prevState: any, formData: FormData) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     if (!user) return { error: "Unauthorized" };
 

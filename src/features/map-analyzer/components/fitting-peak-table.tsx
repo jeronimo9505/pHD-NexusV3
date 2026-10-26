@@ -193,7 +193,7 @@ export function FittingPeakTable({ peaks, onChange, disabled, showLimits = false
                     <Sliders size={24} className="text-slate-700 mb-3 animate-pulse" />
                     <p className="text-[11px] text-slate-400 font-bold mb-1">No Peak Seeds Configured</p>
                     <p className="text-[10px] text-slate-500 max-w-[280px]">
-                        Double-click on the spectrum plot above to add peaks, or click the "Add Peak" button.
+                        Double-click on the spectrum plot above to add peaks, or click the &quot;Add Peak&quot; button.
                     </p>
                 </div>
             ) : (

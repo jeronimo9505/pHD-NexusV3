@@ -2,6 +2,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getKnowledgeItemsAction, type KnowledgeItem } from "@/features/knowledge/actions";
 import { KnowledgeExplorer } from "@/features/knowledge/components/knowledge-explorer";
+import { getGroupSummary } from '@/lib/supabase/queries';
 
 interface PageProps {
     params: Promise<{
@@ -17,17 +18,12 @@ function toResourceType(v: string | null | undefined): KnowledgeItem['resource_t
 
 export default async function KnowledgePage({ params }: PageProps) {
     const { groupId } = await params;
-    const supabase = await createClient();
 
     // Use explicit generics / typed variables to avoid TS2589
     // (type instantiation excessively deep on complex Supabase return types)
     const [itemsRes, settingsRes] = await Promise.all([
         getKnowledgeItemsAction(groupId),
-        supabase
-            .from('groups')
-            .select('drive_settings')
-            .eq('id', groupId)
-            .single<{ drive_settings: Record<string, unknown> | null }>(),
+        getGroupSummary(groupId),
     ]);
 
     // Map raw DB rows → KnowledgeItem[], narrowing resource_type to the union type
@@ -45,7 +41,7 @@ export default async function KnowledgePage({ params }: PageProps) {
         resource_type: toResourceType((row as { resource_type?: string | null }).resource_type),
     }));
 
-    const driveSettings = settingsRes.data?.drive_settings ?? {};
+    const driveSettings = settingsRes?.drive_settings ?? {};
 
     return (
         <KnowledgeExplorer

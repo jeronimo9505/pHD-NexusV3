@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { logActivity } from "@/lib/activity-log";
 
@@ -42,7 +42,7 @@ export async function getTaskCommentsAction(taskId: string) {
 
 export async function createTaskCommentAction(taskId: string, groupId: string, content: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     if (!user) return { error: "Unauthorized" };
     if (!content.trim()) return { error: "Comment cannot be empty" };

@@ -1,13 +1,13 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // ─── CRUD OPERATIONS FOR NOTION LOGBOOK ──────────────────────────────
 
 export async function getDocumentsAction(groupId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { data, error } = await (supabase as any)
@@ -27,7 +27,7 @@ export async function getDocumentsAction(groupId: string) {
 
 export async function saveDocumentAction(id: string, groupId: string, title: string, content: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { data, error } = await (supabase as any)
@@ -52,7 +52,7 @@ export async function saveDocumentAction(id: string, groupId: string, title: str
 
 export async function deleteDocumentAction(id: string, groupId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { error } = await (supabase as any)
@@ -70,7 +70,7 @@ export async function deleteDocumentAction(id: string, groupId: string) {
 
 export async function toggleStarDocumentAction(id: string, isStarred: boolean) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { data, error } = await (supabase as any)
@@ -89,7 +89,7 @@ export async function toggleStarDocumentAction(id: string, isStarred: boolean) {
 
 export async function togglePinDocumentAction(id: string, isPinned: boolean) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     const { data, error } = await (supabase as any)
@@ -119,7 +119,7 @@ export async function askDocumentAIAction(input: {
 
     // 1. Auth check
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
 
     // 2. Fetch group settings for custom API keys and model

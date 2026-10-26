@@ -1,5 +1,7 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import { useState, useEffect } from 'react';
 import { Search, ChevronRight, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -9,14 +11,14 @@ import { VaultLibrary } from './vault-library';
 import { HeatmapCanvas } from './heatmap-canvas';
 import { SpectrumInspector } from './spectrum-inspector';
 import { GrapheneCanvasGrid } from './graphene-canvas-grid';
-import { GrapheneAnalyticsView } from './graphene-analytics-view';
-import { VaultExplorerModal } from './vault-explorer-modal';
-import { PipelineEditor } from './pipeline-editor';
-import { ComparisonView } from './comparison-view';
-import { DeconvolutionView } from './deconvolution-view';
-import { FittingView } from './fitting-view';
-import { RgiView } from './rgi-view';
-import { Rgi2View } from './rgi2-view';
+const GrapheneAnalyticsView = dynamic(() => import('./graphene-analytics-view').then(module => module.GrapheneAnalyticsView));
+const VaultExplorerModal = dynamic(() => import('./vault-explorer-modal').then(module => module.VaultExplorerModal));
+const PipelineEditor = dynamic(() => import('./pipeline-editor').then(module => module.PipelineEditor));
+const ComparisonView = dynamic(() => import('./comparison-view').then(module => module.ComparisonView));
+const DeconvolutionView = dynamic(() => import('./deconvolution-view').then(module => module.DeconvolutionView));
+const FittingView = dynamic(() => import('./fitting-view').then(module => module.FittingView));
+const RgiView = dynamic(() => import('./rgi-view').then(module => module.RgiView));
+const Rgi2View = dynamic(() => import('./rgi2-view').then(module => module.Rgi2View));
 import { getLogbooksAction, getSamplesAction, registerGroupedH5FileAction } from '@/features/samples/actions';
 import { Logbook } from '@/features/samples/types';
 

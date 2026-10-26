@@ -334,7 +334,7 @@ export function RamanWorkspace({ samples, driveSettings }: RamanWorkspaceProps) 
                         <h4 className="font-bold mb-2 text-purple-200">Graph Controls</h4>
                         <ul className="space-y-1.5 text-slate-200">
                             <li><span className="font-semibold text-white">Zoom In:</span> Click and drag across the area you want to magnify.</li>
-                            <li><span className="font-semibold text-white">Zoom Out:</span> Click the "Reset Zoom" button in the top left.</li>
+                            <li><span className="font-semibold text-white">Zoom Out:</span> Click the &quot;Reset Zoom&quot; button in the top left.</li>
                             <li><span className="font-semibold text-white">Toggle Line:</span> Click any item in the legend above the chart.</li>
                             <li><span className="font-semibold text-white">Hover:</span> Move mouse over the plot to see exact values.</li>
                         </ul>

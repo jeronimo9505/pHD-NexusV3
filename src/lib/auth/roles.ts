@@ -2,6 +2,7 @@ import { createClient, getUser } from "@/lib/supabase/server";
 import { Database } from "@/types/supabase";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { cache } from "react";
+import { getCurrentProfile, getGroupSummary } from '@/lib/supabase/queries';
 
 export type GroupRole = Database['public']['Tables']['group_members']['Row']['role'];
 export type SystemRole = 'admin' | 'user';
@@ -21,6 +22,7 @@ const fetchGroupRole = cache(async (groupId: string, userId: string): Promise<Gr
         .select('role')
         .eq('group_id', groupId)
         .eq('user_id', userId)
+        .eq('status', 'active')
         .single();
     return member?.role || null;
 });
@@ -44,6 +46,10 @@ export async function getGroupRole(groupId: string, supabase?: SupabaseClient, u
  * Accepts optional supabase client and userId to avoid redundant auth calls.
  */
 export async function getSystemRole(supabase?: SupabaseClient, userId?: string): Promise<SystemRole | null> {
+    if (!userId) {
+        const role = (await getCurrentProfile())?.system_role;
+        return role === 'admin' || role === 'user' ? role : null;
+    }
     const sb = supabase || await createClient();
     let uid = userId;
     if (!uid) {
@@ -69,17 +75,8 @@ export async function isGroupOwner(groupId: string): Promise<boolean> {
         const user = await getUser();
         if (!user) return false;
 
-        const supabase = await createClient();
-        const { data: group, error } = await supabase
-            .from('groups')
-            .select('created_by')
-            .eq('id', groupId)
-            .single();
-
-        if (error || !group) {
-            console.warn(`[isGroupOwner] Group not found or query error for ID ${groupId}:`, error?.message);
-            return false;
-        }
+        const group = await getGroupSummary(groupId);
+        if (!group) return false;
 
         return group.created_by === user.id;
     } catch (e) {

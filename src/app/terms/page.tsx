@@ -1,3 +1,4 @@
+import Link from 'next/link';
 export default function TermsPage() {
     const lastUpdated = "February 27, 2026";
     const appName = "PhD Nexus";
@@ -67,9 +68,9 @@ export default function TermsPage() {
                 </section>
 
                 <div className="mt-10 pt-6 border-t text-center text-sm text-slate-400">
-                    <a href="/login" className="hover:underline">Back to {appName}</a>
+                    <Link href="/login" className="hover:underline">Back to {appName}</Link>
                     {" · "}
-                    <a href="/privacy" className="hover:underline">Privacy Policy</a>
+                    <Link href="/privacy" className="hover:underline">Privacy Policy</Link>
                 </div>
             </div>
         </div>

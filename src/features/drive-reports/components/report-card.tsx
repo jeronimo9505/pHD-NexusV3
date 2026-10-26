@@ -1,5 +1,7 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import { DriveReport } from '../types';
 import { deleteDriveReportAction, markAsSeenAction } from '../actions';
 import { toast } from 'sonner';
@@ -11,8 +13,8 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { ReportCardExpanded } from './report-card-expanded';
-import { DraftEditorModal } from './draft-editor-modal';
-import { EditReportDialog } from './edit-report-dialog';
+const DraftEditorModal = dynamic(() => import('./draft-editor-modal').then(module => module.DraftEditorModal));
+const EditReportDialog = dynamic(() => import('./edit-report-dialog').then(module => module.EditReportDialog));
 
 
 interface ReportCardProps {

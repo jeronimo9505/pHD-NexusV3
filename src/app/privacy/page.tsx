@@ -1,3 +1,4 @@
+import Link from 'next/link';
 export default function PrivacyPolicyPage() {
     const lastUpdated = "February 27, 2026";
     const appName = "PhD Nexus";
@@ -88,9 +89,9 @@ export default function PrivacyPolicyPage() {
                 </section>
 
                 <div className="mt-10 pt-6 border-t text-center text-sm text-slate-400">
-                    <a href="/login" className="hover:underline">Back to {appName}</a>
+                    <Link href="/login" className="hover:underline">Back to {appName}</Link>
                     {" · "}
-                    <a href="/terms" className="hover:underline">Terms of Service</a>
+                    <Link href="/terms" className="hover:underline">Terms of Service</Link>
                 </div>
             </div>
         </div>

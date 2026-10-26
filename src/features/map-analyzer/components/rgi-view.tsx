@@ -1611,7 +1611,7 @@ export function RgiView({ vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1.0
                                         </div>
                                     ) : (
                                         <div className="flex-1 flex items-center justify-center text-xs text-slate-500">
-                                            Single spectrum loaded. Click "Next Step: Fit".
+                                            Single spectrum loaded. Click &quot;Next Step: Fit&quot;.
                                         </div>
                                     )}
                                 </div>
@@ -1622,7 +1622,7 @@ export function RgiView({ vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1.0
                                 <Sparkles size={28} className="text-slate-700 mb-2 animate-bounce" />
                                 <span className="text-xs font-bold text-slate-400 mb-1">Raman Map Model is Empty</span>
                                 <span className="text-[10px] text-slate-500 max-w-xs text-center">
-                                    Select the baseline method and cluster count, and click "Run Map Segmentation" to analyze spectral structures.
+                                    Select the baseline method and cluster count, and click &quot;Run Map Segmentation&quot; to analyze spectral structures.
                                 </span>
                             </div>
                         )}

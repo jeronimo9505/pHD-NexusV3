@@ -1,8 +1,10 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import { useState } from "react";
 import { Users, History } from "lucide-react";
-import { ActivityLogModal } from "./activity-log-modal";
+const ActivityLogModal = dynamic(() => import('./activity-log-modal').then(module => module.ActivityLogModal));
 
 interface DashboardActionsProps {
     groupId: string;
@@ -40,11 +42,11 @@ export function DashboardActions({ groupId, memberCount }: DashboardActionsProps
                 </div>
             </div>
 
-            <ActivityLogModal 
+            {isModalOpen && (<ActivityLogModal
                 isOpen={isModalOpen} 
                 onClose={() => setIsModalOpen(false)} 
                 groupId={groupId} 
-            />
+            />)}
         </div>
     );
 }

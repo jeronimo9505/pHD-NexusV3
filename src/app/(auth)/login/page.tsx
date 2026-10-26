@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { signInAction } from "@/features/auth/actions";
@@ -10,7 +10,7 @@ export default async function LoginPage({
     searchParams: Promise<{ message?: string }>;
 }) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     if (user) {
         return redirect('/dashboard');
@@ -75,7 +75,7 @@ export default async function LoginPage({
                 </form>
 
                 <div className="mt-6 text-center text-sm text-slate-500">
-                    Don't have an account?{" "}
+                    Don&apos;t have an account?{" "}
                     <Link href="/register" className="text-slate-900 font-medium hover:underline">
                         Sign Up
                     </Link>

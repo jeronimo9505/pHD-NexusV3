@@ -1,10 +1,10 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { CreateGroupModal } from "@/features/groups/components/create-group-modal";
 
 export default async function RootPage() {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     if (!user) {
         redirect('/login');
@@ -14,7 +14,10 @@ export default async function RootPage() {
     const { data: members } = await supabase
         .from('group_members')
         .select('group_id')
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: true })
+        .limit(1);
 
     if (members && members.length > 0) {
         // Redirect to the first group
@@ -28,7 +31,7 @@ export default async function RootPage() {
                 <div>
                     <h2 className="mt-6 text-3xl font-extrabold text-slate-900">Welcome to PhD Nexus</h2>
                     <p className="mt-2 text-sm text-slate-600">
-                        You don't seem to be part of any research group yet.
+                        You don&apos;t seem to be part of any research group yet.
                     </p>
                 </div>
 

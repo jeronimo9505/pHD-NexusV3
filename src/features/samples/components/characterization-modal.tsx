@@ -1191,7 +1191,7 @@ export function CharacterizationModal({
                                     <>
                                         <span className="text-slate-300">•</span>
                                         <span className="italic text-slate-400 truncate max-w-[300px]" title={sample.description}>
-                                            "{sample.description}"
+                                            &quot;{sample.description}&quot;
                                         </span>
                                     </>
                                 )}

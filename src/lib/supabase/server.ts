@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { Database } from "@/types/supabase";
 import { cache } from "react";
+import { unstable_rethrow } from 'next/navigation';
 
 /**
  * Creates a Supabase server client. Wrapped with React.cache() so that
@@ -46,6 +47,7 @@ export const createClient = cache(async () => {
             }
         );
     } catch (e) {
+        unstable_rethrow(e);
         console.error("Failed to initialize Supabase server client:", e);
         throw e;
     }
@@ -68,6 +70,7 @@ export const getUser = cache(async () => {
 
         return data?.user || null;
     } catch (e) {
+        unstable_rethrow(e);
         console.error("Unexpected error in getUser helper:", e);
         return null;
     }

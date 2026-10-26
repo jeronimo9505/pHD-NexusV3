@@ -1,5 +1,7 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import { useState, useMemo, useEffect } from 'react';
 import { Sample, SampleFieldConfig, SampleNomenclature, SampleStatus } from '../types';
 import { deleteSampleAction, updateSampleAction } from '../actions';
@@ -24,16 +26,16 @@ import {
     Activity
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SampleForm } from './sample-form';
-import { ConfigModal } from './config-modal';
-import { CharacterizationModal } from './characterization-modal';
-import { BulkCharacterizationModal } from './bulk-characterization-modal';
+const SampleForm = dynamic(() => import('./sample-form').then(module => module.SampleForm));
+const ConfigModal = dynamic(() => import('./config-modal').then(module => module.ConfigModal));
+const CharacterizationModal = dynamic(() => import('./characterization-modal').then(module => module.CharacterizationModal));
+const BulkCharacterizationModal = dynamic(() => import('./bulk-characterization-modal').then(module => module.BulkCharacterizationModal));
 import { formatCellValue, formatDate } from '../utils';
 
-import { SampleDetailSheet } from './sample-detail-sheet';
-import { ActivityLogDrawer } from './activity-log-drawer';
+const SampleDetailSheet = dynamic(() => import('./sample-detail-sheet').then(module => module.SampleDetailSheet));
+const ActivityLogDrawer = dynamic(() => import('./activity-log-drawer').then(module => module.ActivityLogDrawer));
 import { CharacterizationSearch } from './characterization-search';
-import { RamanWorkspace } from './raman-workspace';
+const RamanWorkspace = dynamic(() => import('./raman-workspace').then(module => module.RamanWorkspace));
 import { ScientificText } from '@/components/ScientificText';
 
 interface SampleGridProps {
@@ -680,7 +682,7 @@ export function SampleGrid({
             </div>
 
             {/* Modals */}
-            <ConfigModal
+            {configOpen && (<ConfigModal
                 isOpen={configOpen}
                 onClose={() => setConfigOpen(false)
                 }
@@ -688,7 +690,7 @@ export function SampleGrid({
                 logbookId={logbookId}
                 nomenclatures={nomenclatures}
                 fields={fields}
-            />
+            />)}
 
             {formOpen && (
                 <SampleForm
@@ -796,7 +798,7 @@ export function SampleGrid({
             )}
 
             {/* ──── BULK CHARACTERIZATION MODAL ──── */}
-            <BulkCharacterizationModal
+            {bulkCharOpen && (<BulkCharacterizationModal
                 isOpen={bulkCharOpen}
                 onClose={() => setBulkCharOpen(false)}
                 sampleIds={Array.from(selectedIds)}
@@ -811,9 +813,9 @@ export function SampleGrid({
                 setLastUnits={setLastUnits}
                 parameterOrder={parameterOrder}
                 setParameterOrder={setParameterOrder}
-            />
+            />)}
 
-            <ActivityLogDrawer
+            {activityLogOpen && (<ActivityLogDrawer
                 groupId={groupId}
                 isOpen={activityLogOpen}
                 onClose={() => setActivityLogOpen(false)}
@@ -826,7 +828,7 @@ export function SampleGrid({
                         toast.error("Sample not found in current view");
                     }
                 }}
-            />
+            />)}
         </>
     );
 }

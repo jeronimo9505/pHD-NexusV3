@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { RegularReport } from "./types";
@@ -31,7 +31,7 @@ export async function getRegularReportsAction(groupId: string) {
 
 export async function createRegularReportAction(formData: FormData) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     if (!user) return { error: "Unauthorized" };
 
@@ -118,7 +118,7 @@ export async function updateReportSectionAction(reportId: string, key: string, c
 
 export async function updateReportStatusAction(reportId: string, status: 'draft' | 'submitted' | 'reviewed', groupId: string, feedback?: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     const updates: any = { status };
     if (status === 'submitted') updates.submitted_at = new Date().toISOString();

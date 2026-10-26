@@ -5,6 +5,7 @@ import { LogbookSwitcher } from "@/features/samples/components/logbook-switcher"
 import { getGroupRole } from "@/lib/auth/roles";
 import { redirect } from "next/navigation";
 import { Logbook } from "@/features/samples/types";
+import { getGroupSummary } from '@/lib/supabase/queries';
 
 interface SamplesPageProps {
     params: Promise<{ groupId: string }>;
@@ -51,7 +52,7 @@ export default async function SamplesPage(props: SamplesPageProps) {
         activeLogbookId ? getSamplesAction(groupId, activeLogbookId) : Promise.resolve({ data: [] }),
         activeLogbookId ? getFieldsConfigAction(groupId, activeLogbookId) : Promise.resolve({ data: [] }),
         activeLogbookId ? getNomenclaturesAction(groupId, activeLogbookId) : Promise.resolve({ data: [] }),
-        supabase.from('groups').select('drive_settings').eq('id', groupId).single()
+        getGroupSummary(groupId)
     ]);
 
     if (!role) {
@@ -62,7 +63,7 @@ export default async function SamplesPage(props: SamplesPageProps) {
     const samples = samplesRes.data || [];
     const fields = (fieldsRes.data || []) as any[];
     const nomenclatures = (nomenclaturesRes.data || []) as any[];
-    const driveSettings = groupRes.data?.drive_settings as { clientId?: string; apiKey?: string; folderId?: string; sampleFolderId?: string } | undefined;
+    const driveSettings = groupRes?.drive_settings as { clientId?: string; apiKey?: string; folderId?: string; sampleFolderId?: string } | undefined;
 
     return (
         <div className="h-full flex flex-col p-6 space-y-6">

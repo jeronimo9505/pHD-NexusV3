@@ -17,7 +17,7 @@ export function EmptyState({ type, searchQuery }: EmptyStateProps) {
                     Get started by creating your first report, meeting note, or presentation.
                 </p>
                 <div className="text-xs text-slate-400">
-                    Click the "New" button above to create your first document
+                    Click the &quot;New&quot; button above to create your first document
                 </div>
             </div>
         );
@@ -31,7 +31,7 @@ export function EmptyState({ type, searchQuery }: EmptyStateProps) {
             <h3 className="text-lg font-semibold text-slate-800 mb-2">No results found</h3>
             <p className="text-sm text-slate-500 text-center max-w-sm">
                 {searchQuery ? (
-                    <>No reports match your search for <span className="font-medium">"{searchQuery}"</span></>
+                    <>No reports match your search for <span className="font-medium">&quot;{searchQuery}&quot;</span></>
                 ) : (
                     'No reports match your current filters'
                 )}

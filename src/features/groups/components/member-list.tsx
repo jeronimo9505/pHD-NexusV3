@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { MemberRow } from "./member-row";
 import { GroupMember } from "../types";
 
@@ -10,7 +10,7 @@ export async function MemberList({
     currentUserRole: string;
 }) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getUser();
 
     // Fetch members with profile data
     const { data: members, error } = await supabase
