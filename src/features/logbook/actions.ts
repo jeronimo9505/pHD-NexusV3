@@ -1,4 +1,5 @@
 'use server';
+import { configuredGeminiModel } from "@/lib/google/model";
 
 import { createClient, getUser } from "@/lib/supabase/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -136,11 +137,8 @@ export async function askDocumentAIAction(input: {
         return { error: 'Gemini API key not configured. Add it in Group Settings or as GOOGLE_GEMINI_API_KEY in server environment.' };
     }
 
-    let modelName = aiSettings?.model || 'gemini-1.5-flash';
-    if (modelName.includes('2.5')) {
-        console.warn(`[logbook_ai] Falling back from ${modelName} to gemini-1.5-flash.`);
-        modelName = 'gemini-1.5-flash';
-    }
+    const modelName = configuredGeminiModel(aiSettings?.model || process.env.GOOGLE_GEMINI_MODEL);
+    if (!modelName) return { error: 'Choose a Gemini model available for your API key in Group Settings.' };
 
     // 3. Initialize Gemini
     const genAI = new GoogleGenerativeAI(apiKey);

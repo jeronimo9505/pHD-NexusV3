@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { DriveFile } from './drive-browser';
 import { getFileIcon, formatDate, formatFileSize } from './drive-utils';
 import { X, Download, Clock, User, ExternalLink, Loader2, FileText, History } from 'lucide-react';
+import { downloadDriveContent } from '@/lib/google/download';
+import { toast } from 'sonner';
 
 interface Revision {
     id: string;
@@ -22,19 +24,24 @@ interface FileDetailPanelProps {
 }
 
 export function FileDetailPanel({ file, onClose }: FileDetailPanelProps) {
+    const revisionRequest = useRef(0);
     const [revisions, setRevisions] = useState<Revision[]>([]);
     const [loadingRevisions, setLoadingRevisions] = useState(false);
     const [revisionError, setRevisionError] = useState<string | null>(null);
 
     useEffect(() => {
+        const request = ++revisionRequest.current;
+        setRevisions([]);
+        setRevisionError(null);
         if (file && file.mimeType !== 'application/vnd.google-apps.folder') {
-            loadRevisions(file.id);
+            void loadRevisions(file.id, request);
         } else {
-            setRevisions([]);
+            setLoadingRevisions(false);
         }
-    }, [file?.id]);
+        return () => { revisionRequest.current++; };
+    }, [file?.id, file?.mimeType]);
 
-    const loadRevisions = async (fileId: string) => {
+    const loadRevisions = async (fileId: string, request: number) => {
         setLoadingRevisions(true);
         setRevisionError(null);
         try {
@@ -44,8 +51,9 @@ export function FileDetailPanel({ file, onClose }: FileDetailPanelProps) {
                 fields: 'revisions(id, modifiedTime, lastModifyingUser, size, exportLinks)',
                 pageSize: 20
             });
-            setRevisions(response.result.revisions || []);
+            if (request === revisionRequest.current) setRevisions(response.result.revisions || []);
         } catch (err: any) {
+            if (request !== revisionRequest.current) return;
             console.error('Error loading revisions:', err);
             // Some file types don't support revisions
             if (err?.status === 403 || err?.status === 404) {
@@ -54,51 +62,27 @@ export function FileDetailPanel({ file, onClose }: FileDetailPanelProps) {
                 setRevisionError('Could not load revision history.');
             }
         } finally {
-            setLoadingRevisions(false);
+            if (request === revisionRequest.current) setLoadingRevisions(false);
         }
     };
 
-    const handleDownloadRevision = (fileId: string, revisionId: string) => {
-        const gapi = (window as any).gapi;
-        const token = gapi.client.getToken()?.access_token;
-        if (!token) return;
-
-        const url = `https://www.googleapis.com/drive/v3/files/${fileId}/revisions/${revisionId}?alt=media`;
-        const a = document.createElement('a');
-        a.href = url + `&access_token=${token}`;
-        a.target = '_blank';
-        a.click();
+    const handleDownloadRevision = async (fileId: string, revisionId: string) => {
+        try { await downloadDriveContent(fileId, `${file?.name || 'file'}.revision-${revisionId}`, { revisionId }); }
+        catch (error) { toast.error(error instanceof Error ? error.message : 'Could not download revision'); }
     };
 
-    const handleDownloadFile = () => {
+    const handleDownloadFile = async () => {
         if (!file) return;
-        const gapi = (window as any).gapi;
-        const token = gapi.client.getToken()?.access_token;
-        if (!token) return;
-
-        // For Google Docs types, use export
-        const exportMimeMap: Record<string, { mime: string; ext: string }> = {
-            'application/vnd.google-apps.document': { mime: 'application/pdf', ext: 'pdf' },
-            'application/vnd.google-apps.spreadsheet': { mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ext: 'xlsx' },
-            'application/vnd.google-apps.presentation': { mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', ext: 'pptx' },
+        const formats: Record<string, { mimeType: string; ext: string }> = {
+            'application/vnd.google-apps.document': { mimeType: 'application/pdf', ext: 'pdf' },
+            'application/vnd.google-apps.spreadsheet': { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ext: 'xlsx' },
+            'application/vnd.google-apps.presentation': { mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', ext: 'pptx' },
         };
-
-        const exportInfo = exportMimeMap[file.mimeType];
-        let url: string;
-
-        if (exportInfo) {
-            url = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(exportInfo.mime)}&access_token=${token}`;
-        } else {
-            url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&access_token=${token}`;
-        }
-
-        const a = document.createElement('a');
-        a.href = url;
-        a.target = '_blank';
-        a.download = file.name;
-        a.click();
+        const format = formats[file.mimeType];
+        const name = format && !file.name.toLowerCase().endsWith(`.${format.ext}`) ? `${file.name}.${format.ext}` : file.name;
+        try { await downloadDriveContent(file.id, name, format); }
+        catch (error) { toast.error(error instanceof Error ? error.message : 'Could not download file'); }
     };
-
     if (!file) return null;
 
     const { icon: Icon, color, bgColor } = getFileIcon(file.mimeType);

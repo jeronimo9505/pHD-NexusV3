@@ -107,3 +107,13 @@ Paginación conservando genealogía y búsqueda global, reducción del paquete i
 - El diagnóstico local de Web Vitals se activa únicamente al compilar con el comando de comparación y escribe en la consola del WebView. No se midió aún una navegación autenticada en este modo y no se ha generado un instalador desktop.
 - Pruebas: `npm run test:desktop`, junto a las suites existentes de Samples y carga. Sin cambios SQL ni permisos nuevos.
 - Base de recuperación: `samples-targeted-updates-2026-10-26` (`919e437`); etiqueta final `desktop-loading-2026-10-26`. Reversión de toda esta entrega: `git revert --no-commit samples-targeted-updates-2026-10-26..desktop-loading-2026-10-26`, revisar, crear el commit y publicar.
+
+### Integraciones Google
+
+- Alcance, correcciones, límites y fuentes oficiales: `AUDITORIA-GOOGLE-INTEGRACIONES.md`.
+- OAuth con cancelación, timeout, expiración estricta y limpieza de respuestas antiguas; Calendar comprueba permisos y no repite escrituras automáticamente ante errores.
+- Knowledge recorre páginas y falla de forma explícita ante un escaneo incompleto; Picker propaga errores y recibe el identificador numérico del proyecto.
+- Descargas sin tokens en las URL y cargas compartidas mediante multipart binario. El detalle de Drive descarta historiales de archivos anteriores.
+- Nexus AI y Logbook respetan el modelo Gemini configurado. No se ejecutaron generaciones ni se migró el SDK en esta entrega.
+- Pruebas: `npm run test:google`; no modifican archivos, calendarios o datos reales. Se conserva el cambio local generado de `next-env.d.ts` sin incluirlo en Git.
+- Base: `desktop-loading-2026-10-26`; etiqueta final `google-integrations-2026-10-26`. Reversión: `git revert --no-commit desktop-loading-2026-10-26..google-integrations-2026-10-26`, revisar, crear el commit y publicar; sin reversión SQL.

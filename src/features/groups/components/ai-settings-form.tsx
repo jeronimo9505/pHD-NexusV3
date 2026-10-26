@@ -75,19 +75,21 @@ export function AISettingsForm({ groupId, initialSettings }: AISettingsFormProps
                         <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                             <Sparkles className="w-4 h-4 text-slate-400" /> Gemini Model
                         </label>
-                        <select
-                            name="model"
-                            defaultValue={initialSettings?.model || 'gemini-2.5-flash-lite'}
-                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm bg-white"
-                        >
-                            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Latest Stable)</option>
-                            <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Fast & Efficient)</option>
-                            <option value="gemini-2.0-flash">Gemini 2.0 Flash (Balanced)</option>
-                            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Most Capable)</option>
-                            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Legacy)</option>
-                        </select>
+                        <input
+                            name="model" required list="gemini-model-options"
+                            defaultValue={initialSettings?.model || ''}
+                            placeholder="Model ID available for your API key"
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+                        />
+                        <datalist id="gemini-model-options">
+                            <option value="gemini-3.8-flash" />
+                            <option value="gemini-3.5-flash-lite" />
+                            <option value="gemini-2.5-flash" />
+                            <option value="gemini-2.5-flash-lite" />
+                            <option value="gemini-2.5-pro" />
+                        </datalist>
                         <p className="text-xs text-slate-400 mt-1">
-                            Select the model version to use for Nexus AI chat and tools.
+                            Enter the exact model ID enabled for your API key. Availability depends on your account.
                         </p>
                     </div>
                 </div>

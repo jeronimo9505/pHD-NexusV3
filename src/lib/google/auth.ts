@@ -1,6 +1,4 @@
 import { loadGoogleScripts } from "./loader";
-import { toast } from "sonner";
-import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 
 // Scopes required for creating and editing files and calendar events
 const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/presentations https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/calendar';
@@ -12,47 +10,35 @@ let googleAuthPromise: Promise<string> | null = null;
 
 // --- Helper Functions for Token Caching ---
 
-const saveToken = (token: any) => {
-    // access_tokens for client-side usually last 1 hour
-    if (!token.expires_in) token.expires_in = 3600;
-    // Buffer: 30s instead of 60s
-    const expiry = Date.now() + (token.expires_in * 1000) - 30000;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        access_token: token.access_token,
-        expiry
-    }));
+let memoryToken: { access_token: string; expiry: number; scope?: string } | null = null;
+let rejectAuthorization: ((error: Error) => void) | null = null;
+let authGeneration = 0;
+
+const saveToken = (token: { access_token: string; expires_in?: number; scope?: string }) => {
+    const seconds = Number(token.expires_in ?? 3600);
+    const stored = { access_token: token.access_token, scope: token.scope, expiry: Date.now() + (Number.isFinite(seconds) ? seconds : 3600) * 1000 - 30_000 };
+    memoryToken = stored;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(stored)); } catch { /* This tab can still use its in-memory token. */ }
 };
 
-const loadToken = () => {
+const loadToken = (requiredScopes: string[] = []) => {
     if (typeof window === 'undefined') return null;
+    const permits = (token: { scope?: string }) => requiredScopes.every(scope => token.scope?.split(' ').includes(scope));
+    if (memoryToken && memoryToken.expiry > Date.now() && permits(memoryToken)) return memoryToken.access_token;
     try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (!stored) return null;
-        const { access_token, expiry } = JSON.parse(stored);
-        // If we are strictly within expiry, return it.
-        if (Date.now() < expiry) return access_token;
-        
-        // Desktop optimization: If we're just over the edge, try to use it anyway 
-        // until a fetch actually fails (handled in upload.ts retry logic)
-        // This avoids popups appearing while the user is mid-typing if the token 
-        // is technically expired but still valid at Google (they have grace periods).
-        const gracePeriod = 5 * 60 * 1000; // 5 mins
-        if (Date.now() < expiry + gracePeriod) return access_token;
-
-        return null;
-    } catch {
-        return null;
-    }
+        const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+        if (stored && typeof stored.access_token === 'string' && Number.isFinite(stored.expiry) && stored.expiry > Date.now() && permits(stored)) return stored.access_token;
+    } catch { /* Unavailable storage and malformed tokens are treated as signed out. */ }
+    return null;
 };
 
 export const clearToken = () => {
+    authGeneration++;
+    memoryToken = null;
+    rejectAuthorization?.(new Error('Google authorization cancelled. Please connect again.'));
     if (typeof window === 'undefined') return;
-    localStorage.removeItem(STORAGE_KEY);
-    // Also clear the GAPI in-memory token so withAuthRetry can get a fresh one
-    const gapi = (window as any).gapi;
-    if (gapi?.client?.setToken) {
-        gapi.client.setToken(null);
-    }
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* Storage may be unavailable. */ }
+    (window as any).gapi?.client?.setToken?.(null);
 };
 
 // --- Initialization ---
@@ -97,11 +83,13 @@ export function initGoogleClient(apiKey: string, clientId: string, services?: Go
         // Explicit capability callers require every API they actually use.
         if (services) await Promise.all(loads);
         else await Promise.allSettled(loads);
+        if (configuredClientId && configuredClientId !== clientId.trim()) clearToken();
         const savedToken = loadToken();
-        if (savedToken) gapi.client.setToken({ access_token: savedToken });
+        gapi.client.setToken(savedToken ? { access_token: savedToken } : null);
         if ((!tokenClient || configuredClientId !== clientId.trim()) && (window as any).google?.accounts?.oauth2) {
             tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
                 client_id: clientId.trim(), scope: SCOPES,
+                error_callback: () => rejectAuthorization?.(new Error('Google authorization was closed or blocked. Click connect to try again.')),
                 callback: (resp: any) => {
                     if (resp.access_token) {
                         saveToken(resp);
@@ -120,22 +108,26 @@ export function initGoogleClient(apiKey: string, clientId: string, services?: Go
  * Ensures valid authentication.
  * Returns the access token.
  */
-export const ensureAuth = async (): Promise<string> => {
+export const ensureAuth = async (requiredScopes: string[] = []): Promise<string> => {
+    const generation = authGeneration;
     // 1. Check if token is valid BEFORE any async operations to maintain user-interaction context.
-    const savedToken = loadToken();
+    const savedToken = loadToken(requiredScopes);
     
     if (savedToken) {
         // We have a token, we can safely load scripts asynchronously
         await loadGoogleScripts();
+        if (generation !== authGeneration) throw new Error('Google authorization changed. Please connect again.');
         const gapi = (window as any).gapi;
 
         if (!gapi.client) {
             await new Promise<void>((resolve, reject) => {
-                gapi.load('client', { callback: resolve, onerror: reject });
+                gapi.load('client', { callback: resolve, onerror: reject, timeout: 10_000,
+                    ontimeout: () => reject(new Error('Google client timed out')) });
             });
         }
 
         if (gapi.client && typeof gapi.client.setToken === 'function') {
+            if (generation !== authGeneration) throw new Error('Google authorization changed. Please connect again.');
             gapi.client.setToken({ access_token: savedToken });
         }
         return savedToken;
@@ -146,54 +138,59 @@ export const ensureAuth = async (): Promise<string> => {
     // doesn't block the popup window (it requires transient user activation).
     
     if (googleAuthPromise) {
-        return googleAuthPromise;
+        return googleAuthPromise.then(token => {
+            if (!loadToken(requiredScopes)) throw new Error('Google did not grant the required permissions. Connect again and allow access.');
+            return token;
+        });
     }
 
     if (!tokenClient) {
         throw new Error("Google Token Client not initialized. Call initGoogleClient first.");
     }
 
-    googleAuthPromise = new Promise<string>((resolve, reject) => {
-        // Override callback for this specific request
-        tokenClient!.callback = (resp: any) => {
-            googleAuthPromise = null; // Reset promise
-            if (resp.error) {
-                console.error("Auth Error:", resp);
-                reject(resp);
+    const activeClient = tokenClient;
+    const tokenRequest = new Promise<string>((resolve, reject) => {
+        let settled = false;
+        const finish = (error?: Error, token?: string) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            rejectAuthorization = null;
+            if (error) reject(error);
+            else resolve(token!);
+        };
+        const timer = setTimeout(() => finish(new Error('Google authorization timed out. Please try again.')), 90_000);
+        rejectAuthorization = error => finish(error);
+        activeClient.callback = (response: any) => {
+            if (settled) return;
+            if (response.error || !response.access_token) {
+                finish(new Error(response.error_description || response.error || 'Google did not return an access token'));
                 return;
             }
-            if (resp.access_token) {
-                saveToken(resp);
-                resolve(resp.access_token);
-            } else {
-                reject(new Error("No access_token received"));
+            saveToken(response);
+            if (!loadToken(requiredScopes)) {
+                finish(new Error('Google did not grant the required permissions. Connect again and allow access.'));
+                return;
             }
+            finish(undefined, response.access_token);
         };
-
-        // Trigger GIS token request:
-        // prompt: '' = no consent screen if already granted (silent re-auth)
-        // hint: user email = avoids account picker popup
-        const emailHint = localStorage.getItem('google_auth_email_hint') || undefined;
-        (tokenClient as any).requestAccessToken({ prompt: '', hint: emailHint });
+        let loginHint: string | undefined;
+        try { loginHint = localStorage.getItem('google_auth_email_hint') || undefined; } catch { /* Optional hint. */ }
+        try { (activeClient as any).requestAccessToken({ prompt: '', login_hint: loginHint }); }
+        catch { finish(new Error('Google authorization could not open. Click connect to try again.')); }
     });
-
-    // Wait for the token request to complete
-    const token = await googleAuthPromise;
-
-    // After token is received, ensure GAPI is loaded so we can set the token
-    await loadGoogleScripts();
-    const gapi = (window as any).gapi;
-
-    if (!gapi.client) {
-        await new Promise<void>((resolve, reject) => {
-            gapi.load('client', { callback: resolve, onerror: reject });
+    const request = tokenRequest.then(async token => {
+        await loadGoogleScripts();
+        if (generation !== authGeneration) throw new Error('Google authorization changed. Please connect again.');
+        const gapi = (window as any).gapi;
+        if (!gapi.client) await new Promise<void>((resolve, reject) => {
+            gapi.load('client', { callback: resolve, onerror: reject, timeout: 10_000,
+                ontimeout: () => reject(new Error('Google client timed out')) });
         });
-    }
-
-    if (gapi.client && typeof gapi.client.setToken === 'function') {
+        if (generation !== authGeneration) throw new Error('Google authorization changed. Please connect again.');
         gapi.client.setToken({ access_token: token });
-    }
-
-    return token;
+        return token;
+    }).finally(() => { if (googleAuthPromise === request) googleAuthPromise = null; });
+    googleAuthPromise = request;
+    return request;
 };
-

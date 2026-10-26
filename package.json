@@ -19,7 +19,8 @@
     "test:samples": "node scripts/test-samples-loading.mjs && node scripts/test-sample-index.mjs && node scripts/test-sample-updates.mjs",
     "desktop:preview": "node scripts/desktop-preview.mjs",
     "tauri:perf": "tauri dev --no-watch --config src-tauri/tauri.performance.conf.json",
-    "test:desktop": "node scripts/test-desktop-loading.mjs"
+    "test:desktop": "node scripts/test-desktop-loading.mjs",
+    "test:google": "node scripts/test-google-loader.mjs && node scripts/test-google-init.mjs && node scripts/test-drive-data.mjs && node scripts/test-google-reliability.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

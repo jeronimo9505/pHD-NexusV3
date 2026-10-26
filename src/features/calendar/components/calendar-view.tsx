@@ -600,8 +600,10 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
             const apiMsg = error?.result?.error?.message || error?.message;
             const status = error?.status ?? error?.result?.error?.code;
 
-            if (status === 403 || status === 401) {
-                toast.error('Sin permiso de Google Calendar. Recarga la página y autoriza cuando aparezca el popup de Google.');
+            if (status === 401) {
+                toast.error('La sesión de Google venció. Pulsa generar Meet de nuevo para conectar.');
+            } else if (status === 403) {
+                toast.error(apiMsg || 'Google rechazó la operación. Revisa permisos del calendario, API habilitada y cuota.');
             } else if (status === 404) {
                 toast.error('Calendar ID no encontrado. Verifica el ID en los ajustes del grupo.');
             } else if (apiMsg) {

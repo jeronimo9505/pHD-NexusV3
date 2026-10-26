@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams, usePathname } from 'next/navigation';
-import { initGoogleClient, ensureAuth } from '@/lib/google/auth';
+import { initGoogleClient, ensureAuth, clearToken } from '@/lib/google/auth';
 import { DriveToolbar } from './drive-toolbar';
 import type { GoogleFileType } from './drive-toolbar';
 import { DriveBreadcrumbs } from './drive-breadcrumbs';
@@ -157,11 +157,13 @@ export function DriveBrowser({ groupId, driveSettings }: DriveBrowserProps) {
 
     const showReadError = useCallback((err: any, message: string) => {
         const status = err?.status || err?.result?.error?.code;
-        if (status === 401 || status === 403) {
+        if (status === 401) {
+            clearToken();
             dataSource.invalidate();
             setIsAuthenticated(false);
             setError('Authentication expired. Please sign in again.');
-        } else setError(message);
+        } else if (status === 403) setError('Google denied access. Check file permissions, API access and quota.');
+        else setError(message);
     }, [dataSource]);
 
     const loadFiles = useCallback(async (folderId: string, force = true, pageToken?: string) => {
@@ -327,6 +329,11 @@ export function DriveBrowser({ groupId, driveSettings }: DriveBrowserProps) {
                 if (xhr.status >= 200 && xhr.status < 300) {
                     resolve();
                 } else {
+                    if (xhr.status === 401) {
+                        clearToken();
+                        dataSource.invalidate();
+                        setIsAuthenticated(false);
+                    }
                     reject(new Error(`Upload failed with status ${xhr.status}`));
                 }
             };

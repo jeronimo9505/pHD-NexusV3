@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { clearToken } from '@/lib/google/auth';
 
 const STORAGE_KEY = 'google_drive_access_token';
 const HINT_KEY = 'google_auth_email_hint';
@@ -39,13 +40,13 @@ export function GoogleTokenSync() {
         const cookieExpiry = getCookie('google_provider_token_expiry');
 
         if (cookieToken) {
+            clearToken();
             const expiry = cookieExpiry ? Number(cookieExpiry) : Date.now() + 3_540_000;
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify({ access_token: cookieToken, expiry }));
                 // Inject immediately into GAPI if loaded
                 const gapi = (window as any).gapi;
                 if (gapi?.client?.setToken) gapi.client.setToken({ access_token: cookieToken });
-                console.log('[GoogleTokenSync] Login token synced from auth callback.');
             } catch (e) {
                 console.warn('[GoogleTokenSync] Could not save login token:', e);
             }
@@ -58,11 +59,22 @@ export function GoogleTokenSync() {
         // so the GIS silent re-auth knows which account to use without a popup.
         // We do NOT replace the Drive/Calendar GIS token — that has wider scopes.
         const supabase = createClient();
+        let knownUserId: string | undefined;
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (_event === 'SIGNED_OUT') {
+                clearToken();
+                try { localStorage.removeItem(HINT_KEY); } catch { /* Optional hint. */ }
+                knownUserId = undefined;
+                return;
+            }
             const email = session?.user?.email;
             if (email) {
-                localStorage.setItem(HINT_KEY, email);
-                console.log('[GoogleTokenSync] Email hint updated:', email);
+                try {
+                    const previousEmail = localStorage.getItem(HINT_KEY);
+                    if ((knownUserId && knownUserId !== session.user.id) || (!cookieToken && previousEmail && previousEmail !== email)) clearToken();
+                    localStorage.setItem(HINT_KEY, email);
+                } catch { /* Optional browser storage. */ }
+                knownUserId = session.user.id;
             }
         });
 

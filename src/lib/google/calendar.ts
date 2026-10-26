@@ -1,6 +1,7 @@
 import { ensureAuth, clearToken } from "./auth";
 
 const CALENDAR_DISCOVERY_URL = "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest";
+const CALENDAR_SCOPES = ['https://www.googleapis.com/auth/calendar'];
 
 /**
  * Ensures the Calendar API is loaded. This handles the case where
@@ -20,23 +21,15 @@ async function ensureCalendarApi(): Promise<void> {
 }
 
 /**
- * Wraps a GAPI call with automatic token retry logic.
- * If the call fails with a 401/403, the stale token is cleared and
- * the user is re-authenticated via the GIS popup before retrying once.
+ * Invalidate only expired credentials. Reauthorization must begin on a new
+ * user gesture; permission/quota errors must not open an automatic popup.
  */
 async function withAuthRetry<T>(fn: () => Promise<T>): Promise<T> {
     try {
         return await fn();
     } catch (error: any) {
-        // 401 = expired token, 403 = insufficient scope or token issue
         const status = error?.status ?? error?.result?.error?.code;
-        if (status === 401 || status === 403) {
-            console.warn('[Calendar] Auth error, clearing token and retrying...', status);
-            clearToken();
-            // Force fresh GIS token (may show a mini popup if needed)
-            await ensureAuth();
-            return await fn();
-        }
+        if (status === 401) clearToken();
         throw error;
     }
 }
@@ -52,7 +45,7 @@ export async function createMeetConference(calendarId: string, eventData: {
     endAt: string;   // ISO
     attendees?: string[];
 }) {
-    await ensureAuth();
+    await ensureAuth(CALENDAR_SCOPES);
     await ensureCalendarApi();
     const gapi = (window as any).gapi;
 
@@ -105,7 +98,8 @@ export async function updateMeetConference(calendarId: string, gcalEventId: stri
     startAt: string;
     endAt: string;
 }) {
-    await ensureAuth();
+    await ensureAuth(CALENDAR_SCOPES);
+    await ensureCalendarApi();
     const gapi = (window as any).gapi;
 
     const event: any = {
@@ -134,7 +128,7 @@ export async function updateMeetConference(calendarId: string, gcalEventId: stri
  * Deletes an event from Google Calendar.
  */
 export async function deleteMeetConference(calendarId: string, gcalEventId: string) {
-    await ensureAuth();
+    await ensureAuth(CALENDAR_SCOPES);
     await ensureCalendarApi();
     const gapi = (window as any).gapi;
 

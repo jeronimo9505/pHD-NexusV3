@@ -54,7 +54,7 @@ export function DrivePickerButton({
             const token = await requestAccessToken(safeClientId);
 
             // 2. Open Picker
-            openPicker({
+            await openPicker({
                 clientId: safeClientId,
                 apiKey: safeApiKey,
                 token,

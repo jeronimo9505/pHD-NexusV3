@@ -24,7 +24,7 @@ export const requestAccessToken = async (clientId: string) => {
 
 
 // Open Picker
-export const openPicker = ({
+export const openPicker = async ({
     clientId,
     apiKey,
     token,
@@ -37,17 +37,17 @@ export const openPicker = ({
     const w = window as any;
     if (!w.google || !w.google.picker) {
         // Load Picker Lib
-        w.gapi.load('picker', {
-            callback: () => {
-                createPicker({ clientId, apiKey, token, viewId, onSelect });
-            }
-        });
-    } else {
-        createPicker({ clientId, apiKey, token, viewId, onSelect });
+        await new Promise<void>((resolve, reject) => w.gapi.load('picker', {
+            callback: resolve, onerror: () => reject(new Error('Could not load Google Picker')),
+            timeout: 10_000, ontimeout: () => reject(new Error('Google Picker timed out')),
+        }));
     }
+    createPicker({ clientId, apiKey, token, viewId, onSelect });
 };
 
 const createPicker = ({ clientId, apiKey, token, viewId, onSelect }: any) => {
+    const projectNumber = clientId.trim().match(/^(\d+)-/)?.[1];
+    if (!projectNumber) throw new Error('Google OAuth client ID is invalid. Check Group Settings.');
     const google = (window as any).google;
     const view = new google.picker.DocsView(google.picker.ViewId[viewId]);
     view.setIncludeFolders(true);
@@ -56,7 +56,7 @@ const createPicker = ({ clientId, apiKey, token, viewId, onSelect }: any) => {
     const picker = new google.picker.PickerBuilder()
         .enableFeature(google.picker.Feature.NAV_HIDDEN)
         .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
-        .setAppId(clientId.trim())
+        .setAppId(projectNumber)
         .setOAuthToken(token)
         .setDeveloperKey(apiKey.trim())
         .setOrigin(window.location.protocol + '//' + window.location.host)
