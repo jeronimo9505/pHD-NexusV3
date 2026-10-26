@@ -4,7 +4,9 @@ import dynamic from 'next/dynamic';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Sample, SampleFieldConfig, SampleNomenclature, SampleStatus } from '../types';
-import { deleteSampleAction } from '../actions';
+import { deleteSamples } from '../mutate-samples';
+import { projectSampleRows, acknowledgeSampleRows, expandSampleSelection, type SampleChange } from '../sample-rows';
+import { DeleteSamplesDialog } from './delete-samples-dialog';
 import { updateSample, consumeSampleRefresh } from '../update-sample';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
@@ -81,26 +83,46 @@ export function SampleGrid({
     }, [groupId, logbookId, router]);
     const pendingStatus = useRef(new Set<string>());
     const [savingStatus, setSavingStatus] = useState<Set<string>>(new Set());
-    const [updates, setUpdates] = useState<{ source: Sample[]; rows: Record<string, Sample> }>({ source: serverSamples, rows: {} });
-    const samples = useMemo(() => updates.source === serverSamples
-        ? serverSamples.map(sample => updates.rows[sample.id] ?? sample)
-        : serverSamples, [serverSamples, updates]);
+    const [changes, setChanges] = useState<Record<string, SampleChange>>({});
+    useEffect(() => { setChanges(previous => acknowledgeSampleRows(serverSamples, previous)); }, [serverSamples]);
+    const [removed, setRemoved] = useState<Set<string>>(new Set());
+    const samples = useMemo(() => projectSampleRows(serverSamples, changes, removed), [serverSamples, changes, removed]);
     const applySampleUpdate = (row: Sample) => {
-        setUpdates(previous => ({ source: serverSamples, rows: {
-            ...(previous.source === serverSamples ? previous.rows : {}),
-            [row.id]: { ...samples.find(sample => sample.id === row.id), ...row },
-        } }));
+        setChanges(previous => ({ ...previous, [row.id]: { row, created: previous[row.id]?.created ?? false } }));
         setDetailSample(previous => previous?.id === row.id ? { ...previous, ...row } : previous);
     };
+    const applySampleCreated = (row: Sample) => {
+        setChanges(previous => ({ ...previous, [row.id]: { row, created: true } }));
+        setSearch(''); setStatusFilter('all'); setView('samples');
+        setCollapsed(previous => {
+            const next = { ...previous };
+            let parent = row.parent_id;
+            const visited = new Set<string>();
+            while (parent && !visited.has(parent)) {
+                visited.add(parent); delete next[parent];
+                parent = samples.find(sample => sample.id === parent)?.parent_id ?? null;
+            }
+            return next;
+        });
+    };
+    const [deleteIds, setDeleteIds] = useState<string[]>([]);
+    const [deleting, setDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState<string>();
+    const deleteLock = useRef(false);
+    const requestedDeletion = useMemo(() => new Set(deleteIds), [deleteIds]);
+    const deleteRows = samples.filter(sample => requestedDeletion.has(sample.id));
+    const blockedChildren = samples.filter(sample => sample.parent_id && requestedDeletion.has(sample.parent_id) && !requestedDeletion.has(sample.id)).length;
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<SampleStatus | 'all'>('all');
     const [view, setView] = useState<'samples' | 'characterizations' | 'raman'>('samples');
     const [typeFilter, setTypeFilter] = useState('all');
     const measurements = useLogbookMeasurements(serverSamples, groupId, logbookId, view !== 'samples');
-    const measurementSamples = useMemo(() => measurements.samples.map(sample => ({
-        ...sample, ...(updates.source === serverSamples ? updates.rows[sample.id] : undefined),
-        characterizations: sample.characterizations,
-    })), [measurements.samples, serverSamples, updates]);
+    const measurementSamples = useMemo(() => {
+        const current = new Map(samples.map(sample => [sample.id, sample]));
+        return measurements.samples.filter(sample => current.has(sample.id)).map(sample => ({
+            ...sample, ...current.get(sample.id), characterizations: sample.characterizations,
+        }));
+    }, [measurements.samples, samples]);
     // Collapsed tracks which parent IDs the user has manually collapsed.
     // Empty = everything expanded (default behavior).
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
@@ -221,13 +243,34 @@ export function SampleGrid({
         });
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm('Are you sure you want to delete this sample?')) return;
-        const res = await deleteSampleAction(id, groupId);
-        if (res.error) toast.error(res.error);
-        else toast.success('Deleted');
+    const requestDeletion = (ids: string[]) => {
+        if (deleteLock.current) return;
+        setDeleteError(undefined);
+        setDeleteIds([...new Set(ids)]);
     };
-
+    const confirmDeletion = async () => {
+        if (deleteLock.current || !deleteIds.length || blockedChildren) return;
+        deleteLock.current = true;
+        setDeleting(true); setDeleteError(undefined);
+        try {
+            const result = await deleteSamples(groupId, logbookId, deleteIds);
+            if (result.error || !result.deletedIds) {
+                setDeleteError(result.error || 'Deletion was not confirmed');
+                return;
+            }
+            const deleted = new Set(result.deletedIds);
+            setRemoved(previous => new Set([...previous, ...deleted]));
+            setSelectedIds(previous => new Set([...previous].filter(id => !deleted.has(id))));
+            setDetailSample(previous => previous && deleted.has(previous.id) ? null : previous);
+            setDeleteIds([]);
+            toast.success(`Deleted ${deleted.size} sample${deleted.size === 1 ? '' : 's'}`);
+        } catch {
+            setDeleteError('Deletion could not be confirmed. Refresh before retrying.');
+        } finally {
+            deleteLock.current = false;
+            setDeleting(false);
+        }
+    };
     const handleStatusChange = async (id: string, newStatus: SampleStatus) => {
         if (pendingStatus.current.has(id)) return;
         pendingStatus.current.add(id);
@@ -248,14 +291,15 @@ export function SampleGrid({
         setFormOpen(true);
     };
 
+    const allVisibleSelected = tree.length > 0 && tree.every(row => selectedIds.has(row.id));
     const toggleSelectAll = () => {
-        if (selectedIds.size === tree.length && tree.length > 0) {
-            setSelectedIds(new Set());
-        } else {
-            setSelectedIds(new Set(tree.map(s => s.id)));
-        }
+        setSelectedIds(previous => {
+            const next = new Set(previous);
+            const all = tree.length > 0 && tree.every(row => previous.has(row.id));
+            for (const row of tree) { if (all) next.delete(row.id); else next.add(row.id); }
+            return next;
+        });
     };
-
     const toggleSelect = (id: string) => {
         setSelectedIds(prev => {
             const next = new Set(prev);
@@ -401,7 +445,7 @@ export function SampleGrid({
                                         <input
                                             type="checkbox"
                                             className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                            checked={selectedIds.size === tree.length && tree.length > 0}
+                                            checked={allVisibleSelected}
                                             onChange={toggleSelectAll}
                                         />
                                     </th>
@@ -603,7 +647,8 @@ export function SampleGrid({
                                                     <Edit size={14} />
                                                 </button>
                                                 <button
-                                                    onClick={() => handleDelete(row.id)}
+                                                    disabled={deleting || savingStatus.has(row.id)}
+                                                    onClick={() => requestDeletion([row.id])}
                                                     className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
                                                     title="Delete"
                                                 >
@@ -668,6 +713,7 @@ export function SampleGrid({
                     nomenclatures={nomenclatures}
                     existingSamples={samples}
                     initialData={editingSample}
+                    onCreated={applySampleCreated}
                     onUpdated={applySampleUpdate}
                     initialType={deriveFrom ? 'derived' : 'stock'}
                     initialParentId={deriveFrom?.id}
@@ -737,18 +783,8 @@ export function SampleGrid({
 
                         <button
                             className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded-lg transition-colors text-sm text-red-400"
-                            onClick={async () => {
-                                if (!confirm(`Delete ${selectedIds.size} samples?`)) return;
-                                // Bulk delete implementation...
-                                toast.promise(Promise.all(Array.from(selectedIds).map(id => deleteSampleAction(id, groupId))), {
-                                    loading: 'Deleting...',
-                                    success: () => {
-                                        setSelectedIds(new Set());
-                                        return 'Deleted successfully';
-                                    },
-                                    error: 'Failed to delete some samples'
-                                });
-                            }}
+                            disabled={deleting}
+                            onClick={() => requestDeletion(Array.from(selectedIds))}
                         >
                             <Trash2 size={16} />
                             Delete Selective
@@ -796,6 +832,10 @@ export function SampleGrid({
                     }
                 }}
             />)}
-        </>
+            {deleteIds.length > 0 && <DeleteSamplesDialog samples={deleteRows} blockedChildren={blockedChildren}
+                saving={deleting} error={deleteError}
+                onIncludeChildren={() => { if (!deleteLock.current) { setDeleteError(undefined); setDeleteIds(expandSampleSelection(samples, deleteIds)); } }}
+                onCancel={() => { if (!deleteLock.current) setDeleteIds([]); }}
+                onConfirm={() => { void confirmDeletion(); }} />}        </>
     );
 }

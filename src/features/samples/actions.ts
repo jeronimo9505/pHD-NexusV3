@@ -2,6 +2,7 @@
 
 import { createClient, getUser } from "@/lib/supabase/server";
 import { updateSampleRecord } from "./server/update-sample";
+import { createSampleRecord, deleteSampleRecords } from "./server/mutations";
 import { revalidatePath } from "next/cache";
 
 
@@ -255,132 +256,13 @@ export async function getSamplesAction(groupId: string, logbookId: string) {
     return { data: formattedData };
 }
 
-export async function createSampleAction(input: CreateSampleInput, logbookId: string) {
-    const supabase = await createClient();
-
-    // Get Logbook Prefix
-    const { data: logbook } = await supabase
-        .from('logbooks')
-        .select('prefix')
-        .eq('id', logbookId)
-        .single();
-
-    const LOGBOOK_PREFIX = logbook?.prefix || 'S';
-
-    // Auto-generate name from composition
-    const name = input.composition.length > 0
-        ? input.composition.map(c => c.code).join('-')
-        : 'New Sample'; // Fallback
-
-    // Auto-generate sample_code: A1, A2 (Level 0), B1, B2 (Level 1), etc.
-    let sampleCode = '';
-    let level = 0;
-
-    if (input.parent_id) {
-        // Derived: Get parent info
-        const { data: parent } = await supabase
-            .from('samples')
-            .select('sample_code, level')
-            .eq('id', input.parent_id)
-            .single();
-
-        const parentCode = parent?.sample_code || `${LOGBOOK_PREFIX}?`;
-        level = (parent?.level ?? 0) + 1;
-
-        // Fetch sibling samples to find the next unused index safely (preventing collisions if siblings are deleted)
-        const { data: siblingSamples } = await supabase
-            .from('samples')
-            .select('sample_code')
-            .eq('parent_id', input.parent_id);
-
-        let genPrefix = 'c';
-        if (level === 2) {
-            genPrefix = 'g';
-        } else if (level >= 3) {
-            genPrefix = `${level - 1}g`;
-        }
-
-        const regex = new RegExp(`-${genPrefix}(\\d+)$`);
-        const indexes = (siblingSamples || [])
-            .map(s => {
-                const match = s.sample_code?.match(regex);
-                return match ? parseInt(match[1], 10) : 0;
-            });
-        const nextIndex = Math.max(...indexes, 0) + 1;
-        sampleCode = `${parentCode}-${genPrefix}${nextIndex}`;
-    } else {
-        // Stock (root): LOGBOOK_PREFIX + next count (calculated robustly using max index to prevent collisions)
-        const { data: rootSamples } = await supabase
-            .from('samples')
-            .select('sample_code')
-            .eq('logbook_id', logbookId)
-            .is('parent_id', null);
-
-        const regex = new RegExp(`^${LOGBOOK_PREFIX}(\\d+)$`);
-        const indexes = (rootSamples || [])
-            .map(s => {
-                const match = s.sample_code?.match(regex);
-                return match ? parseInt(match[1], 10) : 0;
-            });
-        const nextIndex = Math.max(...indexes, 0) + 1;
-        sampleCode = `${LOGBOOK_PREFIX}${nextIndex}`;
-    }
-
-    const payload: any = {
-        group_id: input.group_id,
-        logbook_id: logbookId, // New field passed from UI
-        display_id: sampleCode,
-        name: name,
-        sample_code: sampleCode,
-        parent_id: input.parent_id,
-        level: level,
-        type: input.type,
-        status: 'active',
-        attributes: input.attributes,
-        composition: input.composition || [],
-        created_by: (await supabase.auth.getUser()).data.user?.id
-        // description is not in input yet? CreateSampleInput needs update? 
-        // Assuming description might be in attributes or we need to update input type too?
-        // Wait, I didn't update CreateSampleInput in types.ts. I should have. 
-        // But for now, if description is separate, I should add it.
-        // Let's assume description comes in attributes for now OR I update types.ts again?
-        // I'll update types.ts again to be clean.
-    };
-
-    // ... (rest of create logic)
-
-    // Actually, I'll update CreateSampleInput in this same tool call via text replacement if possible? 
-    // No, I can't edit two files. I'll stick to logic here and expect input to have it.
-    // I need to update CreateSampleInput/UpdateSampleInput in types.ts first or assumed it's there.
-    // I missed updating CreateSampleInput. 
-    // I'll update this file assuming functionality, and I'll do a quick fix on types.ts next.
-
-    if ((input as any).description) payload.description = (input as any).description;
-
-    const { data, error } = await supabase
-        .from('samples')
-        .insert(payload)
-        .select()
-        .single();
-
-    if (error) {
-        if (error.code === '23505' && error.message.includes('sample_code')) {
-            return { error: 'Sample Code conflict. Please try again.' };
-        }
-        return { error: error.message };
-    }
-
-    await supabase.from('sample_audit_log').insert({
-        sample_id: data.id,
-        user_id: payload.created_by,
-        action: 'create',
-        changes: { initial: payload }
-    });
-
+export async function createSampleAction(input: CreateSampleInput, logbookId: string, requestId: string = crypto.randomUUID()) {
+    if (!await getUser()) return { error: 'Unauthorized' };
+    const result = await createSampleRecord(input, logbookId, requestId);
+    if (result.error) return result;
     revalidatePath(`/${input.group_id}/samples`);
-    return { success: true, data };
+    return { success: true, ...result };
 }
-
 export async function updateSampleAction(input: UpdateSampleInput, groupId: string) {
     const user = await getUser();
     if (!user) return { error: 'Unauthorized' };
@@ -558,18 +440,15 @@ export async function getBulkSamplesAction(bulkId: string) {
 }
 
 export async function deleteSampleAction(sampleId: string, groupId: string) {
+    if (!await getUser()) return { error: 'Unauthorized' };
     const supabase = await createClient();
-
-    // Check if it has children first? RLS cascade might handle it but good to be safe/warn.
-    // For now, direct delete.
-
-    const { error } = await supabase.from('samples').delete().eq('id', sampleId);
-    if (error) return { error: error.message };
-
+    const { data } = await supabase.from('samples').select('logbook_id').eq('id', sampleId).eq('group_id', groupId).single();
+    if (!data?.logbook_id) return { error: 'Sample not found or inaccessible' };
+    const result = await deleteSampleRecords(groupId, data.logbook_id, [sampleId]);
+    if (result.error) return result;
     revalidatePath(`/${groupId}/samples`);
-    return { success: true };
+    return { success: true, ...result };
 }
-
 // ─── CONFIGURATION (Nomenclatures & Fields) ──────────────────────
 
 export async function getNomenclaturesAction(groupId: string, logbookId: string) {

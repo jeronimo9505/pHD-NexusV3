@@ -101,22 +101,24 @@ const find = node => {
 };
 find(grid);
 assert.ok(patch && projection);
-const originals = [{ id: 's1', name: 'before', characterization_refs: [{ id: 'c1' }] }, { id: 's2', name: 'untouched' }];
-let updates = { source: originals, rows: {} }, detail = originals[0];
+const originals = [{ id: 's1', name: 'before', updated_at: '2026-01-01', characterization_refs: [{ id: 'c1' }] }, { id: 's2', name: 'untouched' }];
+const rowsModule = { exports: {} };
+vm.runInNewContext(compile('src/features/samples/sample-rows.ts'), rowsModule);
+let changes = {}, detail = originals[0];
 const ui = { exports: {}, serverSamples: originals, samples: originals,
-    setUpdates(callback) { updates = callback(updates); },
+    projectSampleRows: rowsModule.exports.projectSampleRows,
+    setChanges(callback) { changes = callback(changes); },
     setDetailSample(callback) { detail = callback(detail); },
 };
-vm.runInNewContext(ts.transpileModule(`exports.patch = ${patch}; exports.project = (serverSamples: any, updates: any) => ${projection};`, {
+vm.runInNewContext(ts.transpileModule(`exports.patch = ${patch}; exports.project = (serverSamples: any, changes: any, removed: Set<string>) => ${projection};`, {
     compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS },
 }).outputText, ui);
-ui.exports.patch({ id: 's1', name: 'after' });
-const projected = ui.exports.project(originals, updates);
+ui.exports.patch({ id: 's1', name: 'after', updated_at: '2026-01-02' });
+const projected = ui.exports.project(originals, changes, new Set());
 assert.equal(projected[0].name, 'after');
 assert.equal(projected[0].characterization_refs[0].id, 'c1');
 assert.equal(projected[1], originals[1], 'unaffected sample keeps its object');
 assert.equal(detail.name, 'after');
 assert.equal(originals[0].name, 'before', 'server snapshot stays immutable');
-const refreshed = [{ id: 's1', name: 'new server result' }];
-assert.equal(ui.exports.project(refreshed, updates), refreshed, 'new server snapshot supersedes local patches');
-console.log('PASS Sample updates: scoped session writes, audit attribution, rejected failures, HTTP auth/origin/validation, targeted response and invalidation');
+const refreshed = [{ id: 's1', name: 'new server result', updated_at: '2026-01-03' }];
+assert.equal(ui.exports.project(refreshed, changes, new Set())[0], refreshed[0], 'newer server row supersedes a local patch');console.log('PASS Sample updates: scoped session writes, audit attribution, rejected failures, HTTP auth/origin/validation, targeted response and invalidation');

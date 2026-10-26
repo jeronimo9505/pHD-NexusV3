@@ -18,6 +18,9 @@ export async function proxy(request: NextRequest) {
     }
 
     const path = request.nextUrl.pathname
+    if (!user && path.startsWith('/api/samples/')) {
+        return NextResponse.json({ error: 'Your session expired. Sign in again before retrying.' }, { status: 401 })
+    }
 
     // 1. If user is signed in and visits login page, redirect to root (which acts as dispatcher)
     if (user && path.startsWith('/login')) {

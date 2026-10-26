@@ -117,3 +117,12 @@ Paginación conservando genealogía y búsqueda global, reducción del paquete i
 - Nexus AI y Logbook respetan el modelo Gemini configurado. No se ejecutaron generaciones ni se migró el SDK en esta entrega.
 - Pruebas: `npm run test:google`; no modifican archivos, calendarios o datos reales. Se conserva el cambio local generado de `next-env.d.ts` sin incluirlo en Git.
 - Base: `desktop-loading-2026-10-26`; etiqueta final `google-integrations-2026-10-26`. Reversión: `git revert --no-commit desktop-loading-2026-10-26..google-integrations-2026-10-26`, revisar, crear el commit y publicar; sin reversión SQL.
+
+### Samples: creación y borrado seguros
+
+- Detalles y validación: `CORRECCIONES-SAMPLES-GUARDADO-BORRADO.md`.
+- Creación con UUID de borrador estable, código asignado en una transacción y fila aplicada directamente al confirmar. El formulario conserva errores y bloquea doble envío/cierre durante la espera.
+- Confirmación de borrado dentro de la app; operación múltiple transaccional y validación de filas eliminadas. Las derivadas requieren selección explícita; no se borran familias por sorpresa.
+- Selección global corregida con filtros, campos numéricos 0 preservados y respuestas anteriores que no resucitan filas eliminadas.
+- Migración Supabase aplicada: `sample_mutation_safety`. Funciones SECURITY INVOKER y política de historial limitada al actor y membresía activa. SQL: `db/changes/sample_mutation_safety.sql`; pruebas con ROLLBACK: `db/tests/sample_mutation_safety.sql`; reversión: `db/rollback/sample_mutation_safety.sql`.
+- Base Git `google-integrations-2026-10-26`; etiqueta final `sample-mutation-safety-2026-10-26`. Revertir primero la aplicación y después, si procede, SQL. La reversión no elimina muestras creadas.

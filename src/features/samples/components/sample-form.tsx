@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { CreateSampleInput, Sample, SampleFieldConfig, SampleNomenclature, SampleType, SampleCompositionItem } from '../types';
-import { createSampleAction } from '../actions';
+import { createSample } from '../mutate-samples';
 import { updateSample } from '../update-sample';
 import { toast } from 'sonner';
 import { X, Save, Plus, Trash2, GripVertical, FileText } from 'lucide-react';
@@ -116,6 +116,7 @@ function SortableCompositionItem({
 }
 
 interface SampleFormProps {
+    onCreated: (sample: Sample) => void;
     onUpdated?: (sample: Sample) => void;
     groupId: string;
     logbookId: string;
@@ -132,6 +133,7 @@ interface SampleFormProps {
 }
 
 export function SampleForm({
+    onCreated,
     onUpdated,
     groupId,
     logbookId,
@@ -147,6 +149,7 @@ export function SampleForm({
     initialComposition = []
 }: SampleFormProps) {
     const saving = useRef(false);
+    const requestId = useRef<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const isEdit = !!initialData;
 
@@ -178,6 +181,7 @@ export function SampleForm({
     );
 
     const handleDragEnd = (event: DragEndEvent) => {
+        if (saving.current) return;
         const { active, over } = event;
         if (over && active.id !== over.id) {
             setComposition((items) => {
@@ -224,6 +228,7 @@ export function SampleForm({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (saving.current) return;
+        if (!isEdit && type === 'derived' && !parentId) { toast.error('Select a parent sample first'); return; }
         saving.current = true;
         setIsSaving(true);
         try {
@@ -247,16 +252,18 @@ export function SampleForm({
                     onClose();
                 }
             } else {
-                const res = await createSampleAction({
+                if (!requestId.current) requestId.current = crypto.randomUUID();
+                const res = await createSample({
                     group_id: groupId,
-                    parent_id: parentId || null,
+                    parent_id: type === 'derived' ? parentId || null : null,
                     type,
                     attributes,
                     composition: cleanComposition,
                     description
-                }, logbookId);
+                }, logbookId, requestId.current);
                 if (res.error) toast.error(res.error);
-                else {
+                else if (res.data) {
+                    onCreated(res.data);
                     toast.success('Sample created');
                     onClose();
                 }
@@ -309,13 +316,15 @@ export function SampleForm({
                             {namePreview}
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-slate-200/80 rounded-full transition-colors text-slate-500 hover:text-slate-700">
+                    <button type="button" disabled={isSaving} onClick={() => { if (!saving.current) onClose(); }} className="p-2 hover:bg-slate-200/80 rounded-full transition-colors text-slate-500 hover:text-slate-700 disabled:opacity-50">
                         <X size={18} />
                     </button>
                 </div>
 
                 {/* Form Content */}
-                <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-6">
+                <form onSubmit={handleSubmit} aria-busy={isSaving} className="flex-1 overflow-y-auto p-5 space-y-6">
+                    {isSaving && <p role="status" className="text-sm text-blue-700">Saving… Waiting for server confirmation.</p>}
+                    <fieldset disabled={isSaving} className="min-w-0 space-y-6">
 
                     {/* 1. Basic Setup */}
                     <div className="space-y-3">
@@ -468,7 +477,7 @@ export function SampleForm({
                                         {field.type === 'select' ? (
                                             <select
                                                 required={field.required}
-                                                value={attributes[field.name] || ''}
+                                                value={attributes[field.name] ?? ''}
                                                 onChange={e => handleAttributeChange(field.name, e.target.value)}
                                                 className="w-full text-sm border-slate-300 rounded-md px-2 py-1.5 bg-white shadow-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                                             >
@@ -495,7 +504,7 @@ export function SampleForm({
                                             <input
                                                 required={field.required}
                                                 type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
-                                                value={attributes[field.name] || ''}
+                                                value={attributes[field.name] ?? ''}
                                                 onChange={e => handleAttributeChange(field.name, e.target.value)}
                                                 className="w-full text-sm border-slate-300 rounded-md px-2 py-1.5 bg-white shadow-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                                             />
@@ -507,11 +516,12 @@ export function SampleForm({
                     </div>
 
                     <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 flex justify-end gap-3 shadow-lg z-10">
-                        <button onClick={onClose} type="button" className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-800 rounded-lg transition-colors">Cancel</button>
+                        <button onClick={() => { if (!saving.current) onClose(); }} disabled={isSaving} type="button" className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-800 rounded-lg transition-colors">Cancel</button>
                         <button type="submit" disabled={isSaving} className="px-6 py-2 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-800 shadow-md hover:shadow-lg transition-all flex items-center gap-2 transform active:scale-95">
                             <Save size={16} /> {isSaving ? 'Saving…' : 'Save Sample'}
                         </button>
                     </div>
+                    </fieldset>
                 </form>
             </div>
         </div>

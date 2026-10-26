@@ -4,6 +4,10 @@ import type { Sample, UpdateSampleInput } from './types';
 // tab must refresh its server snapshot once, without refreshing during a save.
 const dirtyLogbooks = new Set<string>();
 export const consumeSampleRefresh = (groupId: string, logbookId: string) => dirtyLogbooks.delete(`${groupId}:${logbookId}`);
+export function markSamplesChanged(groupId: string, logbookId: string) {
+    if (dirtyLogbooks.size >= 100) dirtyLogbooks.delete(dirtyLogbooks.values().next().value!);
+    dirtyLogbooks.add(`${groupId}:${logbookId}`);
+}
 
 export async function updateSample(input: UpdateSampleInput, groupId: string): Promise<{ data?: Sample; error?: string }> {
     try {
@@ -15,8 +19,7 @@ export async function updateSample(input: UpdateSampleInput, groupId: string): P
         if (!response.ok) return { error: result.error || 'Unable to update sample' };
         if (!result.data?.id) return { error: 'Unable to confirm the saved sample. Please reload.' };
         if (result.data.group_id === groupId && result.data.logbook_id) {
-            if (dirtyLogbooks.size >= 100) dirtyLogbooks.delete(dirtyLogbooks.values().next().value!);
-            dirtyLogbooks.add(`${groupId}:${result.data.logbook_id}`);
+            markSamplesChanged(groupId, result.data.logbook_id);
         }
         return { data: result.data };
     } catch {
