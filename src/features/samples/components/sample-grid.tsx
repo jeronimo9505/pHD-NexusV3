@@ -86,12 +86,14 @@ export function SampleGrid({
     const [changes, setChanges] = useState<Record<string, SampleChange>>({});
     useEffect(() => { setChanges(previous => acknowledgeSampleRows(serverSamples, previous)); }, [serverSamples]);
     const [removed, setRemoved] = useState<Set<string>>(new Set());
+    const [newSampleId, setNewSampleId] = useState<string | null>(null);
     const samples = useMemo(() => projectSampleRows(serverSamples, changes, removed), [serverSamples, changes, removed]);
     const applySampleUpdate = (row: Sample) => {
         setChanges(previous => ({ ...previous, [row.id]: { row, created: previous[row.id]?.created ?? false } }));
         setDetailSample(previous => previous?.id === row.id ? { ...previous, ...row } : previous);
     };
     const applySampleCreated = (row: Sample) => {
+        setNewSampleId(row.id);
         setChanges(previous => ({ ...previous, [row.id]: { row, created: true } }));
         setSearch(''); setStatusFilter('all'); setView('samples');
         setCollapsed(previous => {
@@ -199,6 +201,14 @@ export function SampleGrid({
     const sampleIndex = useMemo(() => createSampleIndex(samples), [samples]);
     const tree = useMemo(() => selectSampleRows(sampleIndex, search, statusFilter, collapsed),
         [sampleIndex, search, statusFilter, collapsed]);
+    useEffect(() => {
+        if (!newSampleId || !tree.some(row => row.id === newSampleId)) return;
+        const frame = requestAnimationFrame(() => {
+            document.getElementById(`sample-row-${newSampleId}`)?.scrollIntoView({ block: 'nearest' });
+            setNewSampleId(null);
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [newSampleId, tree]);
     // Stats calculation for Characterization View
     const charStats = useMemo(() => {
         if (view !== 'characterizations') return { samples: 0, measurements: 0 };
@@ -482,6 +492,7 @@ export function SampleGrid({
                                 {tree.map(row => (
                                     <tr
                                         key={row.id}
+                                        id={`sample-row-${row.id}`}
                                         className={cn(
                                             "hover:bg-blue-50/50 group transition-colors",
                                             selectedIds.has(row.id) && "bg-blue-50/30"

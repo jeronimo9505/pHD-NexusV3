@@ -264,7 +264,7 @@ export function SampleForm({
                 if (res.error) toast.error(res.error);
                 else if (res.data) {
                     onCreated(res.data);
-                    toast.success('Sample created');
+                    toast.success(`Sample ${res.data.sample_code || res.data.display_id} created`);
                     onClose();
                 }
             }

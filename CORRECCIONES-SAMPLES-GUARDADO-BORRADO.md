@@ -19,7 +19,7 @@ Revisión del 26 de octubre de 2026. Base Git: `google-integrations-2026-10-26` 
 
 Cada borrador nuevo conserva un UUID durante sus reintentos. La creación usa ese UUID como identidad de fila. La función de base de datos serializa la asignación del código dentro del grupo, comprueba bitácora/padre, mantiene RLS y confirma creación e historial en una transacción. Repetir el mismo borrador ya guardado devuelve la misma muestra sin otra inserción ni otro historial. Si se cambia un borrador cuya petición ya se guardó, se pide actualizar la lista antes de editar esa muestra.
 
-El formulario bloquea envíos, cierre y edición mientras espera. Un fallo conserva el borrador. Al confirmar el servidor, la tabla recibe la fila devuelta sin esperar a reconstruir toda la página. Se limpian búsqueda/filtro y se abren sus ancestros plegados para hacer visible la muestra nueva. El padre se valida dentro de la misma bitácora y grupo; se infiere su nivel en servidor.
+El formulario bloquea envíos, cierre y edición mientras espera. Un fallo conserva el borrador. Al confirmar el servidor, la tabla recibe la fila devuelta sin esperar a reconstruir toda la página. Se limpian búsqueda/filtro, se abren sus ancestros plegados y la lista se desplaza hasta la muestra nueva; el mensaje de éxito identifica su código. El padre se valida dentro de la misma bitácora y grupo; se infiere su nivel en servidor.
 
 No se promete deduplicación de dos borradores nuevos intencionales con UUID diferentes. Tampoco se identifican ni borran duplicados históricos por similitud: dos muestras físicas legítimas pueden tener idéntica composición.
 
