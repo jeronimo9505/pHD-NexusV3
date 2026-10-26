@@ -2,9 +2,10 @@
 
 import dynamic from 'next/dynamic';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Sample, SampleFieldConfig, SampleNomenclature, SampleStatus } from '../types';
-import { deleteSampleAction, updateSampleAction } from '../actions';
+import { deleteSampleAction } from '../actions';
+import { updateSample } from '../update-sample';
 import { toast } from 'sonner';
 import {
     ChevronRight,
@@ -38,6 +39,7 @@ import { CharacterizationSearch } from './characterization-search';
 const RamanWorkspace = dynamic(() => import('./raman-workspace').then(module => module.RamanWorkspace));
 import { ScientificText } from '@/components/ScientificText';
 import { useLogbookMeasurements } from '../use-logbook-measurements';
+import { createSampleIndex, selectSampleRows } from '../sample-index';
 
 interface SampleGridProps {
     groupId: string;
@@ -66,17 +68,34 @@ export function SampleGrid({
     logbookId,
     logbookName,
     logbookPrefix,
-    samples,
+    samples: serverSamples,
     fields,
     nomenclatures,
     userRole,
     driveSettings
 }: SampleGridProps) {
+    const pendingStatus = useRef(new Set<string>());
+    const [savingStatus, setSavingStatus] = useState<Set<string>>(new Set());
+    const [updates, setUpdates] = useState<{ source: Sample[]; rows: Record<string, Sample> }>({ source: serverSamples, rows: {} });
+    const samples = useMemo(() => updates.source === serverSamples
+        ? serverSamples.map(sample => updates.rows[sample.id] ?? sample)
+        : serverSamples, [serverSamples, updates]);
+    const applySampleUpdate = (row: Sample) => {
+        setUpdates(previous => ({ source: serverSamples, rows: {
+            ...(previous.source === serverSamples ? previous.rows : {}),
+            [row.id]: { ...samples.find(sample => sample.id === row.id), ...row },
+        } }));
+        setDetailSample(previous => previous?.id === row.id ? { ...previous, ...row } : previous);
+    };
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<SampleStatus | 'all'>('all');
     const [view, setView] = useState<'samples' | 'characterizations' | 'raman'>('samples');
     const [typeFilter, setTypeFilter] = useState('all');
-    const measurements = useLogbookMeasurements(samples, groupId, logbookId, view !== 'samples');
+    const measurements = useLogbookMeasurements(serverSamples, groupId, logbookId, view !== 'samples');
+    const measurementSamples = useMemo(() => measurements.samples.map(sample => ({
+        ...sample, ...(updates.source === serverSamples ? updates.rows[sample.id] : undefined),
+        characterizations: sample.characterizations,
+    })), [measurements.samples, serverSamples, updates]);
     // Collapsed tracks which parent IDs the user has manually collapsed.
     // Empty = everything expanded (default behavior).
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
@@ -150,88 +169,9 @@ export function SampleGrid({
 
     const isAdmin = userRole === 'owner' || userRole === 'labmanager' || userRole === 'supervisor';
 
-    // ... (Tree logic remains same)
-    const tree = useMemo(() => {
-        const map = new Map<string, Sample & { children: Sample[], level: number }>();
-        const roots: (Sample & { children: Sample[], level: number })[] = [];
-
-        samples.forEach(s => {
-            map.set(s.id, { ...s, children: [], level: 0 });
-        });
-
-        samples.forEach(s => {
-            const node = map.get(s.id)!;
-            if (s.parent_id && map.has(s.parent_id)) {
-                const parent = map.get(s.parent_id)!;
-                parent.children.push(node);
-                node.level = parent.level + 1;
-            } else {
-                roots.push(node);
-            }
-        });
-
-        // Sort by created_at desc
-        const sortNodes = (nodes: any[]) => {
-            nodes.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-            nodes.forEach(n => sortNodes(n.children));
-        };
-        sortNodes(roots);
-
-        const flat: (Sample & { level: number, hasChildren: boolean })[] = [];
-
-        const traverse = (nodes: any[], level: number) => {
-            const searchLower = search.toLowerCase();
-            for (const node of nodes) {
-                const matchesSearch = !search || (
-                    (node.sample_code?.toLowerCase().includes(searchLower)) ||
-                    (node.display_id?.toLowerCase().includes(searchLower)) ||
-                    (node.name?.toLowerCase().includes(searchLower)) ||
-                    (node.description?.toLowerCase().includes(searchLower)) ||
-                    (node.composition?.some((c: any) =>
-                        c.code?.toLowerCase().includes(searchLower) ||
-                        c.name?.toLowerCase().includes(searchLower)
-                    )) ||
-                    (JSON.stringify(node.attributes).toLowerCase().includes(searchLower)) ||
-                    (node.characterization_types?.some((t: string) => t.toLowerCase().includes(searchLower)))
-                );
-
-                const matchesStatus = statusFilter === 'all' || node.status === statusFilter;
-
-                if (matchesSearch && matchesStatus) {
-                    flat.push({ ...node, level, hasChildren: node.children.length > 0 });
-                }
-
-                if ((search || !collapsed[node.id]) && node.children.length > 0) {
-                    traverse(node.children, search ? level : level + 1);
-                }
-            }
-        };
-
-        if (search || statusFilter !== 'all') {
-            const searchLower = search.toLowerCase();
-            return samples.filter(s => {
-                const matchesSearch = !search || (
-                    (s.sample_code?.toLowerCase().includes(searchLower)) ||
-                    (s.display_id?.toLowerCase().includes(searchLower)) ||
-                    (s.name?.toLowerCase().includes(searchLower)) ||
-                    (s.description?.toLowerCase().includes(searchLower)) ||
-                    (s.composition?.some((c: any) =>
-                        c.code?.toLowerCase().includes(searchLower) ||
-                        c.name?.toLowerCase().includes(searchLower)
-                    )) ||
-                    (JSON.stringify(s.attributes).toLowerCase().includes(searchLower)) ||
-                    (s.characterization_types?.some((t: string) => t.toLowerCase().includes(searchLower)))
-                );
-                const matchesStatus = statusFilter === 'all' || s.status === statusFilter;
-                return matchesSearch && matchesStatus;
-            }).map(s => ({ ...s, level: 0, hasChildren: false }));
-        }
-
-        traverse(roots, 0);
-        return flat;
-
-    }, [samples, search, statusFilter, collapsed]);
-
+    const sampleIndex = useMemo(() => createSampleIndex(samples), [samples]);
+    const tree = useMemo(() => selectSampleRows(sampleIndex, search, statusFilter, collapsed),
+        [sampleIndex, search, statusFilter, collapsed]);
     // Stats calculation for Characterization View
     const charStats = useMemo(() => {
         if (view !== 'characterizations') return { samples: 0, measurements: 0 };
@@ -240,7 +180,7 @@ export function SampleGrid({
         let measurementCount = 0;
         const searchLower = search.toLowerCase();
 
-        measurements.samples.forEach(s => {
+        measurementSamples.forEach(s => {
             const charList = s.characterizations || [];
             const matches = charList.filter(c => {
                 const matchesType = typeFilter === 'all' || c.type === typeFilter;
@@ -262,7 +202,7 @@ export function SampleGrid({
         });
 
         return { samples: sampleCount, measurements: measurementCount };
-    }, [measurements.samples, search, typeFilter, view]);
+    }, [measurementSamples, search, typeFilter, view]);
 
     const handleToggleExpand = (id: string) => {
         setCollapsed(prev => {
@@ -284,9 +224,17 @@ export function SampleGrid({
     };
 
     const handleStatusChange = async (id: string, newStatus: SampleStatus) => {
-        const res = await updateSampleAction({ id, status: newStatus }, groupId);
-        if (res.error) toast.error(res.error);
-        else toast.success('Status updated');
+        if (pendingStatus.current.has(id)) return;
+        pendingStatus.current.add(id);
+        setSavingStatus(new Set(pendingStatus.current));
+        try {
+            const res = await updateSample({ id, status: newStatus }, groupId);
+            if (res.error) toast.error(res.error);
+            else if (res.data) { applySampleUpdate(res.data); toast.success('Status updated'); }
+        } finally {
+            pendingStatus.current.delete(id);
+            setSavingStatus(new Set(pendingStatus.current));
+        }
     };
 
     const handleDerive = (sample: Sample) => {
@@ -585,6 +533,7 @@ export function SampleGrid({
                                         < td className="px-4 py-2 border-r border-slate-100" >
                                             <select
                                                 value={row.status}
+                                                disabled={savingStatus.has(row.id)}
                                                 onChange={(e) => handleStatusChange(row.id, e.target.value as SampleStatus)}
                                                 className={cn(
                                                     "block w-full text-xs font-medium rounded-md border-0 py-1 pl-2 pr-6 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600 sm:text-xs",
@@ -674,7 +623,7 @@ export function SampleGrid({
                     )}
                     {view === 'characterizations' && !measurements.loading && !measurements.error && (
                         <CharacterizationSearch
-                            samples={measurements.samples}
+                            samples={measurementSamples}
                             search={search}
                             typeFilter={typeFilter}
                             onSelectSample={(sample, charId) => {
@@ -686,7 +635,7 @@ export function SampleGrid({
 
                     {view === 'raman' && !measurements.loading && !measurements.error && (
                         <div className="h-full flex flex-col p-4 bg-slate-50 min-h-[500px]">
-                            <RamanWorkspace samples={measurements.samples} driveSettings={driveSettings} />
+                            <RamanWorkspace samples={measurementSamples} driveSettings={driveSettings} />
                         </div>
                     )}
                 </div>
@@ -714,6 +663,7 @@ export function SampleGrid({
                     nomenclatures={nomenclatures}
                     existingSamples={samples}
                     initialData={editingSample}
+                    onUpdated={applySampleUpdate}
                     initialType={deriveFrom ? 'derived' : 'stock'}
                     initialParentId={deriveFrom?.id}
                     initialComposition={deriveFrom?.composition}
@@ -744,6 +694,7 @@ export function SampleGrid({
                 detailSample && (
                     <SampleDetailSheet
                         sample={detailSample}
+                        onUpdated={applySampleUpdate}
                         allSamples={tree}
                         onSelectSample={setDetailSample}
                         groupId={groupId}

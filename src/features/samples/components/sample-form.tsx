@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { CreateSampleInput, Sample, SampleFieldConfig, SampleNomenclature, SampleType, SampleCompositionItem } from '../types';
-import { createSampleAction, updateSampleAction } from '../actions';
+import { createSampleAction } from '../actions';
+import { updateSample } from '../update-sample';
 import { toast } from 'sonner';
 import { X, Save, Plus, Trash2, GripVertical, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -115,6 +116,7 @@ function SortableCompositionItem({
 }
 
 interface SampleFormProps {
+    onUpdated?: (sample: Sample) => void;
     groupId: string;
     logbookId: string;
     logbookPrefix: string;
@@ -130,6 +132,7 @@ interface SampleFormProps {
 }
 
 export function SampleForm({
+    onUpdated,
     groupId,
     logbookId,
     logbookPrefix,
@@ -143,6 +146,8 @@ export function SampleForm({
     initialParentId = '',
     initialComposition = []
 }: SampleFormProps) {
+    const saving = useRef(false);
+    const [isSaving, setIsSaving] = useState(false);
     const isEdit = !!initialData;
 
     // State
@@ -218,41 +223,51 @@ export function SampleForm({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (saving.current) return;
+        saving.current = true;
+        setIsSaving(true);
+        try {
 
-        // Strip IDs for submission
-        const cleanComposition = composition.map(({ id, ...rest }) => rest);
+            // Strip IDs for submission
+            const cleanComposition = composition.map(({ id, ...rest }) => rest);
 
-        if (isEdit && initialData) {
-            const res = await updateSampleAction({
-                id: initialData.id,
-                attributes,
-                composition: cleanComposition,
-                sample_code: sampleCode,
-                name: namePreview, // Optional override
-                description
-            }, groupId);
-            if (res.error) toast.error(res.error);
-            else {
-                toast.success('Sample updated');
-                onClose();
+            if (isEdit && initialData) {
+                const res = await updateSample({
+                    id: initialData.id,
+                    attributes,
+                    composition: cleanComposition,
+                    sample_code: sampleCode,
+                    name: namePreview, // Optional override
+                    description
+                }, groupId);
+                if (res.error) toast.error(res.error);
+                else {
+                    toast.success('Sample updated');
+                    if (res.data) onUpdated?.(res.data);
+                    onClose();
+                }
+            } else {
+                const res = await createSampleAction({
+                    group_id: groupId,
+                    parent_id: parentId || null,
+                    type,
+                    attributes,
+                    composition: cleanComposition,
+                    description
+                }, logbookId);
+                if (res.error) toast.error(res.error);
+                else {
+                    toast.success('Sample created');
+                    onClose();
+                }
             }
-        } else {
-            const res = await createSampleAction({
-                group_id: groupId,
-                parent_id: parentId || null,
-                type,
-                attributes,
-                composition: cleanComposition,
-                description
-            }, logbookId);
-            if (res.error) toast.error(res.error);
-            else {
-                toast.success('Sample created');
-                onClose();
-            }
+        } catch {
+            toast.error('Unable to save sample. Please try again.');
+        } finally {
+            saving.current = false;
+            setIsSaving(false);
         }
     };
-
     const handleAttributeChange = (fieldName: string, value: any) => {
         setAttributes(prev => ({ ...prev, [fieldName]: value }));
     };
@@ -493,8 +508,8 @@ export function SampleForm({
 
                     <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 flex justify-end gap-3 shadow-lg z-10">
                         <button onClick={onClose} type="button" className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-800 rounded-lg transition-colors">Cancel</button>
-                        <button type="submit" className="px-6 py-2 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-800 shadow-md hover:shadow-lg transition-all flex items-center gap-2 transform active:scale-95">
-                            <Save size={16} /> Save Sample
+                        <button type="submit" disabled={isSaving} className="px-6 py-2 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-800 shadow-md hover:shadow-lg transition-all flex items-center gap-2 transform active:scale-95">
+                            <Save size={16} /> {isSaving ? 'Saving…' : 'Save Sample'}
                         </button>
                     </div>
                 </form>

@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { Sample, SampleFieldConfig, SampleCharacterization } from '../types';
-import { getCharacterizationsAction, deleteCharacterizationAction, updateSampleAction, updateCharacterizationAction, createCharacterizationAction, getBulkSamplesAction } from '../actions';
+import { getCharacterizationsAction, deleteCharacterizationAction, updateCharacterizationAction, createCharacterizationAction, getBulkSamplesAction } from '../actions';
+import { updateSample } from '../update-sample';
 import { X, Calendar, User, FlaskConical, FileText, Plus, ExternalLink, Microscope, Settings, Edit, MessageSquareText, Trash2, Pencil, Check, StickyNote, ArrowLeft, Edit2, ChevronDown, ChevronUp, Loader2, Save, History, Clock, Copy, Database, Image } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -16,6 +17,7 @@ import { FolderOpen } from 'lucide-react';
 import { ScientificText } from '@/components/ScientificText';
 
 interface SampleDetailSheetProps {
+    onUpdated?: (sample: Sample) => void;
     sample: Sample | null;
     groupId: string;
     logbookName: string;
@@ -34,6 +36,7 @@ interface SampleDetailSheetProps {
 }
 
 export function SampleDetailSheet({
+    onUpdated,
     sample, groupId, logbookName, fields, onClose,
     parameterUnits, setParameterUnits, lastUnits, setLastUnits,
     parameterOrder, setParameterOrder, driveSettings, initialCharId,
@@ -130,10 +133,10 @@ export function SampleDetailSheet({
     const saveDescription = async () => {
         if (!sample) return;
         setIsSaving(true);
-        const res = await updateSampleAction({ id: sample.id, description: editValue }, groupId);
+        const res = await updateSample({ id: sample.id, description: editValue }, groupId);
         setIsSaving(false);
         if (res.error) toast.error(res.error);
-        else { toast.success('Description updated'); setEditingSection(null); }
+        else { if (res.data) onUpdated?.(res.data); toast.success('Description updated'); setEditingSection(null); }
     };
 
     const saveCompositionNote = async (index: number) => {
@@ -141,10 +144,10 @@ export function SampleDetailSheet({
         setIsSaving(true);
         const newComposition = [...sample.composition];
         newComposition[index] = { ...newComposition[index], notes: editValue };
-        const res = await updateSampleAction({ id: sample.id, composition: newComposition }, groupId);
+        const res = await updateSample({ id: sample.id, composition: newComposition }, groupId);
         setIsSaving(false);
         if (res.error) toast.error(res.error);
-        else { toast.success('Note updated'); setEditingSection(null); }
+        else { if (res.data) onUpdated?.(res.data); toast.success('Note updated'); setEditingSection(null); }
     };
 
     const getSummaryString = (char: SampleCharacterization) => {

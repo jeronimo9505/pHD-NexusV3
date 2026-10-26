@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit --incremental false",
     "check": "npm run typecheck && npm run lint",
     "test:loading": "node scripts/test-drive-data.mjs && node scripts/test-google-init.mjs && node scripts/test-google-loader.mjs && node scripts/test-loading-lifecycle.mjs",
-    "test:samples": "node scripts/test-samples-loading.mjs"
+    "test:samples": "node scripts/test-samples-loading.mjs && node scripts/test-sample-index.mjs && node scripts/test-sample-updates.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

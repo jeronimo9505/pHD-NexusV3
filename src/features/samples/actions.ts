@@ -1,6 +1,7 @@
 'use server';
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
+import { updateSampleRecord } from "./server/update-sample";
 import { revalidatePath } from "next/cache";
 
 
@@ -380,66 +381,13 @@ export async function createSampleAction(input: CreateSampleInput, logbookId: st
     return { success: true, data };
 }
 
-export async function updateSampleAction(input: UpdateSampleInput & { description?: string }, groupId: string) {
-    const supabase = await createClient();
-
-    const { data: current } = await supabase
-        .from('samples')
-        .select('*')
-        .eq('id', input.id)
-        .single();
-
-    if (!current) return { error: 'Sample not found' };
-
-    const payload: any = {
-        updated_at: new Date().toISOString()
-    };
-    if (input.attributes) payload.attributes = input.attributes;
-    if (input.status) payload.status = input.status;
-    if (input.description !== undefined) payload.description = input.description;
-
-    if (input.composition) {
-        payload.composition = input.composition;
-        const newName = input.composition.length > 0
-            ? input.composition.map(c => c.code).join('-')
-            : 'Empty Sample';
-        payload.name = newName;
-    }
-
-    if (input.name) {
-        payload.name = input.name;
-    }
-
-    if (input.sample_code) payload.sample_code = input.sample_code;
-
-    const { data, error } = await supabase
-        .from('samples')
-        .update(payload)
-        .eq('id', input.id)
-        .select()
-        .single();
-
-    if (error) return { error: error.message };
-
-    const changes: Record<string, any> = {};
-    if (input.attributes) changes.attributes = { old: current.attributes, new: input.attributes };
-    if (input.status) changes.status = { old: current.status, new: input.status };
-    if (input.composition) changes.composition = { old: current.composition, new: input.composition };
-    if (input.description !== undefined) changes.description = { old: current.description, new: input.description };
-
-    if (Object.keys(changes).length > 0) {
-        await supabase.from('sample_audit_log').insert({
-            sample_id: input.id,
-            user_id: (await supabase.auth.getUser()).data.user?.id,
-            action: 'update',
-            changes
-        });
-    }
-
-    revalidatePath(`/${groupId}/samples`);
-    return { success: true, data };
+export async function updateSampleAction(input: UpdateSampleInput, groupId: string) {
+    const user = await getUser();
+    if (!user) return { error: 'Unauthorized' };
+    const result = await updateSampleRecord(input, groupId, user.id);
+    if (!result.error) revalidatePath(`/${groupId}/samples`);
+    return result;
 }
-
 // Characterization Actions
 
 export async function createCharacterizationAction(input: {
