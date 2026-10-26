@@ -80,11 +80,14 @@ assert.deepEqual(invalidated, [`/${groupId}/samples`]);
 let fetchCalls = [], fail = false;
 const browser = { exports: {}, async fetch(url, options) {
     fetchCalls.push({ url, options });
-    return { ok: !fail, json: async () => fail ? { error: 'denied' } : { data: { id, status: 'completed' } } };
+    return { ok: !fail, json: async () => fail ? { error: 'denied' } : { data: { id, group_id: groupId, logbook_id: 'book', status: 'completed' } } };
 } };
 vm.runInNewContext(compile('src/features/samples/update-sample.ts'), browser);
 assert.equal((await browser.exports.updateSample(input, groupId)).data.id, id);
 assert.equal(fetchCalls.length, 1); assert.equal(fetchCalls[0].options.method, 'PATCH');
+assert.equal(browser.exports.consumeSampleRefresh('other-group', 'book'), false);
+assert.equal(browser.exports.consumeSampleRefresh(groupId, 'book'), true, 'revisited cached page must refresh once');
+assert.equal(browser.exports.consumeSampleRefresh(groupId, 'book'), false);
 fail = true;
 assert.equal((await browser.exports.updateSample(input, groupId)).error, 'denied');
 

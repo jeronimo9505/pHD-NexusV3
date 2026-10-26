@@ -5,7 +5,8 @@ import dynamic from 'next/dynamic';
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Sample, SampleFieldConfig, SampleNomenclature, SampleStatus } from '../types';
 import { deleteSampleAction } from '../actions';
-import { updateSample } from '../update-sample';
+import { updateSample, consumeSampleRefresh } from '../update-sample';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
     ChevronRight,
@@ -74,6 +75,10 @@ export function SampleGrid({
     userRole,
     driveSettings
 }: SampleGridProps) {
+    const router = useRouter();
+    useEffect(() => {
+        if (consumeSampleRefresh(groupId, logbookId)) router.refresh();
+    }, [groupId, logbookId, router]);
     const pendingStatus = useRef(new Set<string>());
     const [savingStatus, setSavingStatus] = useState<Set<string>>(new Set());
     const [updates, setUpdates] = useState<{ source: Sample[]; rows: Record<string, Sample> }>({ source: serverSamples, rows: {} });
