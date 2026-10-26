@@ -34,7 +34,7 @@ export function SyncDriveButton({ groupId, driveSettings }: SyncDriveButtonProps
             const { initGoogleClient, ensureAuth } = await import('@/lib/google/auth');
 
             // 1. Initialize & Auth
-            await initGoogleClient(apiKey, clientId);
+            await initGoogleClient(apiKey, clientId, ['drive']);
             const token = await ensureAuth();
 
             if (!token) {

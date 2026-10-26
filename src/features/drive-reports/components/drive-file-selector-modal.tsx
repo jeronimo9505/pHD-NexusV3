@@ -51,7 +51,7 @@ export function DriveFileSelectorModal({
 
         const init = async () => {
             try {
-                await initGoogleClient(driveSettings.apiKey!, driveSettings.clientId!);
+                await initGoogleClient(driveSettings.apiKey!, driveSettings.clientId!, ['drive']);
 
                 // Check if authenticated
                 const gapi = (window as any).gapi;

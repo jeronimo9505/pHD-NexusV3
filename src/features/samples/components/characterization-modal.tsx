@@ -230,7 +230,7 @@ export function CharacterizationModal({
         if (isOpen && driveSettings?.apiKey && driveSettings?.clientId) {
             if (!scriptsLoaded) {
                 import('@/lib/google/auth').then(({ initGoogleClient }) => {
-                    initGoogleClient(driveSettings.apiKey!, driveSettings.clientId!)
+                    initGoogleClient(driveSettings.apiKey!, driveSettings.clientId!, ['drive'])
                         .then(() => {
                             setScriptsLoaded(true);
                         })

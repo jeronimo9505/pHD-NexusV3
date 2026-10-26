@@ -32,7 +32,7 @@ export function DrivePickerButton({
 
     useEffect(() => {
         if (safeClientId && safeApiKey) {
-            initGoogleClient(safeApiKey, safeClientId)
+            initGoogleClient(safeApiKey, safeClientId, ['drive'])
                 .then(() => setIsReady(true))
                 .catch((err) => {
                     console.error("Failed to load Google Scripts", err);

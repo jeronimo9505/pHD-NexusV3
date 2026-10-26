@@ -4,12 +4,6 @@ import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 
 // Scopes required for creating and editing files and calendar events
 const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/presentations https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/calendar';
-const DISCOVERY_DOCS = [
-    "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
-    "https://docs.googleapis.com/$discovery/rest?version=v1",
-    "https://slides.googleapis.com/$discovery/rest?version=v1",
-    "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"
-];
 
 const STORAGE_KEY = 'google_drive_access_token';
 
@@ -69,27 +63,45 @@ export const getGapiClient = async () => {
     return (window as any).gapi;
 }
 
-export const initGoogleClient = async (apiKey: string, clientId: string) => {
-    console.log("Initializing Google Client...");
-    await loadGoogleScripts();
+export type GoogleService = 'drive' | 'docs' | 'slides' | 'calendar';
+const SERVICE_URLS: Record<GoogleService, string> = {
+    drive: 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+    docs: 'https://docs.googleapis.com/$discovery/rest?version=v1',
+    slides: 'https://slides.googleapis.com/$discovery/rest?version=v1',
+    calendar: 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
+};
+let initializationQueue: Promise<unknown> = Promise.resolve();
+let configuredApiKey = '';
+let configuredClientId = '';
 
-    if (!(window as any).gapi) throw new Error('GAPI not loaded');
-
-    const gapi = (window as any).gapi;
-
-    // If the preloader already initialized everything, just ensure token client exists
-    if (gapi.client?.drive) {
-        // Restore token if available
-        const savedToken = loadToken();
-        if (savedToken) {
-            gapi.client.setToken({ access_token: savedToken });
+// Serialize initialization only, not file/event reads. A Drive-only screen
+// never waits for Docs, Slides or Calendar discovery documents.
+export function initGoogleClient(apiKey: string, clientId: string, services?: GoogleService[]): Promise<void> {
+    const requested = services ?? ['drive', 'docs', 'slides', 'calendar'];
+    const initialization = initializationQueue.then(async () => {
+        await loadGoogleScripts();
+        const gapi = (window as any).gapi;
+        if (!gapi) throw new Error('GAPI not loaded');
+        if (!gapi.client) await new Promise<void>((resolve, reject) => {
+            gapi.load('client', { callback: resolve, onerror: reject, timeout: 10_000,
+                ontimeout: () => reject(new Error('Google client timed out')) });
+        });
+        if (configuredApiKey !== apiKey.trim()) {
+            await gapi.client.init({ apiKey: apiKey.trim() });
+            configuredApiKey = apiKey.trim();
         }
-
-        // Ensure token client is set up
-        if (!tokenClient && (window as any).google?.accounts?.oauth2) {
+        const loads = requested.map(async service => {
+            if (!gapi.client[service]) await gapi.client.load(SERVICE_URLS[service]);
+        });
+        // Preserve legacy callers' tolerance for an unused, disabled API.
+        // Explicit capability callers require every API they actually use.
+        if (services) await Promise.all(loads);
+        else await Promise.allSettled(loads);
+        const savedToken = loadToken();
+        if (savedToken) gapi.client.setToken({ access_token: savedToken });
+        if ((!tokenClient || configuredClientId !== clientId.trim()) && (window as any).google?.accounts?.oauth2) {
             tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
-                client_id: clientId.trim(),
-                scope: SCOPES,
+                client_id: clientId.trim(), scope: SCOPES,
                 callback: (resp: any) => {
                     if (resp.access_token) {
                         saveToken(resp);
@@ -97,66 +109,12 @@ export const initGoogleClient = async (apiKey: string, clientId: string) => {
                     }
                 },
             });
+            configuredClientId = clientId.trim();
         }
-
-        console.log("Google Client already pre-loaded — skipping init");
-        return;
-    }
-
-    // Load GAPI client
-    await new Promise<void>((resolve, reject) => {
-        gapi.load('client', { callback: resolve, onerror: reject });
     });
-
-    // Init GAPI client with API Key
-    try {
-        await gapi.client.init({
-            apiKey: apiKey.trim(),
-        });
-    } catch (e: any) {
-        console.warn("GAPI Init warning:", e);
-    }
-
-    // Load APIs individually to handle permissions/errors gracefully
-    const loadApi = async (name: string, version: string, discoveryUrl: string) => {
-        try {
-            await gapi.client.load(discoveryUrl);
-            console.log(`Loaded ${name} API`);
-        } catch (e) {
-            console.info(`[Info] Could not load ${name} API (checking others...)`);
-        }
-    };
-
-    await Promise.all([
-        loadApi('drive', 'v3', "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"),
-        loadApi('docs', 'v1', "https://docs.googleapis.com/$discovery/rest?version=v1"),
-        loadApi('slides', 'v1', "https://slides.googleapis.com/$discovery/rest?version=v1"),
-        loadApi('calendar', 'v3', "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest")
-    ]);
-
-    // Restore token if available
-    const savedToken = loadToken();
-    if (savedToken) {
-        console.log("Restoring cached Google token");
-        gapi.client.setToken({ access_token: savedToken });
-    }
-
-    // Init Token Client (GIS)
-    if ((window as any).google?.accounts?.oauth2) {
-        tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
-            client_id: clientId.trim(),
-            scope: SCOPES,
-            callback: (resp: any) => {
-                if (resp.access_token) {
-                    saveToken(resp);
-                    if (resp.email) localStorage.setItem('google_auth_email_hint', resp.email);
-                }
-            },
-        });
-    }
-
-    console.log("Google Client Initialized");
-};
+    initializationQueue = initialization.catch(() => undefined);
+    return initialization;
+}
 
 /**
  * Ensures valid authentication.

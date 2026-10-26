@@ -78,6 +78,9 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
     const [localEvents, setLocalEvents] = useState<LocalEvent[]>([]);
     const [loadingEvents, setLoadingEvents] = useState(false);
     const rangeRef = useRef<{ from: string, to: string } | null>(null);
+    const loadedRangeRef = useRef('');
+    const eventRequestRef = useRef(0);
+    const pendingRangeRef = useRef('');
 
     // UI State
     const [panelOpen, setPanelOpen] = useState(true);
@@ -99,7 +102,7 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
     
     useEffect(() => {
         if (groupId && driveSettings?.apiKey && driveSettings?.clientId) {
-            initGoogleClient(driveSettings.apiKey, driveSettings.clientId).catch(console.error);
+            initGoogleClient(driveSettings.apiKey, driveSettings.clientId, ['calendar']).catch(console.error);
         }
     }, [groupId, driveSettings]);
 
@@ -178,15 +181,31 @@ export function CalendarView({ groupId, groupName, calendarId, driveSettings, ta
 
     /* ── Fetch local events ── */
     const fetchLocal = useCallback(async (from: string, to: string) => {
-        // Only fetch if range changed significantly
-        if (rangeRef.current?.from === from && rangeRef.current?.to === to) return;
-        
-        setLoadingEvents(true);
+        const key = `${groupId}:${from}:${to}`;
+        if (pendingRangeRef.current === key) return;
+        const request = ++eventRequestRef.current;
         rangeRef.current = { from, to };
-        
-        const res = await getCalendarEventsAction(groupId, from, to);
-        if (res.data) setLocalEvents(res.data as LocalEvent[]);
-        setLoadingEvents(false);
+        if (loadedRangeRef.current === key) {
+            pendingRangeRef.current = '';
+            setLoadingEvents(false);
+            return;
+        }
+        pendingRangeRef.current = key;
+        setLoadingEvents(true);
+        try {
+            const res = await getCalendarEventsAction(groupId, from, to);
+            if (request !== eventRequestRef.current) return;
+            if (res.error) throw new Error(res.error);
+            setLocalEvents(res.data as LocalEvent[]);
+            loadedRangeRef.current = key;
+        } catch {
+            if (request === eventRequestRef.current) toast.error('Could not load calendar events. Please try again.');
+        } finally {
+            if (request === eventRequestRef.current) {
+                pendingRangeRef.current = '';
+                setLoadingEvents(false);
+            }
+        }
     }, [groupId]);
 
     // handleDatesSet is called by FullCalendar whenever the view or dates change

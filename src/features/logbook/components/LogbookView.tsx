@@ -198,14 +198,16 @@ function LogEntry({ entry, groupId, onImageClick, onUpdate, onDelete, comments, 
     );
 }
 
-export default function LogbookView({ groupId, userId, isPrivate, isOwner }: { 
+export default function LogbookView({ groupId, userId, isPrivate, isOwner, initialEntries, initialTasks }: {
     groupId: string;
     userId?: string;
     isPrivate?: boolean;
     isOwner?: boolean;
+    initialEntries?: any[];
+    initialTasks?: { id: string; status: string }[];
 }) {
-    const [entries, setEntries] = useState<any[]>([]);
-    const [tasks, setTasks] = useState<any[]>([]);
+    const [entries, setEntries] = useState<any[]>(() => [...(initialEntries ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at)));
+    const [tasks, setTasks] = useState<any[]>(initialTasks ?? []);
     const [allActiveDates, setAllActiveDates] = useState<string[]>([]);
     const [activeTag, setActiveTag] = useState<string | null>(null);
     const [viewMode, setViewMode] = useState<'timeline' | 'gallery' | 'notebook'>('timeline');
@@ -213,9 +215,9 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
     const [filterTasks, setFilterTasks] = useState(false);
     const [mediaFilter, setMediaFilter] = useState<'all' | 'image' | 'video'>('all');
     const [isLoadingMore, setIsLoadingMore] = useState(false);
-    const [hasMore, setHasMore] = useState(true);
+    const [hasMore, setHasMore] = useState(initialEntries === undefined || initialEntries.length === 50);
     const [hasMoreDown, setHasMoreDown] = useState(false);
-    const [isReady, setIsReady] = useState(false);
+    const [isReady, setIsReady] = useState(initialEntries !== undefined);
     const [showHelp, setShowHelp] = useState(false);
     const [lightbox, setLightbox] = useState<{ url: string, type: string } | null>(null);
     const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -289,8 +291,8 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
     };
 
     useEffect(() => {
-        fetchEntries(true);
-        fetchTasks();
+        if (initialEntries === undefined) fetchEntries(true);
+        if (initialTasks === undefined) fetchTasks();
         fetchAllActiveDates();
         
         const logbookChannel = supabase.channel('logbook_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'logbook_entries', filter: `group_id=eq.${groupId}` }, (payload) => {
@@ -352,7 +354,9 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
             query = query.order('created_at', { ascending: false });
         }
 
-        const { data } = await query;
+        try {
+        const { data, error } = await query;
+        if (error) throw error;
         
         if (data) {
             const logbookData = data as any[];
@@ -386,7 +390,13 @@ export default function LogbookView({ groupId, userId, isPrivate, isOwner }: {
             }
         }
         
-        setIsLoadingMore(false);
+        } catch {
+            toast.error('Could not load logbook entries. Please try again.');
+        } finally {
+            setIsLoadingMore(false);
+            // Empty and failed requests must also release the initial hidden state.
+            setIsReady(true);
+        }
     };
 
     const fetchTasks = async () => {

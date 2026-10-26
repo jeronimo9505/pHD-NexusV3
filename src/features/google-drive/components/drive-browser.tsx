@@ -1,15 +1,17 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams, usePathname } from 'next/navigation';
 import { initGoogleClient, ensureAuth } from '@/lib/google/auth';
 import { DriveToolbar } from './drive-toolbar';
 import type { GoogleFileType } from './drive-toolbar';
 import { DriveBreadcrumbs } from './drive-breadcrumbs';
 import { DriveFileRow } from './drive-file-row';
 import { DriveFileCard } from './drive-file-card';
-import { FileDetailPanel } from './file-detail-panel';
-import { ActivityFeedPanel } from './activity-feed-panel';
+import dynamic from 'next/dynamic';
+import { createDriveDataSource } from '@/lib/google/drive-data';
+const FileDetailPanel = dynamic(() => import('./file-detail-panel').then(module => module.FileDetailPanel));
+const ActivityFeedPanel = dynamic(() => import('./activity-feed-panel').then(module => module.ActivityFeedPanel));
 import { Loader2, CloudOff, LogIn, RefreshCw, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -43,7 +45,6 @@ export type ViewMode = 'list' | 'grid';
 export type SortBy = 'name_asc' | 'name_desc' | 'modified_desc' | 'modified_asc';
 
 export function DriveBrowser({ groupId, driveSettings }: DriveBrowserProps) {
-    const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
 
@@ -62,6 +63,13 @@ export function DriveBrowser({ groupId, driveSettings }: DriveBrowserProps) {
 
     // Navigation – initialize from URL params
     const rootFolderId = driveSettings?.folderId || 'root';
+    const requestVersion = useRef(0);
+    const [nextPageToken, setNextPageToken] = useState<string | undefined>();
+    const dataSource = useMemo(() => createDriveDataSource<DriveFile>(params => {
+        const drive = (window as any).gapi?.client?.drive;
+        if (!drive) throw new Error('Google Drive API not loaded');
+        return drive.files.list(params);
+    }), [groupId, driveSettings?.clientId, driveSettings?.apiKey, rootFolderId]);
 
     const getInitialPath = (): FolderEntry[] => {
         const pathParam = searchParams.get('path');
@@ -88,8 +96,8 @@ export function DriveBrowser({ groupId, driveSettings }: DriveBrowserProps) {
             params.set('path', encodeURIComponent(JSON.stringify(path)));
         }
         const qs = params.toString();
-        router.push(`${pathname}${qs ? `?${qs}` : ''}`);
-    }, [pathname, rootFolderId, router]);
+        window.history.pushState(null, '', `${pathname}${qs ? `?${qs}` : ''}`);
+    }, [pathname, rootFolderId]);
 
     // Listen for popstate (browser back/forward) to update folder state
     useEffect(() => {
@@ -120,179 +128,90 @@ export function DriveBrowser({ groupId, driveSettings }: DriveBrowserProps) {
     const [searchQuery, setSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<SortBy>('modified_desc');
 
-    // Debounce ref for search
-    const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Initialize Google client
+    // One initialization and one read pipeline per account/group.
     useEffect(() => {
+        let cancelled = false;
+        setIsInitializing(true);
+        setIsAuthenticated(false);
+        setFiles([]);
+        setNextPageToken(undefined);
+        dataSource.invalidate();
         if (!driveSettings?.apiKey || !driveSettings?.clientId) {
-            setIsInitializing(false);
-            setLoading(false);
-            setError('Google Drive is not configured. Please set up your credentials in Group Settings.');
+            setIsInitializing(false); setLoading(false);
             return;
         }
-
         const init = async () => {
             try {
-                await initGoogleClient(driveSettings.apiKey!, driveSettings.clientId!);
-
-                const gapi = (window as any).gapi;
-                if (gapi?.client?.getToken()?.access_token) {
-                    setIsAuthenticated(true);
-                }
-            } catch (err) {
-                console.error('Failed to initialize Google API:', err);
-                setError('Failed to initialize Google Drive connection');
+                await initGoogleClient(driveSettings.apiKey!, driveSettings.clientId!, ['drive']);
+                if (!cancelled) setIsAuthenticated(Boolean((window as any).gapi?.client?.getToken()?.access_token));
+            } catch {
+                if (!cancelled) setError('Failed to initialize Google Drive connection');
             } finally {
-                setIsInitializing(false);
-                setLoading(false);
+                if (!cancelled) { setIsInitializing(false); setLoading(false); }
             }
         };
+        void init();
+        return () => { cancelled = true; requestVersion.current++; };
+    }, [driveSettings?.apiKey, driveSettings?.clientId, dataSource]);
 
-        init();
-    }, [driveSettings?.apiKey, driveSettings?.clientId]);
+    const showReadError = useCallback((err: any, message: string) => {
+        const status = err?.status || err?.result?.error?.code;
+        if (status === 401 || status === 403) {
+            dataSource.invalidate();
+            setIsAuthenticated(false);
+            setError('Authentication expired. Please sign in again.');
+        } else setError(message);
+    }, [dataSource]);
 
-    // Load files when folder changes or auth state changes
-    useEffect(() => {
-        if (isAuthenticated && !isInitializing) {
-            loadFiles(currentFolderId);
-        }
-    }, [currentFolderId, isAuthenticated, isInitializing]);
-
-    // Deep search with debounce
-    useEffect(() => {
-        if (!isAuthenticated || isInitializing) return;
-
-        // Clear previous timer
-        if (searchTimerRef.current) {
-            clearTimeout(searchTimerRef.current);
-        }
-
-        // If search is cleared, go back to folder view
-        if (!searchQuery.trim()) {
-            setIsSearchResults(false);
-            loadFiles(currentFolderId);
-            return;
-        }
-
-        // Debounce: wait 500ms after user stops typing
-        searchTimerRef.current = setTimeout(() => {
-            searchDriveFiles(searchQuery.trim());
-        }, 500);
-
-        return () => {
-            if (searchTimerRef.current) {
-                clearTimeout(searchTimerRef.current);
-            }
-        };
-    }, [searchQuery, isAuthenticated, isInitializing]);
-
-    const loadFiles = useCallback(async (folderId: string) => {
-        setLoading(true);
-        setError(null);
-
+    const loadFiles = useCallback(async (folderId: string, force = true, pageToken?: string) => {
+        const version = ++requestVersion.current;
+        if (force) dataSource.invalidate();
+        setLoading(true); setSearching(false); setError(null);
         try {
-            const gapi = (window as any).gapi;
-            if (!gapi?.client?.drive) {
-                throw new Error('Google Drive API not loaded');
-            }
-
-            const response = await gapi.client.drive.files.list({
-                q: `'${folderId}' in parents and trashed=false`,
-                fields: 'files(id, name, mimeType, webViewLink, iconLink, modifiedTime, size, owners, lastModifyingUser)',
-                orderBy: 'folder,name',
-                pageSize: 200
-            });
-
-            setFiles(response.result.files || []);
+            const result = await dataSource.listFolder(folderId, pageToken, force);
+            if (version !== requestVersion.current) return;
+            setFiles(previous => pageToken
+                ? [...new Map([...previous, ...result.files].map(file => [file.id, file])).values()]
+                : result.files);
+            setNextPageToken(result.nextPageToken);
             setIsSearchResults(false);
-        } catch (err: any) {
-            console.error('Error loading files:', err);
-            const status = err?.status || err?.result?.error?.code;
-            if (status === 401 || status === 403) {
-                setIsAuthenticated(false);
-                setError('Authentication expired. Please sign in again.');
-            } else {
-                setError('Failed to load files. Please try again.');
-            }
+        } catch (err) {
+            if (version === requestVersion.current) showReadError(err, 'Failed to load files. Please try again.');
         } finally {
-            setLoading(false);
+            if (version === requestVersion.current) setLoading(false);
         }
-    }, []);
+    }, [dataSource, showReadError]);
 
     const searchDriveFiles = useCallback(async (query: string) => {
-        setSearching(true);
-        setError(null);
-
+        const version = ++requestVersion.current;
+        setSearching(true); setLoading(false); setError(null); setNextPageToken(undefined);
         try {
-            const gapi = (window as any).gapi;
-            if (!gapi?.client?.drive) {
-                throw new Error('Google Drive API not loaded');
-            }
-
-            // Step 1: Recursively collect all folder IDs under root
-            const allFolderIds: string[] = [rootFolderId];
-            const foldersToScan = [rootFolderId];
-
-            while (foldersToScan.length > 0) {
-                const batch = foldersToScan.splice(0, 5);
-                const results = await Promise.all(
-                    batch.map(fId =>
-                        gapi.client.drive.files.list({
-                            q: `'${fId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-                            fields: 'files(id)',
-                            pageSize: 100
-                        })
-                    )
-                );
-                for (const res of results) {
-                    const subFolders = res.result.files || [];
-                    for (const sf of subFolders) {
-                        allFolderIds.push(sf.id);
-                        foldersToScan.push(sf.id);
-                    }
-                }
-            }
-
-            // Step 2: Search files by name within those folders
-            const escapedQuery = query.replace(/'/g, "\\'");
-            // Build parent filter: ('id1' in parents or 'id2' in parents ...)
-            // Drive API has query length limits, so batch if needed
-            const BATCH_SIZE = 20;
-            const allMatchedFiles: DriveFile[] = [];
-
-            for (let i = 0; i < allFolderIds.length; i += BATCH_SIZE) {
-                const chunk = allFolderIds.slice(i, i + BATCH_SIZE);
-                const parentFilter = chunk.map(id => `'${id}' in parents`).join(' or ');
-
-                const response = await gapi.client.drive.files.list({
-                    q: `name contains '${escapedQuery}' and (${parentFilter}) and trashed=false`,
-                    fields: 'files(id, name, mimeType, webViewLink, iconLink, modifiedTime, size, owners, lastModifyingUser)',
-                    orderBy: 'modifiedTime desc',
-                    pageSize: 100
-                });
-
-                allMatchedFiles.push(...(response.result.files || []));
-            }
-
-            // Deduplicate by ID
-            const unique = Array.from(new Map(allMatchedFiles.map(f => [f.id, f])).values());
-
-            setFiles(unique);
-            setIsSearchResults(true);
-        } catch (err: any) {
-            console.error('Error searching files:', err);
-            const status = err?.status || err?.result?.error?.code;
-            if (status === 401 || status === 403) {
-                setIsAuthenticated(false);
-                setError('Authentication expired. Please sign in again.');
-            } else {
-                setError('Search failed. Please try again.');
-            }
+            const results = await dataSource.search(rootFolderId, query, () => version === requestVersion.current);
+            if (version !== requestVersion.current) return;
+            setFiles(results); setIsSearchResults(true);
+        } catch (err) {
+            if (version === requestVersion.current) showReadError(err, 'Search failed. Please try again.');
         } finally {
-            setSearching(false);
+            if (version === requestVersion.current) setSearching(false);
         }
-    }, [rootFolderId]);
+    }, [dataSource, rootFolderId, showReadError]);
+
+    // A single effect owns folder and search reads. Old responses cannot replace
+    // a newer query or folder; the index is reused between search terms.
+    useEffect(() => {
+        requestVersion.current++;
+        if (!isAuthenticated || isInitializing) return;
+        const term = searchQuery.trim();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        if (term) {
+            setSearching(true); setLoading(false);
+            timer = setTimeout(() => { void searchDriveFiles(term); }, 350);
+        } else {
+            void loadFiles(currentFolderId, false);
+        }
+        return () => { clearTimeout(timer); requestVersion.current++; };
+    }, [currentFolderId, searchQuery, isAuthenticated, isInitializing, loadFiles, searchDriveFiles]);
 
     const handleAuth = async () => {
         setLoading(true);
@@ -300,6 +219,8 @@ export function DriveBrowser({ groupId, driveSettings }: DriveBrowserProps) {
         try {
             const token = await ensureAuth();
             if (token) {
+                dataSource.invalidate();
+                setFiles([]);
                 setIsAuthenticated(true);
             } else {
                 setError('Authentication failed. Please try again.');
@@ -329,6 +250,7 @@ export function DriveBrowser({ groupId, driveSettings }: DriveBrowserProps) {
     };
 
     const handleRefresh = () => {
+        dataSource.invalidate();
         if (searchQuery.trim()) {
             searchDriveFiles(searchQuery.trim());
         } else {
@@ -352,7 +274,6 @@ export function DriveBrowser({ groupId, driveSettings }: DriveBrowserProps) {
     const handleClearSearch = () => {
         setSearchQuery('');
         setIsSearchResults(false);
-        loadFiles(currentFolderId);
     };
 
     // ─── UPLOAD FILES ────────────────────────────────────────────────
@@ -668,6 +589,12 @@ export function DriveBrowser({ groupId, driveSettings }: DriveBrowserProps) {
                                 />
                             ))}
                         </div>
+                    )}
+                    {nextPageToken && !isSearchResults && !searchQuery.trim() && (
+                        <button type="button" disabled={loading} onClick={() => void loadFiles(currentFolderId, false, nextPageToken)}
+                            className="mx-auto mt-4 block rounded-lg border border-slate-200 px-5 py-2 text-sm text-slate-700 disabled:opacity-50">
+                            {loading ? 'Loading…' : 'Load more files'}
+                        </button>
                     )}
                 </div>
             </div>

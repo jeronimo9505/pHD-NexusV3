@@ -33,27 +33,7 @@ export default function ClientTasksWrapper({ tasks: initialTasks, groupId, initi
         setTasks(initialTasks);
     }, [initialTasks]);
 
-    // Auto-heal Orphans: Check for specific tasks that belong to non-existent columns (orphans)
-    // and move them to the first available column.
-    useEffect(() => {
-        if (customColumns.length > 0 && tasks.length > 0) {
-            const firstColumn = customColumns[0];
-            const orphans = tasks.filter(t => !customColumns.includes(t.status));
-
-            if (orphans.length > 0) {
-                // Group orphans by status to minimize API calls
-                const uniqueOrphanStatuses = [...new Set(orphans.map(t => t.status))];
-
-                uniqueOrphanStatuses.forEach(async (status) => {
-                    // Prevent double-toast on strict mode or re-renders by checking if operation is needed
-                    // For now simple toast is fine
-                    console.warn(`Found orphaned tasks in "${status}". Moving to "${firstColumn}"...`);
-                    toast.info(`Recovering tasks from deleted list "${status}"...`);
-                    await moveTasksToStatusAction(groupId, status, firstColumn);
-                });
-            }
-        }
-    }, [tasks, customColumns, groupId]);
+    // Display orphaned tasks in the fallback column without writing on mount.
 
     const handleTaskMove = async (taskId: string, newStatus: string) => {
         // Optimistic Update

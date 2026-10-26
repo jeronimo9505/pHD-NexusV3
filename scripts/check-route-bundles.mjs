@@ -12,6 +12,7 @@ const routes = [
     ['tasks', 'client-wrapper.tsx'], ['ai-chat', 'AIChatPanel.tsx'],
     ['settings', 'edit-group-form.tsx'],
     ['dashboard', 'dashboard-actions.tsx'],
+    ['google-drive', 'drive-browser.tsx'],
 ];
 const results = [];
 const reportsSource = fs.readFileSync('src/features/regular-reports/components/report-list.tsx', 'utf8');

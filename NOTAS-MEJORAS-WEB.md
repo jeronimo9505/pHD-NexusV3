@@ -52,7 +52,19 @@ No restaurar permisos inseguros solo para resolver un problema de interfaz: mant
 
 ## Publicación
 
-Autorizada por el usuario el 26 de octubre de 2026. Se subirá la rama de trabajo para obtener un deployment de vista previa en Vercel y verificar el resultado antes de cambiar la versión de producción. Los cambios de Supabase ya están activos y mantienen compatibilidad con la web anterior.
+Autorizada por el usuario el 26 de octubre de 2026. Primera entrega integrada en main: `2de7f6c`. Deployment de producción verificado: `dpl_FpFwJczXU4HQAKcQBTCxz5qQ3wxC`, READY, región Dublín; el inicio de sesión responde 200 en la web principal.
+
+## Segunda entrega: estructura de carga
+
+- Rama de trabajo: `codex/web-loading-flow`; base recuperable: etiqueta `web-performance-2026-10-26`.
+- Drive pasa a una ruta de lectura con caché limitada a la instancia, deduplicación, paginación, árbol reutilizable y descarte de respuestas antiguas. El refresco invalida los datos reutilizados.
+- Drive y Calendar inicializan solo los servicios Google que necesitan; las inicializaciones concurrentes se coordinan.
+- Logbook recibe hasta 50 entradas iniciales y estados de tareas desde el servidor, con comprobación de membresía activa. Mantiene paginación y tiempo real. Los resultados vacíos o fallidos terminan el estado de carga.
+- Tasks ya no modifica estados automáticamente al abrirse. Se mantienen las acciones explícitas de mover tareas, renombrar y eliminar columnas.
+- Calendar distingue rangos pendientes y recibidos; admite reintentos y descarta respuestas de navegaciones anteriores.
+- Pruebas reproducibles: `npm run test:loading`. Evaluación detallada y decisiones sobre MCP: `EVALUACION-ARQUITECTURA-WEB.md`.
+- Esta entrega no cambia el esquema ni los permisos de Supabase y no activa MCP ni nuevos permisos Google.
+- Etiqueta del commit de esta entrega: `web-loading-flow-2026-10-26`. Para revertir únicamente esta segunda entrega, usar `git revert web-loading-flow-2026-10-26` y publicar el nuevo commit. Si se desea revertir también la primera, hacerlo después con su etiqueta; Git avisará si hay conflictos.
 
 ## Trabajo posterior separado de esta entrega
 
