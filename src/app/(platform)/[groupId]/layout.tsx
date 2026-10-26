@@ -64,7 +64,7 @@ export default async function GroupLayout(props: GroupLayoutProps) {
             />
         }>
             <GoogleTokenSync />
-            <SessionTracker groupId={groupId} />
+            {userId && <SessionTracker groupId={groupId} userId={userId} />}
             {props.children}
         </Shell>
     );

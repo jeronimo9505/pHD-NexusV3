@@ -454,18 +454,17 @@ export async function getAllGroupsAction() {
     if (!user) return { error: 'Unauthorized', data: [] };
 
     // Fetch all groups with owner profile
-    const { data: groups, error } = await supabase
+    const [{ data: groups, error }, { data: memberships, error: membershipError }] = await Promise.all([supabase
         .from('groups')
         .select('id, name, description, code, created_by, profiles!groups_created_by_fkey(full_name, email)')
-        .order('created_at', { ascending: false });
-
-    if (error) return { error: error.message, data: [] };
-
-    // Fetch user's current memberships (to know which groups they are in / pending)
-    const { data: memberships } = await supabase
+        .order('created_at', { ascending: false }),
+        supabase
         .from('group_members')
         .select('group_id, status')
-        .eq('user_id', user.id);
+        .eq('user_id', user.id),
+    ]);
+
+    if (error || membershipError) return { error: (error || membershipError)!.message, data: [] };
 
     const membershipMap = new Map(memberships?.map(m => [m.group_id, m.status]) ?? []);
 

@@ -96,3 +96,14 @@ Paginación conservando genealogía y búsqueda global, reducción del paquete i
 - Benchmark Node con índice ya construido: 121 filas, aproximadamente 0,01–0,20 ms por selección; 10.000 filas, aproximadamente 1,9–28 ms según coincidencias. Construir el índice tiene un coste inicial: se observaron 1,65 ms para 121 filas y 57,8 ms para 10.000 en una ejecución. El comando muestra ese coste por separado. Excluye DOM, red y medición de página. `node scripts/benchmark-sample-filter.mjs` permite repetirlo.
 - Etiqueta final: `samples-targeted-updates-2026-10-26`. Para revertir todos los commits de esta entrega: `git revert --no-commit samples-progressive-loading-2026-10-26..samples-targeted-updates-2026-10-26`, revisar, crear el commit y publicar. No hay cambios SQL que revertir.
 - La paginación de lecturas por familias y los resúmenes separados de mediciones requieren otro diseño de consultas para conservar búsqueda global y genealogía. No se sustituye ese trabajo por cortar filas en el navegador; la libreta actual de 91 muestras se conserva completa.
+
+### Carga desktop, Admin y visitas
+
+- Revisión detallada, interpretación de los registros y comparación compilada: `AUDITORIA-DESKTOP-CARGA.md`.
+- Visitas deduplicadas por usuario/grupo y programadas tras la primera presentación; los errores permiten reintentar y se evita consultar de nuevo la identidad para insertar.
+- Admin recibe su primera instantánea en la página de servidor; un refresco explícito usa una acción con lecturas paralelas y una sola comprobación de administrador. Se mantiene la autorización en las acciones individuales.
+- Redirección al grupo predeterminado sin esperar el directorio completo, conservando la comprobación de membresía activa. Las lecturas del directorio y las membresías también se paralelizan.
+- Comando opcional `npm run tauri:perf`: frontend Next compilado con Webpack y servido en localhost:3000, manteniendo el origen de OAuth. Antes hay que terminar la sesión de desarrollo que ocupa ese puerto. El comando normal de desarrollo permanece disponible.
+- El diagnóstico local de Web Vitals se activa únicamente al compilar con el comando de comparación y escribe en la consola del WebView. No se midió aún una navegación autenticada en este modo y no se ha generado un instalador desktop.
+- Pruebas: `npm run test:desktop`, junto a las suites existentes de Samples y carga. Sin cambios SQL ni permisos nuevos.
+- Base de recuperación: `samples-targeted-updates-2026-10-26` (`919e437`); etiqueta final `desktop-loading-2026-10-26`. Reversión de toda esta entrega: `git revert --no-commit samples-targeted-updates-2026-10-26..desktop-loading-2026-10-26`, revisar, crear el commit y publicar.

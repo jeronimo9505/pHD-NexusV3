@@ -1,16 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useRef } from 'react';
+import type { AdminSnapshot } from '../types';
 import Link from 'next/link';
 import {
-    listAllUsers,
-    listAllGroups,
-    getPlatformStats,
+    getAdminSnapshotAction,
     updateUserSystemRoleAction,
     updateUserStatusAction,
     deleteGroupAction,
     deleteUserAction,
-    getAllPendingRequestsAction,
     updateGroupModulesByAdminAction,
 } from '../actions';
 import { approveJoinRequestAction, rejectJoinRequestAction } from '@/features/groups/actions';
@@ -44,41 +42,36 @@ interface Stats {
     totalTasks: number;
 }
 
-export function AdminPanel() {
+export function AdminPanel({ initialData }: { initialData: AdminSnapshot }) {
+    const refreshing = useRef(false);
     const [tab, setTab] = useState<Tab>('users');
-    const [users, setUsers] = useState<any[]>([]);
-    const [groups, setGroups] = useState<any[]>([]);
-    const [stats, setStats] = useState<Stats | null>(null);
-    const [notifications, setNotifications] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [users, setUsers] = useState<any[]>(initialData.users);
+    const [groups, setGroups] = useState<any[]>(initialData.groups);
+    const [stats, setStats] = useState<Stats | null>(initialData.stats);
+    const [notifications, setNotifications] = useState<any[]>(initialData.notifications);
+    const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState('');
     const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
-    const [selectedGroupId, setSelectedGroupId] = useState<string>('');
-
-    useEffect(() => {
-        loadData();
-    }, []);
+    const [selectedGroupId, setSelectedGroupId] = useState<string>(initialData.groups[0]?.id || '');
 
     const loadData = async () => {
+        if (refreshing.current) return;
+        refreshing.current = true;
         setLoading(true);
-        const [usersRes, groupsRes, statsRes, notifRes] = await Promise.all([
-            listAllUsers(),
-            listAllGroups(),
-            getPlatformStats(),
-            getAllPendingRequestsAction(),
-        ]);
-        if (usersRes.data) setUsers(usersRes.data);
-        if (groupsRes.data) {
-            setGroups(groupsRes.data);
-            if (groupsRes.data.length > 0) {
-                setSelectedGroupId(prev => prev || groupsRes.data![0].id);
-            }
+        try {
+            const data = await getAdminSnapshotAction();
+            setUsers(data.users);
+            setGroups(data.groups);
+            setStats(data.stats);
+            setNotifications(data.notifications);
+            setSelectedGroupId(previous => data.groups.some(group => group.id === previous) ? previous : data.groups[0]?.id || '');
+        } catch {
+            toast.error('Unable to refresh administration. Please try again.');
+        } finally {
+            refreshing.current = false;
+            setLoading(false);
         }
-        if (statsRes.data) setStats(statsRes.data);
-        if (notifRes.data) setNotifications(notifRes.data as any[]);
-        setLoading(false);
     };
-
     const handleRoleChange = async (userId: string, newRole: 'admin' | 'user') => {
         const res = await updateUserSystemRoleAction(userId, newRole);
         if (res.error) toast.error(res.error);

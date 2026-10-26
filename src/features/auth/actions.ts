@@ -3,7 +3,6 @@
 import { createClient, getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { logActivity } from "@/lib/activity-log";
 
 export async function signInAction(formData: FormData) {
     const email = formData.get("email") as string;
@@ -104,7 +103,7 @@ export async function logVisitAction(groupId: string) {
     // "Recent" = last 4 hours
     const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
 
-    const { data: recentLog } = await supabase
+    const { data: recentLog, error: visitError } = await supabase
         .from('activity_log')
         .select('id')
         .eq('group_id', groupId)
@@ -112,15 +111,19 @@ export async function logVisitAction(groupId: string) {
         .eq('action', 'visit')
         .gt('created_at', fourHoursAgo)
         .limit(1)
-        .single();
+        .maybeSingle();
+
+    if (visitError) return { error: 'Unable to check recent visits' };
 
     if (recentLog) {
         return { success: true, alreadyLogged: true };
     }
 
-    await logActivity(groupId, 'visit', 'user', user.id, {
-        source: 'dashboard_visit'
+    const { error } = await supabase.from('activity_log').insert({
+        group_id: groupId, user_id: user.id, action: 'visit', entity_type: 'user',
+        entity_id: user.id, metadata: { source: 'dashboard_visit' },
     });
+    if (error) return { error: 'Unable to record visit' };
 
     return { success: true };
 }

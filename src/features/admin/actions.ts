@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getSystemRole } from "@/lib/auth/roles";
 import { revalidatePath } from "next/cache";
+type AdminClient = Awaited<ReturnType<typeof createClient>>;
 
 async function requireAdmin() {
     const role = await getSystemRole();
@@ -13,7 +14,10 @@ async function requireAdmin() {
 // ─── LIST ALL USERS ──────────────────────────────────────────────
 export async function listAllUsers() {
     await requireAdmin();
-    const supabase = await createClient();
+    return readAllUsers(await createClient());
+}
+
+async function readAllUsers(supabase: AdminClient) {
 
     const { data, error } = await supabase
         .from('profiles')
@@ -59,7 +63,10 @@ export async function updateUserStatusAction(userId: string, newStatus: 'active'
 // ─── LIST ALL GROUPS ─────────────────────────────────────────────
 export async function listAllGroups() {
     await requireAdmin();
-    const supabase = await createClient();
+    return readAllGroups(await createClient());
+}
+
+async function readAllGroups(supabase: AdminClient) {
 
     const { data: groups, error } = await supabase
         .from('groups')
@@ -92,7 +99,10 @@ export async function deleteGroupAction(groupId: string) {
 // ─── PLATFORM STATS ──────────────────────────────────────────────
 export async function getPlatformStats() {
     await requireAdmin();
-    const supabase = await createClient();
+    return readPlatformStats(await createClient());
+}
+
+async function readPlatformStats(supabase: AdminClient) {
 
     const [users, groups, reports, tasks] = await Promise.all([
         supabase.from('profiles').select('*', { count: 'exact', head: true }),
@@ -100,6 +110,9 @@ export async function getPlatformStats() {
         supabase.from('reports').select('*', { count: 'exact', head: true }),
         supabase.from('tasks').select('*', { count: 'exact', head: true }),
     ]);
+
+    const failed = [users, groups, reports, tasks].find(result => result.error);
+    if (failed?.error) return { error: failed.error.message };
 
     return {
         data: {
@@ -109,6 +122,19 @@ export async function getPlatformStats() {
             totalTasks: tasks.count || 0,
         }
     };
+}
+
+// Called once from the server page, or once for an explicit refresh. The
+// browser's Server Action queue no longer serializes four independent reads.
+export async function getAdminSnapshotAction() {
+    await requireAdmin();
+    const supabase = await createClient();
+    const [users, groups, stats, notifications] = await Promise.all([
+        readAllUsers(supabase), readAllGroups(supabase), readPlatformStats(supabase), readPendingRequests(supabase),
+    ]);
+    const error = users.error || groups.error || stats.error || notifications.error;
+    if (error || !stats.data) throw new Error(error || 'Unable to load administration');
+    return { users: users.data ?? [], groups: groups.data ?? [], stats: stats.data, notifications: notifications.data ?? [] };
 }
 
 // ─── DELETE USER ─────────────────────────────────────────────────
@@ -130,7 +156,10 @@ export async function deleteUserAction(userId: string) {
 // ─── ALL PENDING JOIN REQUESTS (across all groups) ────────────────
 export async function getAllPendingRequestsAction() {
     await requireAdmin();
-    const supabase = await createClient();
+    return readPendingRequests(await createClient());
+}
+
+async function readPendingRequests(supabase: AdminClient) {
 
     const { data, error } = await supabase
         .from('group_members')

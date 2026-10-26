@@ -1,29 +1,30 @@
 'use client';
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { logVisitAction } from "@/features/auth/actions";
+import { createVisitTracker } from '@/lib/visit-tracker';
+const trackVisit = createVisitTracker(logVisitAction);
 
 interface SessionTrackerProps {
     groupId: string;
+    userId: string;
 }
 
 /**
  * Silent component that logs a "visit" to a group if it hasn't been logged recently.
  */
-export function SessionTracker({ groupId }: SessionTrackerProps) {
-    const loggedRef = useRef(false);
-
+export function SessionTracker({ groupId, userId }: SessionTrackerProps) {
     useEffect(() => {
-        if (loggedRef.current) return;
-        
-        // We log the visit on mount (once per full page load/refresh)
-        // The server action handles the "spam protection" (e.g. only once every 4 hours)
-        logVisitAction(groupId).then(() => {
-            loggedRef.current = true;
-        }).catch(err => {
-            console.error("Failed to log session visit:", err);
-        });
-    }, [groupId]);
+        // Schedule nonessential telemetry after the first render. Cleanup also
+        // cancels the discarded Strict Mode effect before it sends anything.
+        const send = () => { void trackVisit(userId, groupId).catch(error => console.error('Failed to log session visit:', error)); };
+        if ('requestIdleCallback' in window) {
+            const id = window.requestIdleCallback(send, { timeout: 2000 });
+            return () => window.cancelIdleCallback(id);
+        }
+        const timer = setTimeout(send, 300);
+        return () => clearTimeout(timer);
+    }, [groupId, userId]);
 
     return null;
 }

@@ -1,5 +1,6 @@
 import { Toaster } from 'sonner';
 import { Inter } from 'next/font/google';
+import { DesktopPerformance } from '@/components/layout/DesktopPerformance';
 import './globals.css'; // Assuming we will copy or link globals.css later
 
 const inter = Inter({ subsets: ['latin'] });
@@ -18,6 +19,7 @@ export default function RootLayout({
         <html lang="en">
             <body className={inter.className}>
                 {children}
+                {process.env.NEXT_PUBLIC_NEXUS_PERFORMANCE === '1' && <DesktopPerformance />}
                 <Toaster position="top-right" richColors />
             </body>
         </html>
