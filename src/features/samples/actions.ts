@@ -226,30 +226,29 @@ export async function deleteLogbookAction(id: string, groupId: string) {
 // ─── SAMPLES CRUD ────────────────────────────────────────────────
 
 export async function getSamplesAction(groupId: string, logbookId: string) {
+    if (!logbookId) return { error: 'A sample logbook must be selected' };
     const supabase = await createClient();
-    let query = supabase
+    const query = supabase
         .from('samples')
         .select(`
             *,
             parent:parent_id(id, display_id),
             created_by_user:created_by(full_name, email),
-            characterizations:sample_characterizations(id, type, data, created_at, performed_at)
+            characterizations:sample_characterizations(id, type)
         `)
-        .eq('group_id', groupId);
-
-    if (logbookId) {
-        query = query.eq('logbook_id', logbookId);
-    }
+        .eq('group_id', groupId)
+        .eq('logbook_id', logbookId);
 
     const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) return { error: error.message };
 
-    // Map characterizations to simple array of types but also keep full list
+    // The initial table needs technique badges, not measurement payloads.
     const formattedData = data.map((item: any) => ({
         ...item,
         characterization_types: Array.from(new Set(item.characterizations?.map((c: any) => c.type) || [])),
-        characterizations: item.characterizations || []
+        characterization_refs: item.characterizations || [],
+        characterizations: undefined
     }));
 
     return { data: formattedData };

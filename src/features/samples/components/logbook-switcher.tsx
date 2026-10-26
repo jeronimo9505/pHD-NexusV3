@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
 import { Logbook } from '../types';
 import { createLogbookAction } from '../actions';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -25,6 +25,7 @@ interface LogbookSwitcherProps {
 }
 
 export function LogbookSwitcher({ groupId, logbooks, currentLogbookId }: LogbookSwitcherProps) {
+    const [isPending, startTransition] = useTransition();
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -34,14 +35,16 @@ export function LogbookSwitcher({ groupId, logbooks, currentLogbookId }: Logbook
     const [duplicatingLogbook, setDuplicatingLogbook] = useState<Logbook | null>(null);
 
     const handleSwitch = (logbookId: string) => {
+        if (logbookId === currentLogbookId) return;
         const params = new URLSearchParams(searchParams.toString());
         params.set('logbook', logbookId);
-        router.push(`${pathname}?${params.toString()}`);
+        startTransition(() => router.push(`${pathname}?${params.toString()}`));
     };
 
     return (
         <>
-            <div className="flex items-center gap-1 flex-wrap">
+            <div className="flex items-center gap-1 flex-wrap" aria-busy={isPending}>
+                {isPending && <span role="status" className="text-sm text-slate-500">Opening logbook…</span>}
                 {logbooks.map(logbook => {
                     const isActive = currentLogbookId === logbook.id;
                     return (

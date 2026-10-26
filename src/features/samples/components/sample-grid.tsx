@@ -37,6 +37,7 @@ const ActivityLogDrawer = dynamic(() => import('./activity-log-drawer').then(mod
 import { CharacterizationSearch } from './characterization-search';
 const RamanWorkspace = dynamic(() => import('./raman-workspace').then(module => module.RamanWorkspace));
 import { ScientificText } from '@/components/ScientificText';
+import { useLogbookMeasurements } from '../use-logbook-measurements';
 
 interface SampleGridProps {
     groupId: string;
@@ -75,6 +76,7 @@ export function SampleGrid({
     const [statusFilter, setStatusFilter] = useState<SampleStatus | 'all'>('all');
     const [view, setView] = useState<'samples' | 'characterizations' | 'raman'>('samples');
     const [typeFilter, setTypeFilter] = useState('all');
+    const measurements = useLogbookMeasurements(samples, groupId, logbookId, view !== 'samples');
     // Collapsed tracks which parent IDs the user has manually collapsed.
     // Empty = everything expanded (default behavior).
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
@@ -238,7 +240,7 @@ export function SampleGrid({
         let measurementCount = 0;
         const searchLower = search.toLowerCase();
 
-        samples.forEach(s => {
+        measurements.samples.forEach(s => {
             const charList = s.characterizations || [];
             const matches = charList.filter(c => {
                 const matchesType = typeFilter === 'all' || c.type === typeFilter;
@@ -260,7 +262,7 @@ export function SampleGrid({
         });
 
         return { samples: sampleCount, measurements: measurementCount };
-    }, [samples, search, typeFilter, view]);
+    }, [measurements.samples, search, typeFilter, view]);
 
     const handleToggleExpand = (id: string) => {
         setCollapsed(prev => {
@@ -559,7 +561,7 @@ export function SampleGrid({
                                                             key={i}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                const char = row.characterizations?.find((c: any) => c.type === type);
+                                                                const char = row.characterization_refs?.find(c => c.type === type);
                                                                 if (char) {
                                                                     setInitialCharId(char.id);
                                                                     setDetailSample(row);
@@ -661,9 +663,18 @@ export function SampleGrid({
                         </table>
                     )}
 
-                    {view === 'characterizations' && (
+                    {view !== 'samples' && measurements.loading && (
+                        <div role="status" className="p-8 text-center text-sm text-slate-500">Loading measurements…</div>
+                    )}
+                    {view !== 'samples' && measurements.error && (
+                        <div role="alert" className="p-8 text-center text-sm text-slate-600">
+                            <p>{measurements.error}</p>
+                            <button type="button" onClick={measurements.retry} className="mt-3 rounded border px-4 py-2">Try again</button>
+                        </div>
+                    )}
+                    {view === 'characterizations' && !measurements.loading && !measurements.error && (
                         <CharacterizationSearch
-                            samples={samples}
+                            samples={measurements.samples}
                             search={search}
                             typeFilter={typeFilter}
                             onSelectSample={(sample, charId) => {
@@ -673,9 +684,9 @@ export function SampleGrid({
                         />
                     )}
 
-                    {view === 'raman' && (
+                    {view === 'raman' && !measurements.loading && !measurements.error && (
                         <div className="h-full flex flex-col p-4 bg-slate-50 min-h-[500px]">
-                            <RamanWorkspace samples={samples} driveSettings={driveSettings} />
+                            <RamanWorkspace samples={measurements.samples} driveSettings={driveSettings} />
                         </div>
                     )}
                 </div>

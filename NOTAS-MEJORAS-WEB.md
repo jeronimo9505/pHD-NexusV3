@@ -68,4 +68,18 @@ Autorizada por el usuario el 26 de octubre de 2026. Primera entrega integrada en
 
 ## Trabajo posterior separado de esta entrega
 
+### Samples: carga progresiva por bitácora (26 de octubre)
+
+- Base de reversión: `web-loading-flow-2026-10-26` (`0dec12a`). Rama: `codex/samples-progressive-loading`.
+- Se conserva la selección actual: parámetro `logbook` válido o primera bitácora por fecha de creación. No existe una columna de bitácora predefinida y esta entrega no añade una preferencia distinta.
+- Solo se consultan muestras, campos y nomenclaturas de la bitácora seleccionada. Una consulta de muestras sin selección devuelve error en lugar de cargar el grupo completo.
+- Encabezado y selector se entregan antes de la tabla mediante Suspense; el módulo tiene una vista de carga propia y el cambio de bitácora muestra respuesta inmediata.
+- Primera lectura: muestras y tipos de técnicas; se omiten los datos completos de mediciones. Caracterizaciones y Raman los solicitan al abrirse mediante una lectura directa de Supabase filtrada por grupo y bitácora, bajo las políticas existentes.
+- Los resultados de mediciones se reutilizan en la misma tabla y se invalidan cuando cambia la instantánea de muestras del servidor. Las respuestas antiguas se descartan; los errores ofrecen reintento y no parecen listas vacías.
+- Se conserva la genealogía y la búsqueda de la tabla, las técnicas, la búsqueda de mediciones por contenido, Raman y las lecturas completas del detalle.
+- Comparación SQL de proyecciones equivalentes en la libreta de 91 muestras: muestras + mediciones completas 213.956 bytes; muestras + referencias de técnica 77.093 bytes. Las referencias incluyen identificadores para conservar el enlace directo desde las etiquetas al detalle. Excluye relaciones de perfil/padre, protocolo, compresión, HTML y JavaScript; no es una medición de tiempo de navegador.
+- Validación reproducible: `npm run test:samples`; cubre selección obligatoria, proyección ligera, lectura diferida, reutilización, invalidación, respuestas antiguas, vacío y reintentos. No cambia datos ni esquema en Supabase.
+- Etiqueta de esta entrega: `samples-progressive-loading-2026-10-26`. Reversión: `git revert samples-progressive-loading-2026-10-26`, publicar el nuevo commit; no requiere reversión SQL.
+- Próximos pasos a largo plazo: medir sesión real por etapa, separar resumen/detalle de mediciones si crecen, paginar por familias conservando genealogía y búsqueda global, y actualizar solo la muestra afectada tras una edición. La tabla actual de 91 filas no justifica una migración completa ni virtualización sin medición.
+
 Paginación conservando genealogía y búsqueda global, reducción del paquete interno de Plotly, pruebas de PDF tras actualización mayor, medición autenticada de LCP/INP y empaquetado definitivo de escritorio. Las listas actuales conservan su contenido y filtros; esta entrega reduce el trabajo de entrada y difiere herramientas pesadas sin recortar resultados.

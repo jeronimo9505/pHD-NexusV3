@@ -38,6 +38,7 @@ export interface Sample {
     created_by_user?: { full_name: string; email: string };
     characterizations?: any[];
     characterization_types?: string[];
+    characterization_refs?: { id: string; type: string }[];
 }
 
 export interface SampleNomenclature {

@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { Suspense } from "react";
+import { SamplesTableLoading } from "@/features/samples/components/samples-loading";
 import { getSamplesAction, getFieldsConfigAction, getNomenclaturesAction, getLogbooksAction } from "@/features/samples/actions";
 import { SampleGrid } from "@/features/samples/components/sample-grid";
 import { LogbookSwitcher } from "@/features/samples/components/logbook-switcher";
@@ -15,15 +16,18 @@ interface SamplesPageProps {
 export default async function SamplesPage(props: SamplesPageProps) {
     const { groupId } = await props.params;
     const searchParams = await props.searchParams;
-    const supabase = await createClient();
 
-    // 1. Fetch Logbooks first to know which one is active
-    const logbooksRes = await getLogbooksAction(groupId);
+
+    // Independent reads start together; sample data waits for book selection.
+    const [logbooksRes, role, groupRes] = await Promise.all([
+        getLogbooksAction(groupId), getGroupRole(groupId), getGroupSummary(groupId),
+    ]);
+    if (!role) redirect('/dashboard');
+    if (logbooksRes.error) throw new Error('Unable to load sample logbooks');
     const logbooks = (logbooksRes.data || []) as Logbook[];
 
     // Determine active logbook
     // If param exists and is valid, use it. Otherwise use first logbook.
-    // If no logbooks exist (shouldn't happen with migration), efficient fallback needed.
     let activeLogbookId = typeof searchParams.logbook === 'string' ? searchParams.logbook : undefined;
 
     // Validate activeLogbookId
@@ -35,35 +39,7 @@ export default async function SamplesPage(props: SamplesPageProps) {
         activeLogbookId = logbooks[0].id;
     }
 
-    // If still no logbook (e.g. migration failed or empty group), we might have issues.
-    // But migration ensures at least one.
-
     const activeLogbook = logbooks.find(l => l.id === activeLogbookId);
-
-    // Parallel fetch for speed
-    const [
-        role,
-        samplesRes,
-        fieldsRes,
-        nomenclaturesRes,
-        groupRes
-    ] = await Promise.all([
-        getGroupRole(groupId),
-        activeLogbookId ? getSamplesAction(groupId, activeLogbookId) : Promise.resolve({ data: [] }),
-        activeLogbookId ? getFieldsConfigAction(groupId, activeLogbookId) : Promise.resolve({ data: [] }),
-        activeLogbookId ? getNomenclaturesAction(groupId, activeLogbookId) : Promise.resolve({ data: [] }),
-        getGroupSummary(groupId)
-    ]);
-
-    if (!role) {
-        redirect('/dashboard');
-    }
-
-    // Default to empty arrays if error
-    const samples = samplesRes.data || [];
-    const fields = (fieldsRes.data || []) as any[];
-    const nomenclatures = (nomenclaturesRes.data || []) as any[];
-    const driveSettings = groupRes?.drive_settings as { clientId?: string; apiKey?: string; folderId?: string; sampleFolderId?: string } | undefined;
 
     return (
         <div className="h-full flex flex-col p-6 space-y-6">
@@ -87,17 +63,9 @@ export default async function SamplesPage(props: SamplesPageProps) {
 
             <div className="flex-1 min-h-0">
                 {activeLogbookId && (
-                    <SampleGrid
-                        groupId={groupId}
-                        logbookId={activeLogbookId}
-                        logbookName={activeLogbook?.name || ''}
-                        logbookPrefix={activeLogbook?.prefix || 'S'}
-                        samples={samples}
-                        fields={fields}
-                        nomenclatures={nomenclatures}
-                        userRole={role}
-                        driveSettings={driveSettings}
-                    />
+                    <Suspense key={activeLogbookId} fallback={<SamplesTableLoading />}>
+                        <SelectedLogbook groupId={groupId} logbook={activeLogbook!} role={role} driveSettings={groupRes?.drive_settings} />
+                    </Suspense>
                 )}
                 {!activeLogbookId && (
                     <div className="text-center p-10 text-slate-500">
@@ -107,4 +75,25 @@ export default async function SamplesPage(props: SamplesPageProps) {
             </div>
         </div>
     );
+}
+
+// Only the selected book reaches the data queries. The selector can stream
+// before these reads finish; other books are fetched on explicit navigation.
+async function SelectedLogbook({ groupId, logbook, role, driveSettings }: {
+    groupId: string; logbook: Logbook; role: string;
+    driveSettings: unknown;
+}) {
+    const [samplesRes, fieldsRes, nomenclaturesRes] = await Promise.all([
+        getSamplesAction(groupId, logbook.id),
+        getFieldsConfigAction(groupId, logbook.id),
+        getNomenclaturesAction(groupId, logbook.id),
+    ]);
+    if (samplesRes.error || fieldsRes.error || nomenclaturesRes.error) {
+        throw new Error('Unable to load the selected sample logbook');
+    }
+    return <SampleGrid key={logbook.id} groupId={groupId} logbookId={logbook.id}
+        logbookName={logbook.name} logbookPrefix={logbook.prefix || 'S'}
+        samples={samplesRes.data || []} fields={(fieldsRes.data || []) as any[]}
+        nomenclatures={(nomenclaturesRes.data || []) as any[]} userRole={role}
+        driveSettings={driveSettings as { clientId?: string; apiKey?: string; folderId?: string; sampleFolderId?: string } | undefined} />;
 }
