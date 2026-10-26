@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { redirect } from "next/navigation";
+import { isGroupAdmin, isGroupOwner, getGroupRole, getSystemRole } from "@/lib/auth/roles";
 
 // Schemas
 const createGroupSchema = z.object({
@@ -541,6 +542,36 @@ export async function rejectJoinRequestAction(memberId: string, groupId: string)
 
     if (error) return { error: error.message };
     revalidatePath(`/${groupId}/settings`);
+    return { success: true };
+}
+
+export async function updateGroupModulesAction(groupId: string, visibleModules: string[]) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { error: 'Unauthorized' };
+
+    // Check manager or system admin permissions
+    const [role, isOwner, systemRole] = await Promise.all([
+        getGroupRole(groupId, supabase, user.id),
+        isGroupOwner(groupId),
+        getSystemRole(supabase, user.id),
+    ]);
+
+    const canManage = isGroupAdmin(role) || isOwner || systemRole === 'admin';
+    if (!canManage) {
+        return { error: 'No tienes permisos de administrador para modificar los módulos de este grupo.' };
+    }
+
+    const { error } = await supabase
+        .from('groups')
+        .update({ visible_modules: visibleModules } as any)
+        .eq('id', groupId);
+
+    if (error) return { error: error.message };
+
+    revalidatePath(`/${groupId}`);
+    revalidatePath(`/${groupId}/settings`);
+    revalidatePath(`/admin`);
     return { success: true };
 }
 

@@ -28,6 +28,7 @@ import {
 import { GroupRole, SystemRole } from '@/lib/auth/roles';
 import { createBrowserClient } from '@supabase/ssr';
 import { isDesktop } from '@/lib/desktop';
+import { isModuleAllowed } from '@/lib/auth/module-permissions';
 
 interface GroupInfo {
     id: string;
@@ -76,41 +77,19 @@ export function Sidebar({ groupId, role, systemRole, userName, userEmail, groups
         links.splice(3, 0, { href: `/${groupId}/map-analyzer`, label: 'Map Analyzer', icon: Map });
     }
 
-    if (!isSysAdmin) {
-        const visibleModules = currentGroup?.visible_modules;
-        if (visibleModules && Array.isArray(visibleModules)) {
-            links = links.filter(link => {
-                const label = link.label;
-                const moduleKey = label.toLowerCase().replace(/\s+/g, '-');
-                
-                // Settings is always visible to group managers (owners, supervisors, labmanagers)
-                if (label === 'Settings' && (isOwner || role === 'supervisor' || role === 'labmanager')) {
-                    return true;
-                }
-                
-                // Even if allowed by group, web clients can never see map-analyzer
-                if (moduleKey === 'map-analyzer' && !isDesktopClient) {
-                    return false;
-                }
-                return visibleModules.includes(moduleKey);
-            });
-        } else {
-            links = links.filter(link => {
-                const label = link.label;
-                
-                // Settings is always visible to group managers (owners, supervisors, labmanagers)
-                if (label === 'Settings' && (isOwner || role === 'supervisor' || role === 'labmanager')) {
-                    return true;
-                }
-                
-                if (isDesktopClient) {
-                    return label === 'Samples' || label === 'Map Analyzer';
-                } else {
-                    return label === 'Samples';
-                }
-            });
-        }
-    }
+    // Filter modules based on role permissions and platform (desktop vs web)
+    links = links.filter(link => {
+        let moduleId = link.label.toLowerCase().replace(/\s+/g, '-');
+        if (moduleId === 'knowledge-base') moduleId = 'knowledge';
+        return isModuleAllowed({
+            moduleId,
+            role,
+            isOwner,
+            isSysAdmin,
+            isDesktopClient,
+            visibleModules: currentGroup?.visible_modules,
+        });
+    });
 
     const handleSignOut = async () => {
         const supabase = createBrowserClient(

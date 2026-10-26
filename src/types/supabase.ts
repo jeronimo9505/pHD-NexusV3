@@ -567,6 +567,7 @@ export type Database = {
           id: string
           kanban_columns: Json | null
           name: string
+          visible_modules: string[] | null
         }
         Insert: {
           ai_settings?: Json | null
@@ -578,6 +579,7 @@ export type Database = {
           id?: string
           kanban_columns?: Json | null
           name: string
+          visible_modules?: string[] | null
         }
         Update: {
           ai_settings?: Json | null
@@ -589,6 +591,7 @@ export type Database = {
           id?: string
           kanban_columns?: Json | null
           name?: string
+          visible_modules?: string[] | null
         }
         Relationships: [
           {

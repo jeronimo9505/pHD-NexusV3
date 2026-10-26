@@ -150,3 +150,21 @@ export async function getAllPendingRequestsAction() {
     return { data: data ?? [] };
 }
 
+// ─── UPDATE GROUP VISIBLE MODULES (Platform Admin) ───────────────
+export async function updateGroupModulesByAdminAction(groupId: string, visibleModules: string[]) {
+    await requireAdmin();
+    const supabase = await createClient();
+
+    const { error } = await supabase
+        .from('groups')
+        .update({ visible_modules: visibleModules } as any)
+        .eq('id', groupId);
+
+    if (error) return { error: error.message };
+
+    revalidatePath(`/${groupId}`);
+    revalidatePath(`/${groupId}/settings`);
+    revalidatePath('/admin');
+    return { success: true };
+}
+

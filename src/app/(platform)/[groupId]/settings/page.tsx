@@ -6,8 +6,9 @@ import { MemberList } from "@/features/groups/components/member-list";
 import { DriveSettingsForm } from "@/features/groups/components/drive-settings-form";
 import { AISettingsForm } from "@/features/groups/components/ai-settings-form";
 import { InviteMemberForm } from "@/features/groups/components/invite-member-form";
-import { Settings, Users, HardDrive, Key, UserPlus, Info, Clock, Sparkles } from "lucide-react";
+import { Settings, Users, HardDrive, Key, UserPlus, Info, Clock, Sparkles, SlidersHorizontal } from "lucide-react";
 import { PendingRequests } from "@/features/groups/components/pending-requests";
+import { RoleModulesConfig } from "@/features/groups/components/role-modules-config";
 
 export default async function GroupSettingsPage({
     params,
@@ -109,6 +110,22 @@ export default async function GroupSettingsPage({
                             <h2 className="text-lg font-semibold text-slate-900">Pending Join Requests</h2>
                         </div>
                         <PendingRequests groupId={groupId} pending={pendingMembers} />
+                    </section>
+                )}
+
+                {/* Module Permissions by Role — Admin/Manager only */}
+                {canManage && (
+                    <section className="space-y-4">
+                        <div className="flex items-center gap-2">
+                            <SlidersHorizontal size={18} className="text-blue-600" />
+                            <div>
+                                <h2 className="text-lg font-semibold text-slate-900">Visibilidad de Módulos por Rol</h2>
+                                <p className="text-xs text-slate-500">Define qué apartados y herramientas ve cada rol en este grupo.</p>
+                            </div>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl border border-slate-200">
+                            <RoleModulesConfig groupId={groupId} initialVisibleModules={group.visible_modules} />
+                        </div>
                     </section>
                 )}
                 <section className="space-y-4">

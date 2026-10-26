@@ -11,6 +11,7 @@ import {
     deleteGroupAction,
     deleteUserAction,
     getAllPendingRequestsAction,
+    updateGroupModulesByAdminAction,
 } from '../actions';
 import { approveJoinRequestAction, rejectJoinRequestAction } from '@/features/groups/actions';
 import { toast } from 'sonner';
@@ -29,10 +30,12 @@ import {
     Check,
     X,
     Loader2,
+    SlidersHorizontal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { RoleModulesConfig } from '@/features/groups/components/role-modules-config';
 
-type Tab = 'users' | 'groups' | 'stats' | 'notifications';
+type Tab = 'users' | 'groups' | 'permissions' | 'stats' | 'notifications';
 
 interface Stats {
     totalUsers: number;
@@ -50,6 +53,7 @@ export function AdminPanel() {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+    const [selectedGroupId, setSelectedGroupId] = useState<string>('');
 
     useEffect(() => {
         loadData();
@@ -64,7 +68,12 @@ export function AdminPanel() {
             getAllPendingRequestsAction(),
         ]);
         if (usersRes.data) setUsers(usersRes.data);
-        if (groupsRes.data) setGroups(groupsRes.data);
+        if (groupsRes.data) {
+            setGroups(groupsRes.data);
+            if (groupsRes.data.length > 0) {
+                setSelectedGroupId(prev => prev || groupsRes.data![0].id);
+            }
+        }
         if (statsRes.data) setStats(statsRes.data);
         if (notifRes.data) setNotifications(notifRes.data as any[]);
         setLoading(false);
@@ -135,6 +144,7 @@ export function AdminPanel() {
     const tabs: { id: Tab; label: string; icon: any; count?: number; badge?: number }[] = [
         { id: 'users', label: 'Users', icon: Users, count: users.length },
         { id: 'groups', label: 'Groups', icon: Building2, count: groups.length },
+        { id: 'permissions', label: 'Role Modules', icon: SlidersHorizontal },
         { id: 'stats', label: 'Statistics', icon: BarChart3 },
         { id: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.length },
     ];
@@ -362,13 +372,25 @@ export function AdminPanel() {
                                                     {new Date(group.created_at).toLocaleDateString()}
                                                 </td>
                                                 <td className="px-5 py-3.5">
-                                                    <button
-                                                        onClick={() => handleDeleteGroup(group.id, group.name)}
-                                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                        title="Delete group"
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </button>
+                                                    <div className="flex items-center gap-1">
+                                                        <button
+                                                            onClick={() => {
+                                                                setSelectedGroupId(group.id);
+                                                                setTab('permissions');
+                                                            }}
+                                                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                            title="Configurar módulos por rol"
+                                                        >
+                                                            <SlidersHorizontal size={14} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteGroup(group.id, group.name)}
+                                                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                            title="Delete group"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}
@@ -377,6 +399,67 @@ export function AdminPanel() {
                                 {filteredGroups.length === 0 && (
                                     <div className="text-center py-12 text-slate-400 text-sm">No groups found.</div>
                                 )}
+                            </div>
+                        )}
+
+                        {/* ─── PERMISSIONS TAB ───────────────────────── */}
+                        {tab === 'permissions' && (
+                            <div className="space-y-6">
+                                <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-5">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                                        <div>
+                                            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                                <SlidersHorizontal size={20} className="text-blue-600" />
+                                                Control de Módulos y Pestañas por Rol
+                                            </h2>
+                                            <p className="text-xs text-slate-500 mt-1">
+                                                Define qué apartados ve cada tipo de usuario (Estudiantes, Investigadores, Supervisores, Lab Managers) para cada grupo.
+                                            </p>
+                                        </div>
+
+                                        {/* Group selector */}
+                                        {groups.length > 0 && (
+                                            <div className="flex items-center gap-2 min-w-[280px]">
+                                                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Grupo:</label>
+                                                <select
+                                                    value={selectedGroupId}
+                                                    onChange={(e) => setSelectedGroupId(e.target.value)}
+                                                    className="w-full text-sm font-medium border border-slate-200 bg-slate-50 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                >
+                                                    {groups.map((g: any) => (
+                                                        <option key={g.id} value={g.id}>
+                                                            {g.name} ({g.code})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {selectedGroupId ? (
+                                        (() => {
+                                            const selectedGroup = groups.find((g: any) => g.id === selectedGroupId);
+                                            return (
+                                                <RoleModulesConfig
+                                                    key={selectedGroupId}
+                                                    groupId={selectedGroupId}
+                                                    initialVisibleModules={selectedGroup?.visible_modules}
+                                                    customSaveAction={async (gId, visMods) => {
+                                                        const res = await updateGroupModulesByAdminAction(gId, visMods);
+                                                        if (!res.error) {
+                                                            setGroups(prev => prev.map(g => g.id === gId ? { ...g, visible_modules: visMods } : g));
+                                                        }
+                                                        return res;
+                                                    }}
+                                                />
+                                            );
+                                        })()
+                                    ) : (
+                                        <div className="text-center py-12 text-slate-400 text-sm">
+                                            No hay grupos registrados en el sistema.
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
 
