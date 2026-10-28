@@ -53,8 +53,8 @@ export function MultiSpectrumGraph({ selectedConfigs }: MultiSpectrumGraphProps)
             setError(null);
 
             try {
-                const { ensureAuth } = await import('@/lib/google/auth');
-                const token = await ensureAuth();
+                const { ramanDriveToken } = await import('@/lib/google/desktop-drive');
+                const token = await ramanDriveToken();
 
                 // Build a fresh dict of { [charId]: dataPoints }
                 const newData: Record<string, any[]> = {};

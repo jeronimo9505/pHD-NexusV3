@@ -47,7 +47,9 @@ export async function getFileContent(fileId: string, accessToken: string) {
     if (!accessToken) throw new Error("Access Token required");
 
     // We use the drive.files.get method with alt=media to get the file content
-    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    const { hasNativeDrive, ramanDriveFetch } = await import('./desktop-drive');
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+    const response = hasNativeDrive() ? await ramanDriveFetch(url) : await fetch(url, {
         headers: {
             'Authorization': `Bearer ${accessToken}`
         }

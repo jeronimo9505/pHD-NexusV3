@@ -7,6 +7,7 @@ import { Key, Folder, Save, Shield, HelpCircle, Loader2, Search, CalendarDays, H
 import { DriveFileSelectorModal } from '../../drive-reports/components/drive-file-selector-modal';
 import { open } from '@tauri-apps/plugin-dialog';
 import { isDesktop } from '@/lib/desktop';
+import { DesktopGoogleConnection } from './desktop-google-connection';
 
 interface DriveSettingsFormProps {
     groupId: string;
@@ -120,6 +121,7 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
                 </div>
             </div>
 
+            <DesktopGoogleConnection key={groupId} groupId={groupId} />
             {/* Desktop Only: Local Data Vault */}
             {isDesktop && (
                 <div className="p-6 border-b border-slate-100 bg-white">

@@ -152,7 +152,7 @@ export function SampleDetailSheet({
 
     const getSummaryString = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'raman_drive_sync', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -177,7 +177,7 @@ export function SampleDetailSheet({
 
     const getParameterRows = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'raman_drive_sync', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -529,6 +529,11 @@ export function SampleDetailSheet({
                                     )}
 
                                     {/* Raman Spectrum Graph */}
+                                    {expandedChar!.data.raman_drive_sync?.status === 'pending' && (
+                                        <p role="status" className="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg">
+                                            Referencia Google pendiente. Los datos están guardados y se reintentará la subida al conectar Google en desktop.
+                                        </p>
+                                    )}
                                     {expandedChar!.type === 'Raman' && expandedChar!.data.raman_spectrum_file_id && (
                                         <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
                                             <SpectrumGraph

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { getFileContent } from '@/lib/google/drive';
-import { ensureAuth } from '@/lib/google/auth';
+import { ramanDriveToken } from '@/lib/google/desktop-drive';
 import { Loader2, Activity, Download, Maximize2 } from 'lucide-react';
 
 interface SpectrumGraphProps {
@@ -22,7 +22,7 @@ export function SpectrumGraph({ fileId, title }: SpectrumGraphProps) {
             setIsLoading(true);
             setError(null);
             try {
-                const token = await ensureAuth();
+                const token = await ramanDriveToken();
                 const content = await getFileContent(fileId, token);
                 // Backward compatibility: Handle both raw arrays and new payload format
                 let spectrumData = [];

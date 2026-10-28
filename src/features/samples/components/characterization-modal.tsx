@@ -6,6 +6,8 @@ import { createCharacterizationAction, updateCharacterizationAction, getGroupCha
 import { toast } from 'sonner';
 import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity, HardDrive, CheckCircle2, AlertCircle, Clipboard, Image, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { hasNativeDrive, desktopDriveIdentity } from '@/lib/google/desktop-drive';
+import { DesktopGoogleConnection } from '@/features/groups/components/desktop-google-connection';
 import { uploadFileToDrive } from '@/lib/google/upload';
 import { ensureAuth } from '@/lib/google/auth';
 import { isDesktop, ingestFile, ingestGroupFiles, checkEngineHealth, SCIENCE_ENGINE_URL, fetchRepresentativeSpectrum, savePastedImage, renameVaultFiles } from '@/lib/desktop';
@@ -220,6 +222,7 @@ export function CharacterizationModal({
 
     // UI States
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const submittingRef = useRef(false);
     const [isGeneratingDoc, setIsGeneratingDoc] = useState(false);
     const [scriptsLoaded, setScriptsLoaded] = useState(false);
     const [updateBatch, setUpdateBatch] = useState(false);
@@ -626,7 +629,7 @@ export function CharacterizationModal({
 
                 // 2. Process Remaining Keys
                 Object.entries(data).forEach(([k, v]) => {
-                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image'];
+                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', 'raman_drive_sync', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image'];
                     if (!processedKeys.has(k) && !systemKeys.includes(k)) {
                         const { value, unit } = splitValueAndUnit(v);
                         fields.push({ key: k, value, unit });
@@ -713,7 +716,7 @@ export function CharacterizationModal({
                         const order: string[] = Array.isArray(data.__order__) ? data.__order__ : [];
                         const systemKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link',
                             'local_h5_paths', 'original_files', 'local_h5_path', 'original_file',
-                            'raman_spectrum_file_id', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
+                            'raman_spectrum_file_id', 'raman_drive_sync', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
 
                         const separateUnit = (val: string): { v: string; u: string } => {
                             const match = val.match(/^([\d\.]+)\s*([a-zA-Z%μµ°Ω]+)$/);
@@ -839,10 +842,13 @@ export function CharacterizationModal({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (submittingRef.current) return;
+        submittingRef.current = true;
         setIsSubmitting(true);
+        try {
 
         // Prime Google Auth early to preserve user interaction context for popups
-        if (type === 'Raman' && scriptsLoaded) {
+        if (type === 'Raman' && scriptsLoaded && !hasNativeDrive()) {
             import('@/lib/google/auth').then(({ ensureAuth }) => ensureAuth().catch(() => {}));
         }
 
@@ -854,6 +860,8 @@ export function CharacterizationModal({
         }
 
         const cleanData: Record<string, any> = {};
+        if (initialData?.data.raman_spectrum_file_id) cleanData.raman_spectrum_file_id = initialData.data.raman_spectrum_file_id;
+        if (initialData?.data.raman_drive_sync) cleanData.raman_drive_sync = initialData.data.raman_drive_sync;
         const orderedKeys: string[] = [];
 
         dataFields.forEach(field => {
@@ -928,7 +936,7 @@ export function CharacterizationModal({
                         sample_name: sample.name,
                         date: performedAt,
                         equipment: equipment,
-                        parameters: cleanData,
+                        parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'raman_spectrum_file_id'].includes(key))),
                         data: spectrumData
                     };
                     const jsonString = JSON.stringify(payload, null, 2);
@@ -941,24 +949,21 @@ export function CharacterizationModal({
                     const blob = new Blob([jsonString], { type: 'application/json' });
                     const file = new File([blob], `${docName}.json`, { type: 'application/json' });
 
-                    // OPTIONAL: Try Google Drive Upload. Do not block if it fails or hangs on Desktop.
-                    try {
-                        const { ensureAuth } = await import('@/lib/google/auth');
-                        // 3-second timeout for Auth (Tauri blocks popups, causing it to hang)
-                        const authPromise = ensureAuth();
-                        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('AUTH_TIMEOUT')), 3000));
-                        await Promise.race([authPromise, timeoutPromise]);
-
-                        const targetFolderId = driveSettings?.sampleFolderId || driveSettings?.folderId;
-                        const driveFile = await uploadFileToDrive(file, targetFolderId);
-
-                        if (driveFile && driveFile.id) {
-                            cleanData['raman_spectrum_file_id'] = driveFile.id;
+                    if (hasNativeDrive()) {
+                        // Save the complete small reference before attempting Drive; no popup in submit.
+                        cleanData.raman_drive_sync = {
+                            job_id: crypto.randomUUID(), owner_id: (await desktopDriveIdentity(groupId)).userId, status: 'pending', name: `${docName}.json`,
+                            folder_id: driveSettings?.sampleFolderId || driveSettings?.folderId || null,
+                            payload, created_at: new Date().toISOString()
+                        };
+                    } else {
+                        try {
+                            await ensureAuth();
+                            const driveFile = await uploadFileToDrive(file, driveSettings?.sampleFolderId || driveSettings?.folderId);
+                            if (driveFile?.id) cleanData.raman_spectrum_file_id = driveFile.id;
+                        } catch {
+                            toast.info('Google Drive upload failed. Existing reference has been preserved.');
                         }
-                    } catch (driveErr: any) {
-                        console.warn("Drive upload skipped:", driveErr);
-                        // We do NOT abort. We just proceed saving locally/Supabase.
-                        toast.info("Saved data, but Google Drive sync was skipped.");
                     }
                 }
              } catch (err: any) {
@@ -1056,6 +1061,10 @@ export function CharacterizationModal({
             }
         }
 
+        if (hasNativeDrive() && cleanData.raman_drive_sync?.status === 'pending') {
+            cleanData.raman_drive_sync = { ...cleanData.raman_drive_sync, job_id: crypto.randomUUID(), owner_id: (await desktopDriveIdentity(groupId)).userId, file_id: undefined, payload: { ...cleanData.raman_drive_sync.payload,
+                parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'raman_spectrum_file_id'].includes(key))) } };
+        }
         let res;
         if (initialData?.id) {
             res = await updateCharacterizationAction({
@@ -1095,8 +1104,17 @@ export function CharacterizationModal({
                     });
                 localStorage.setItem(`phdnexus_last_params_${finalType}`, JSON.stringify(paramsToSave));
             }
-            toast.success(initialData?.id ? 'Updated' : 'Created');
+            if (hasNativeDrive() && cleanData.raman_drive_sync?.status === 'pending') {
+                toast.success('Raman saved. Google reference pending synchronization.');
+                window.dispatchEvent(new Event('phdnexus-raman-pending'));
+            } else toast.success(initialData?.id ? 'Updated' : 'Created');
             onClose();
+        }
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Could not save Raman data');
+        } finally {
+            submittingRef.current = false;
+            setIsSubmitting(false);
         }
     };
 
@@ -1168,7 +1186,7 @@ export function CharacterizationModal({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200 p-4">
-            <div className="absolute inset-0" onClick={onClose} />
+            <div className="absolute inset-0" onClick={() => { if (!submittingRef.current) onClose(); }} />
             <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200">
 
                 {/* Header */}
@@ -1198,7 +1216,7 @@ export function CharacterizationModal({
                             </div>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                    <button disabled={isSubmitting} onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
                         <X size={20} />
                     </button>
                 </div>
@@ -1424,7 +1442,7 @@ export function CharacterizationModal({
                                                         const order: string[] = Array.isArray(data.__order__) ? data.__order__ : [];
                                                         const systemKeys = new Set(['equipment', 'notes', '__order__', 'file_origin',
                                                             'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path',
-                                                            'original_file', 'raman_spectrum_file_id', '__bulk_id__', 'file_metadata',
+                                                            'original_file', 'raman_spectrum_file_id', 'raman_drive_sync', '__bulk_id__', 'file_metadata',
                                                             'attached_images', 'attached_image']);
                                                         const separateUnit = (val: string): { v: string; u: string } => {
                                                             const m = val.match(/^([\d\.]+)\s*([a-zA-Z%μµ°Ω]+)$/);
@@ -1617,6 +1635,7 @@ export function CharacterizationModal({
                             )}
 
                             {/* Raman / SERS Spectrum Section */}
+                            {type === 'Raman' && <DesktopGoogleConnection key={groupId} groupId={groupId} />}
                             {(type === 'Raman' || type === 'SERS') && (
                                 <div className="p-5 bg-purple-50/50 border border-purple-100 rounded-xl space-y-4">
                                     <div className="flex items-center gap-2">
@@ -1839,6 +1858,7 @@ export function CharacterizationModal({
                     <button
                         type="button"
                         onClick={onClose}
+                        disabled={isSubmitting}
                         className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 hover:bg-slate-200 rounded-lg transition-colors"
                     >
                         Cancel

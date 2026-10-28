@@ -1,4 +1,5 @@
 use tauri_plugin_shell::ShellExt;
+mod google_drive;
 
 #[tauri::command]
 fn open_local_folder(app: tauri::AppHandle, path: String) -> Result<(), String> {
@@ -11,7 +12,9 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_dialog::init())
-    .invoke_handler(tauri::generate_handler![open_local_folder])
+    .invoke_handler(tauri::generate_handler![open_local_folder, google_drive::google_drive_import_client,
+      google_drive::google_drive_status, google_drive::google_drive_connect, google_drive::google_drive_token,
+      google_drive::google_drive_disconnect])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

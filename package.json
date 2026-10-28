@@ -20,6 +20,7 @@
     "desktop:preview": "node scripts/desktop-preview.mjs",
     "tauri:perf": "tauri dev --no-watch --config src-tauri/tauri.performance.conf.json",
     "test:desktop": "node scripts/test-desktop-loading.mjs",
+    "test:raman-drive": "node scripts/test-raman-drive-sync.mjs && node scripts/test-google-oauth-probe.mjs",
     "test:google": "node scripts/test-google-loader.mjs && node scripts/test-google-init.mjs && node scripts/test-drive-data.mjs && node scripts/test-google-reliability.mjs"
   },
   "dependencies": {

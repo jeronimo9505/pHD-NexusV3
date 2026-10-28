@@ -6,6 +6,7 @@ import { getGroupRole } from "@/lib/auth/roles";
 import { getCurrentProfile } from '@/lib/supabase/queries';
 import { GoogleTokenSync } from "@/components/layout/GoogleTokenSync";
 import { SessionTracker } from "@/components/layout/SessionTracker";
+import { RamanDriveSync } from '@/components/layout/RamanDriveSync';
 
 interface GroupLayoutProps {
     children: React.ReactNode;
@@ -64,6 +65,7 @@ export default async function GroupLayout(props: GroupLayoutProps) {
             />
         }>
             <GoogleTokenSync />
+            {userId && <RamanDriveSync key={`${userId}:${groupId}`} groupId={groupId} userId={userId} />}
             {userId && <SessionTracker groupId={groupId} userId={userId} />}
             {props.children}
         </Shell>

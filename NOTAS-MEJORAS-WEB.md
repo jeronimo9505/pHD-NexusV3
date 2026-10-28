@@ -144,3 +144,11 @@ Paginación conservando genealogía y búsqueda global, reducción del paquete i
 - En Pipeline Templates, «Copy N local templates to this group» copia las antiguas al grupo elegido. No sobrescribe nombres existentes y conserva el almacenamiento local como respaldo. Ante un fallo parcial las copias confirmadas permanecen y se puede reintentar lo pendiente.
 - Verificación: node scripts/test-pipeline-templates.mjs (carga, copia, colisiones, doble envío, errores y respuestas antiguas), node scripts/test-vault-discovery.mjs, TypeScript y ESLint. La tabla existente tiene pasos JSON válidos; no se importaron automáticamente datos de la sesión local del usuario ni se ejecutaron pipelines reales.
 - Base de recuperación: vault-discovery-2026-10-28 (c1df8e6). Etiqueta final: pipeline-templates-cloud-2026-10-28. Reversión: git revert --no-commit vault-discovery-2026-10-28..pipeline-templates-cloud-2026-10-28, revisar y publicar. Las plantillas copiadas a Supabase permanecen; no hay reversión SQL. Se excluye next-env.d.ts generado por desarrollo.
+
+### Google Drive renovable en Tauri — 2026-10-28
+
+- Diagnóstico, activación y límites: CONEXION-GOOGLE-DESKTOP.md. OAuth nativo en navegador Windows, PKCE/estado/puerto temporal y credenciales en el almacén seguro del sistema. Solo drive.file; sin ampliar lectura general.
+- Raman se guarda primero en Supabase con referencia pendiente; reintentos persistentes por usuario/grupo, ID Drive reservado para evitar duplicados y enlace anterior conservado hasta confirmación. Las ediciones concurrentes no se sobrescriben.
+- Controles en Settings y formulario Raman: importar JSON desktop, conectar, comprobar renovación, reintentar y desconectar. Requiere reiniciar tauri dev e importar/conectar una vez; Vercel no actualiza el ejecutable.
+- Verificación: npm run test:raman-drive, pruebas Rust/almacén Windows con datos ficticios, regresiones Google/Samples/desktop/Vault/plantillas, TypeScript, ESLint y build Vercel. Pendiente comprobación interactiva de autorización/subida dentro de Tauri. Sin migración SQL ni instalador nuevo.
+- Base pipeline-templates-cloud-2026-10-28 (063fbe2); etiqueta final google-desktop-renewal-2026-10-28. Instrucciones de reversión y conexiones locales en CONEXION-GOOGLE-DESKTOP.md. Credenciales, captura y next-env.d.ts no se publican.
