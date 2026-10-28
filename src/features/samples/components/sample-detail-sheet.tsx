@@ -11,6 +11,7 @@ import { formatCellValue, splitValueAndUnit } from '../utils';
 import { CharacterizationModal } from './characterization-modal';
 import { format } from 'date-fns';
 import { SampleCommentsSection } from './sample-comments-section';
+import { formatSpectralRange } from '../raman-file-metadata';
 import { WipSavedImageDialog } from './wip-saved-image-dialog';
 import type { WipGeometry } from '../wip-spatial';
 import { WipMetadataDialog } from './wip-metadata-dialog';
@@ -470,6 +471,7 @@ export function SampleDetailSheet({
                                                     
                                                     return paths.map((path: string, i: number) => {
                                                         const meta = metadata[path];
+                                                        const range = formatSpectralRange(meta?.range);
                                                         const filename = path.split(/[\\/]/).pop();
                                                         return (
                                                             <div key={i} className="p-2 flex flex-col gap-1 hover:bg-emerald-100/30 transition-colors">
@@ -484,10 +486,10 @@ export function SampleDetailSheet({
                                                                 </div>
                                                                 {meta && (
                                                                     <div className="flex flex-wrap gap-x-3 gap-y-1">
-                                                                        {meta.range && (
+                                                                        {range && (
                                                                             <div className="flex items-center gap-1">
                                                                                 <span className="text-[8px] font-bold text-emerald-600/60 uppercase">Range</span>
-                                                                                <span className="text-[9px] font-medium text-emerald-700">{meta.range[0].toFixed(0)}-{meta.range[1].toFixed(0)} cm⁻¹</span>
+                                                                                <span className="text-[9px] font-medium text-emerald-700">{range}</span>
                                                                             </div>
                                                                         )}
                                                                         {meta.points && (
@@ -500,7 +502,7 @@ export function SampleDetailSheet({
                                                                             <div className="flex items-center gap-1">
                                                                                 <span className="text-[8px] font-bold text-emerald-600/60 uppercase">Matrix</span>
                                                                                 <span className="text-[9px] font-medium text-emerald-700">
-                                                                                    {meta.spectra === 1 ? '1x1' : 
+                                                                                    {Number.isInteger(meta.grid?.x)&&Number.isInteger(meta.grid?.y)&&meta.grid.x>0&&meta.grid.y>0 ? `${meta.grid.x}x${meta.grid.y}` : meta.spectra === 1 ? '1x1' :
                                                                                      Number.isInteger(Math.sqrt(meta.spectra)) ? `${Math.sqrt(meta.spectra)}x${Math.sqrt(meta.spectra)}` : 
                                                                                      `${meta.spectra} spec`}
                                                                                 </span>

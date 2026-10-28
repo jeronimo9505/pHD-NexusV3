@@ -281,7 +281,7 @@ class ProjectSession:
                 'version': self.project.version, 'reader': 'witio 0.2.0', 'validation': info['validation'],
                 'original_metadata': info['metadata'], 'reviewed_metadata': metadata.get('parameters', {}),
                 'references': info['references'], 'attached_object_ids': attached,
-                'shape': info['shape'], 'history': info['history'],
+                'shape': info['shape'], 'axis': info['axis'], 'history': info['history'],
                 'spatial_geometry': info['spatial_geometry'],
                 'field_sources': self.details(object_id)['field_sources']}
             details = self.details(object_id)

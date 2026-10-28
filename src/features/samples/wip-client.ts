@@ -3,6 +3,7 @@ import { desktopDriveCommand, desktopDriveIdentity } from '@/lib/google/desktop-
 import { saveWipCharacterizationAction } from './wip-actions';
 import type { WipExtraction, WipSample } from './wip-types';
 import { characterizationParameters } from './wip-parameters';
+import { wipFileMetadata } from './raman-file-metadata';
 
 export async function wipRequest<T>(action: string, body: unknown, signal?: AbortSignal): Promise<T> {
     const response = await fetch(`${SCIENCE_ENGINE_URL}/api/wip/${action}`, {
@@ -22,8 +23,7 @@ export async function saveWipExtraction(groupId: string, sample: WipSample, extr
         wip_archive_path:extracted.archive_relative_path };
     if (extracted.h5_relative_path) {
         data.local_h5_paths=[extracted.h5_relative_path];
-        data.file_metadata={ [extracted.h5_relative_path]: { spectra:extracted.shape[0]*extracted.shape[1],
-            points:extracted.shape[2],range:{x:extracted.shape[0],y:extracted.shape[1]} } };
+        data.file_metadata={ [extracted.h5_relative_path]: wipFileMetadata(extracted) };
     }
     if (extracted.kind==='raman' && extracted.representative?.length) {
         const { userId } = await desktopDriveIdentity(groupId);

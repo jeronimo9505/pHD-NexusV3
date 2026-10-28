@@ -23,6 +23,16 @@ class SpatialTests(unittest.TestCase):
         for changed in [dict(self.map,valid=False),dict(self.map,project_hash='other'),dict(self.map,system_id='other')]:
             with self.assertRaises(ValueError):overlay(self.image,changed)
 
+    def test_point_and_line(self):
+        point=dict(self.map,width=1,height=1)
+        shape=overlay(self.image,point)
+        self.assertEqual(shape['kind'],'point')
+        np.testing.assert_allclose(shape['polygon'],[[5,5]])
+        self.assertEqual(overlay(self.image,dict(self.map,width=1,height=5))['kind'],'line')
+        scene=Image.new('RGB',(100,100),'white')
+        exported=Image.open(io.BytesIO(base64.b64decode(annotate(scene,self.image,[point],0))))
+        self.assertEqual(exported.getpixel((5,5)),(239,68,68))
+
     def test_export_keeps_original(self):
         source=Image.new('RGB',(100,100),'white');before=source.tobytes()
         result=Image.open(io.BytesIO(base64.b64decode(annotate(source,self.image,[self.map],40,True))))

@@ -35,3 +35,13 @@ A deterministic import ID covers group, sample, source hash, object, reviewed se
 Baseline application commit: `08b065e`. This feature is isolated in one Git commit; use `git revert <WIP feature commit>` and deploy the revert to recover prior application behavior. Do not use a destructive reset on a checkout containing local work.
 
 The database migration is `db/changes/wip_import.sql` (already applied). If removing it, revert the application first, then apply `db/rollback/wip_import.sql`. That rollback only removes the import RPC; it does not delete characterizations or local vault files. Existing records remain available. Private Reference WIPs, OAuth files and unrelated local changes are excluded from the feature commit.
+
+## Follow-up fixes: image detection and sample search
+
+Measurement outlines are red and thicker in the viewer and exported PNGs. The default list shows only measurements whose calibrated footprints intersect the image. Completely contained measurements are labelled **Inside image**; partial intersections are **Partially inside image**. **Show detected** selects up to 12 matches. **Include outside / unlocated measurements** exposes the remaining entries for inspection without assigning invented positions. Single-pixel measurements render as points; one-dimensional scans render as lines. Detection does not automatically attach an image or change sample assignment.
+
+Both destination sample fields now search the server by ID prefix after 250 ms, return at most 20 matches within the active group, and require explicit selection. Empty searches do not retrieve the sample catalog. Previously selected samples remain available for the current import session.
+
+The original importer mistakenly stored pixel dimensions in `file_metadata.range`. That property is reserved for the two spectral bounds. New imports store a separate `grid`, and use the decoded spectral axis for `range`. The detail sheet validates both bounds before formatting them, so existing records with the old malformed property can be opened without reimporting or changing their source data. An unavailable spectral range is omitted rather than inferred from pixel counts.
+
+Regression checks: `node scripts/test-wip-parameters.mjs`, `node scripts/test-wip-sample-search.mjs`, `python python-engine/tests/test_wip_spatial.py`, `python python-engine/tests/test_wip_import.py`, TypeScript and targeted ESLint. Revert this follow-up commit to recover the previous interface; it adds no database migration and deletes no imported records.

@@ -18,7 +18,7 @@ assert.equal(saved.Power,'500 µW');assert.equal(saved.Spots,'50x50 ixj');assert
 assert.deepEqual(Object.keys(saved),Array.from(WIP_PARAMETERS,field=>field.label));
 assert.equal(object.metadata.power,999,'source metadata remains unchanged');
 assert.equal(initialWipParameters({kind:'raman',metadata:{}}).size,'');
-const {spatialOverlay}=load('src/features/samples/wip-spatial.ts');
+const {spatialOverlay,spatialRelation}=load('src/features/samples/wip-spatial.ts');
 const image={valid:true,project_hash:'same',system_id:'instrument',matrix_um:[[2,0,10],[0,-2,30],[0,0,1]],width:100,height:100};
 const map={...image,matrix_um:[[0,-2,20],[2,0,20],[0,0,1]],width:5,height:3};
 const shape=spatialOverlay(image,map,true);
@@ -27,4 +27,28 @@ assert.equal(shape.points.length,15);
 assert.throws(()=>spatialOverlay(image,{...map,project_hash:'other'}),/coordinate frame/);
 assert.throws(()=>spatialOverlay(image,{...map,valid:false}),/Calibrated/);
 assert.equal(spatialOverlay(image,{...map,width:100,height:100},true).points.length,0);
+assert.equal(spatialRelation(image,map),'inside');
+const spatial=(x,y,width=5,height=5)=>({...image,matrix_um:[[2,0,10+2*x],[0,-2,30-2*y],[0,0,1]],width,height});
+assert.equal(spatialRelation(image,spatial(200,200)),'outside');
+assert.equal(spatialRelation(image,spatial(98,98)),'overlap');
+assert.equal(spatialRelation(image,spatial(-10,-10,150,150)),'overlap','map enclosing image intersects without any vertex inside');
+assert.equal(spatialRelation(image,spatial(-10,10,150,2)),'overlap','edge crossing intersects without a vertex inside');
+assert.equal(spatialRelation(image,{...map,system_id:'other'}),'unavailable');
+const point=spatial(20,30,1,1);
+assert.equal(spatialOverlay(image,point).kind,'point');
+assert.equal(spatialOverlay(image,point).polygon.length,1);
+assert.equal(spatialRelation(image,point),'inside');
+assert.equal(spatialRelation(image,spatial(101,30,1,1)),'outside');
+assert.equal(spatialOverlay(image,spatial(20,30,1,5)).kind,'line');
+const {spectralRange,formatSpectralRange,wipFileMetadata}=load('src/features/samples/raman-file-metadata.ts');
+for(const invalid of [undefined,null,{x:50,y:50},[],[10],[10,undefined],[NaN,100],['10','20'],new Array(2)]){
+    assert.equal(spectralRange(invalid),null);assert.equal(formatSpectralRange(invalid),null);
+}
+assert.equal(formatSpectralRange([100.2,2000.8]),'100-2001 cm⁻¹');
+assert.equal(JSON.stringify(spectralRange([100,2000])),'[100,2000]');
+const metadata=wipFileMetadata({shape:[50,20,1024],provenance:{axis:{start:2000,end:100}},representative:null});
+assert.equal(JSON.stringify(metadata.range),'[100,2000]');
+assert.equal(JSON.stringify(metadata.grid),'{"x":50,"y":20}');
+assert.equal(metadata.spectra,1000);
+assert.equal('range' in wipFileMetadata({shape:[1,1,2],provenance:{},representative:null}),false);
 console.log('PASS WIP parameters: source preservation, manual analyte/power, units, pixel grid vs physical size; rotated spatial overlays and frame validation');

@@ -9,6 +9,7 @@ import { WipMetadataDialog } from './wip-metadata-dialog';
 import type { WipInventory, WipObject, WipSample, WipExtraction } from '../wip-types';
 import { WIP_PARAMETERS, initialWipParameters } from '../wip-parameters';
 import { WipSpatialViewer } from './wip-spatial-viewer';
+import { WipSamplePicker } from './wip-sample-picker';
 
 type Assignment = { selected:boolean; sampleId:string; images:string[]; reviewed:Record<string,string>; result?:string; done?:boolean };
 
@@ -37,9 +38,9 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
     const session=useRef<string|undefined>(undefined);
     useEffect(()=>{
         alive.current=true;
-        getWipSampleCatalogAction(groupId).then(result=>{if(!alive.current)return;if(result.error)setError(result.error);else setCatalog(result.data||[]);});
+        getWipSampleCatalogAction(groupId,'',defaultSampleId).then(result=>{if(!alive.current)return;if(result.error)setError(result.error);else setCatalog(result.data||[]);});
         return ()=>{alive.current=false;request.current?.abort();if(session.current)void wipRequest('close',{session:session.current,object_id:''}).catch(()=>{});};
-    },[groupId]);
+    },[groupId,defaultSampleId]);
     const object=project?.objects.find(item=>item.id===active);
     const row=rows[active];
     useEffect(()=>{
@@ -109,7 +110,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
 
     const visible=project?.objects.filter(item=>(showSupporting||['raman','image','auxiliary'].includes(item.kind))&&`${item.name} ${item.id}`.toLowerCase().includes(search.toLowerCase()))||[];
     const images=project?.objects.filter(item=>item.kind==='image'&&item.importable)||[];
-    const select=<><option value="">Choose a sample…</option>{catalog.map(sample=><option key={sample.id} value={sample.id}>{sample.sample_code||sample.display_id} · {sample.name} · {sample.logbooks?.name}</option>)}</>;
+    const rememberSample=(sample:WipSample|null)=>{if(sample)setCatalog(current=>current.some(item=>item.id===sample.id)?current:[...current,sample]);};
     const points=preview?.points?.filter(point=>point.y!==null&&Number.isFinite(point.y)) as {x:number;y:number}[]|undefined;
     const polyline=points?.length?(()=>{const ys=points.map(p=>p.y),low=Math.min(...ys),high=Math.max(...ys),xmin=points[0].x,xmax=points[points.length-1].x;return points.map(p=>`${10+(p.x-xmin)/(xmax-xmin||1)*480},${170-(p.y-low)/(high-low||1)*150}`).join(' ');})():'';
     return <div className="fixed inset-0 z-[180] bg-slate-950/60 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Import WITec project">
@@ -125,7 +126,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
                 <section className="border-r flex flex-col min-h-0">
                     <div className="p-3 space-y-2"><input className="border rounded p-2 w-full text-sm" aria-label="Search WIP objects" placeholder="Search objects…" value={search} onChange={e=>setSearch(e.target.value)}/>
                         <label className="text-xs flex gap-2"><input type="checkbox" checked={showSupporting} onChange={e=>setShowSupporting(e.target.checked)}/>Show supporting and unknown objects</label>
-                        <div className="flex gap-2"><select aria-label="Assign selected items to sample" className="border rounded p-2 text-xs min-w-0 flex-1" value={bulkSample} onChange={e=>setBulkSample(e.target.value)}>{select}</select><button type="button" disabled={busy||!bulkSample} className="border rounded px-2 text-xs disabled:opacity-50" onClick={()=>setRows(current=>Object.fromEntries(Object.entries(current).map(([id,value])=>[id,value.selected&&!value.done?{...value,sampleId:bulkSample}:value])))}>Assign selected</button></div>
+                        <div className="flex gap-2"><WipSamplePicker groupId={groupId} value={catalog.find(sample=>sample.id===bulkSample)||null} disabled={busy} label="Assign selected items to sample" onSelect={sample=>{rememberSample(sample);setBulkSample(sample?.id||'');}}/><button type="button" disabled={busy||!bulkSample} className="border rounded px-2 text-xs disabled:opacity-50" onClick={()=>setRows(current=>Object.fromEntries(Object.entries(current).map(([id,value])=>[id,value.selected&&!value.done?{...value,sampleId:bulkSample}:value])))}>Assign selected</button></div>
                     </div>
                     <div className="overflow-auto flex-1 divide-y">{visible.map(item=>{const assignment=rows[item.id];return <div key={item.id} draggable={item.kind==='raman'} onDragStart={event=>event.dataTransfer.setData('application/x-phdnexus-wip-map',item.id)} className={`p-3 flex gap-3 ${active===item.id?'bg-violet-50':''}`}>
                         <input type="checkbox" aria-label={`Select ${item.name}`} disabled={busy||!item.importable||assignment.done} checked={assignment.selected} onChange={e=>update(item.id,{selected:e.target.checked})}/>
@@ -137,11 +138,11 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
                     <div className="flex justify-between gap-3"><h3 className="font-semibold break-all">{object.name}</h3><button type="button" className="text-violet-600 text-sm shrink-0" onClick={()=>showMetadata(object)}>Metadata</button></div>
                     {previewing&&<p className="text-sm">Loading source preview…</p>}
                     {preview?.image&&object.spatial_geometry&&<WipSpatialViewer key={object.id} imageSource={`data:image/png;base64,${preview.image}`} name={object.name} geometry={object.spatial_geometry}
-                        maps={(project?.objects||[]).filter(item=>item.kind==='raman'&&item.spatial_geometry&&item.shape&&item.shape[0]>1&&item.shape[1]>1).map(item=>({id:item.id,name:item.name,geometry:item.spatial_geometry!}))}
+                        maps={(project?.objects||[]).filter(item=>item.kind==='raman'&&item.spatial_geometry&&item.shape&&item.shape[0]>=1&&item.shape[1]>=1).map(item=>({id:item.id,name:item.name,geometry:item.spatial_geometry!}))}
                         onExport={(maps,scale,grid)=>wipRequest('annotate',{session:project!.session,object_id:object.id,map_ids:maps.map(map=>map.id),scale_um:scale,show_grid:grid})}/>}
                     {!!polyline&&<div><svg viewBox="0 0 500 190" className="w-full bg-slate-950 rounded-lg" role="img" aria-label="Source Raman spectrum"><polyline points={polyline} fill="none" stroke="#a78bfa" strokeWidth="1.5"/></svg><p className="text-xs text-slate-500">{preview?.preview_label} · Raman shift (cm⁻¹)</p></div>}
                     {object.warnings.map((warning,index)=><p key={index} className="text-xs text-amber-700">{warning}</p>)}
-                    {object.importable&&<><label className="block text-sm font-medium">Destination sample<select disabled={busy||row.done} aria-label="Destination sample" className="block border rounded p-2 w-full mt-1" value={row.sampleId} onChange={e=>update(object.id,{sampleId:e.target.value})}>{select}</select></label>
+                    {object.importable&&<><label className="block text-sm font-medium">Destination sample<WipSamplePicker groupId={groupId} value={catalog.find(sample=>sample.id===row.sampleId)||null} disabled={busy||row.done} label="Destination sample" onSelect={sample=>{rememberSample(sample);update(object.id,{sampleId:sample?.id||''});}}/></label>
                         {!row.sampleId&&suggestedSample(object,catalog)&&<button type="button" className="text-xs text-violet-600 underline" onClick={()=>update(object.id,{sampleId:suggestedSample(object,catalog)!.id})}>Use name-based suggestion: {suggestedSample(object,catalog)!.sample_code} (confirm before importing)</button>}
                         <fieldset disabled={busy||row.done}><legend className="font-semibold text-sm mb-2">Review import metadata</legend><p className="text-xs text-slate-500 mb-3">Values come from acquisition records, never the file name. Original values remain available in Metadata.</p><table className="w-full text-sm border rounded-lg"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-2 text-left">#</th><th className="p-2 text-left">Parameter</th><th className="p-2 text-left">Value</th><th className="p-2 text-left">Unit</th></tr></thead><tbody>{WIP_PARAMETERS.filter(field=>object.kind==='raman'||field.key==='objective_magnification').map((field,index)=><tr key={field.key} className="border-t"><td className="p-2 text-xs text-slate-400">{index+1}</td><th className="p-2 text-left font-medium">{field.label}</th><td className="p-2"><input aria-label={field.label} className="border rounded p-2 w-full min-w-0" value={row.reviewed[field.key]||''} placeholder={['analyte','power'].includes(field.key)?'Enter manually':'Not recovered — optional'} onChange={e=>update(object.id,{reviewed:{...row.reviewed,[field.key]:e.target.value}})}/></td><td className="p-2 text-xs">{'units' in field?<select aria-label={`${field.label} unit`} className="border rounded p-2" value={row.reviewed[`unit:${field.key}`]??field.unit} onChange={e=>update(object.id,{reviewed:{...row.reviewed,[`unit:${field.key}`]:e.target.value}})}>{field.units.map(unit=><option key={unit} value={unit}>{unit||'—'}</option>)}</select>:field.unit}</td></tr>)}</tbody></table><p className="text-xs text-slate-500 mt-2">Spots = pixel grid (i×j). Size = physical scan width × height. Analyte and Power are always entered manually.</p></fieldset>
                         {object.kind==='raman'&&<fieldset disabled={busy||row.done} className="space-y-2"><legend className="font-semibold text-sm">Attached camera images</legend><p className="text-xs text-slate-500">Select images to include with this measurement. Position overlap is a suggestion, not a confirmed association.</p>

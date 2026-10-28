@@ -24,24 +24,24 @@ export async function getWipSpatialMapsAction(groupId:string,sourceHash:string):
                 .eq('samples.group_id',groupId).eq('type','Raman').eq('data->wip_import->>source_hash',sourceHash)
                 .order('id').range(offset,offset+499);
             if(error)return{error:error.message};
-            rows.push(...(data||[]).filter((row:any)=>row.geometry?.width>1&&row.geometry?.height>1).map((row:any)=>({id:row.id,name:row.name||row.id,geometry:row.geometry})));
+            rows.push(...(data||[]).filter((row:any)=>row.geometry?.width>=1&&row.geometry?.height>=1).map((row:any)=>({id:row.id,name:row.name||row.id,geometry:row.geometry})));
             if(!data||data.length<500)break;
         }
         return{data:rows};
     }catch{return{error:'Could not load maps from the same WIP coordinate frame'};}
 }
 
-export async function getWipSampleCatalogAction(groupId: string): Promise<{ data?: WipSample[]; error?: string }> {
+export async function getWipSampleCatalogAction(groupId: string, query = '', sampleId?: string): Promise<{ data?: WipSample[]; error?: string }> {
+    const prefix=query.trim().replace(/[^a-zA-Z0-9_-]/g,'').slice(0,80);
+    if(!sampleId&&!prefix)return {data:[]};
     try {
-        const client = await access(groupId); const rows: WipSample[] = [];
-        for (let offset=0;;offset+=500) {
-            const { data, error } = await client.from('samples').select('id, sample_code, display_id, name, logbook_id, logbooks(name)')
-                .eq('group_id',groupId).order('id').range(offset,offset+499);
-            if (error) return { error: error.message };
-            rows.push(...(data || [])); if (!data || data.length<500) break;
-        }
-        return { data: rows };
-    } catch (error) { return { error: error instanceof Error ? error.message : 'Could not load samples' }; }
+        const client=await access(groupId);
+        let request=client.from('samples').select('id, sample_code, display_id, name, logbook_id, logbooks(name)').eq('group_id',groupId);
+        if(sampleId)request=request.eq('id',sampleId);
+        else {const pattern=prefix.replaceAll('_','\\_')+'%';request=request.or(`sample_code.ilike.${pattern},display_id.ilike.${pattern}`);}
+        const {data,error}=await request.order('sample_code').order('id').limit(20);
+        return error?{error:error.message}:{data:data||[]};
+    }catch{return {error:'Could not search samples'};}
 }
 
 export async function saveWipCharacterizationAction(input: {

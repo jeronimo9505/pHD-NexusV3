@@ -31,12 +31,13 @@ def geometry(entry, project_hash):
         if np.linalg.norm(linear[2,:2])>max(np.linalg.norm(linear[:2,:2]),1e-12)*1e-7:
             raise ValueError('Tilted 3D planes are not supported by the 2D overlay.')
         affine=np.eye(3);affine[:2,:2]=linear[:2,:2];affine[:2,2]=offset[:2]
-        if abs(np.linalg.det(affine))<1e-15: raise ValueError('The spatial transformation is singular.')
         nx,ny=int(payload['SizeX'].scalar()),int(payload['SizeY'].scalar())
+        point=entry.class_name=='TDGraph' and nx==ny==1
+        if not point and abs(np.linalg.det(affine))<1e-15: raise ValueError('The spatial transformation is singular.')
         meta=entry.measurement_metadata
         for actual,key in [(nx*np.linalg.norm(linear[:2,0]),'scan_span_x_um'),(ny*np.linalg.norm(linear[:2,1]),'scan_span_y_um')]:
             expected=meta.get(key)
-            if expected is not None and expected>0 and not math.isclose(actual,float(expected),rel_tol=.02,abs_tol=.001):
+            if not point and expected is not None and expected>0 and not math.isclose(actual,float(expected),rel_tol=.02,abs_tol=.001):
                 raise ValueError('Stored spatial units/viewport disagree with acquisition dimensions; exact overlay is disabled.')
         result.update(valid=True,matrix_um=affine.tolist(),width=nx,height=ny,
             um_per_pixel_x=float(np.linalg.norm(linear[:2,0])),um_per_pixel_y=float(np.linalg.norm(linear[:2,1])),
@@ -55,25 +56,29 @@ def overlay(image, measurement, grid=False):
     if a.shape!=(3,3) or b.shape!=(3,3) or not np.isfinite(a).all() or not np.isfinite(b).all():raise ValueError('Invalid affine matrix.')
     mapping=np.linalg.inv(a)@b
     nx,ny=int(measurement['width']),int(measurement['height'])
-    corners=np.array([[0,0,1],[nx,0,1],[nx,ny,1],[0,ny,1]],dtype=float)@mapping.T
+    if nx<1 or ny<1:raise ValueError('Invalid acquisition dimensions.')
+    kind='point' if nx==ny==1 else 'line' if nx==1 or ny==1 else 'area'
+    vertices=[[0,0,1]] if kind=='point' else [[0,0,1],[0 if nx==1 else nx-1,0 if ny==1 else ny-1,1]] if kind=='line' else [[0,0,1],[nx,0,1],[nx,ny,1],[0,ny,1]]
+    corners=np.array(vertices,dtype=float)@mapping.T
     points=[]
     if grid and nx*ny<=5000:
         xx,yy=np.meshgrid(np.arange(nx),np.arange(ny))
         source=np.c_[xx.ravel(),yy.ravel(),np.ones(nx*ny)]
         points=(source@mapping.T)[:,:2].tolist()
-    return {'polygon':corners[:,:2].tolist(),'points':points,'grid_available':nx*ny<=5000,
+    return {'kind':kind,'polygon':corners[:,:2].tolist(),'points':points,'grid_available':nx*ny<=5000,
         'convention':measurement.get('convention'),'mapping':mapping.tolist()}
 
 def annotate(rgb_image, image_geometry, maps, scale_um, show_grid=False):
     image=rgb_image.copy().convert('RGB')
     draw=ImageDraw.Draw(image);width,height=image.size
-    line=max(2,round(width/700));radius=max(2,round(width/900))
-    colors=['#ffcd38','#4ade80','#60a5fa','#f472b6','#c084fc','#fb923c']
-    for index,measurement in enumerate(maps):
+    line=max(4,round(width/220));radius=max(2,round(width/900))
+    color='#ef4444'
+    for measurement in maps:
         shape=overlay(image_geometry,measurement,show_grid)
-        color=colors[index%len(colors)]
         vertices=[tuple(p) for p in shape['polygon']]
-        draw.line(vertices+[vertices[0]],fill=color,width=line)
+        if shape['kind']=='point':
+            x,y=vertices[0];r=max(6,round(width/180));draw.ellipse((x-r,y-r,x+r,y+r),fill=color,outline='white',width=max(1,line//3))
+        else:draw.line(vertices+([vertices[0]] if shape['kind']=='area' else []),fill=color,width=line)
         for x,y in shape['points']:draw.ellipse((x-radius,y-radius,x+radius,y+radius),fill=color)
     if scale_um:
         if not image_geometry.get('valid'):raise ValueError('A calibrated image is required for a scale bar.')
