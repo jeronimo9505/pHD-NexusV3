@@ -9,7 +9,7 @@ export interface WipObject {
     spatial_geometry?: import('./wip-spatial').WipGeometry;
 }
 export interface WipInventory {
-    session: string; sha256: string; name: string; source_file_path?:string; size: number; version: number; objects: WipObject[];
+    session: string; sha256: string; name: string; capabilities?:string[]; source_file_path?:string; size: number; version: number; objects: WipObject[];
 }
 export interface WipSample {
     id: string; sample_code: string | null; display_id: string; name: string; logbook_id: string | null;

@@ -72,6 +72,10 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
             setMessage('Reading project structure and acquisition metadata… The original file is read-only.');
             const result=await wipRequest<WipInventory>('inspect',{file_path:path},controller.signal);
             if(!alive.current||controller.signal.aborted){void wipRequest('close',{session:result.session,object_id:''}).catch(()=>{});return;}
+            if(!result.capabilities?.includes('persisted_image_annotations_v1')){
+                void wipRequest('close',{session:result.session,object_id:''}).catch(()=>{});
+                throw new Error('Restart the Python science engine to save image areas and scale bars, then reopen this WIP project.');
+            }
             if(session.current)void wipRequest('close',{session:session.current,object_id:''}).catch(()=>{});
             session.current=result.session;setProject(result);setAnnotations({});
             setRows(Object.fromEntries(result.objects.map(item=>[item.id,{selected:false,sampleId:defaultSampleId||'',images:[],

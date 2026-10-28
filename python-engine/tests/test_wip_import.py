@@ -79,6 +79,7 @@ class ReferenceTests(unittest.TestCase):
         assert after==cls.before,'The original WIP changed during testing'
 
     def test_metadata_and_auxiliary_classification(self):
+        self.assertIn('persisted_image_annotations_v1',self.inventory['capabilities'])
         objects=self.inventory['objects']
         self.assertEqual(len(objects),len(self.session.project.data))
         self.assertTrue(any(o['kind']=='raman' for o in objects))

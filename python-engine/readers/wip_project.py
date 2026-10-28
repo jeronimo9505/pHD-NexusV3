@@ -228,7 +228,7 @@ class ProjectSession:
                     if None not in (ix, iy, sx, sy) and abs(x-ix) <= abs(sx)/2 and abs(y-iy) <= abs(sy)/2:
                         obj['suggested_images'].append(image['id'])
             self.check_source()
-            return {'name': self.path.name, 'source_file_path':self.opened_path,'resolved_source_file_path':str(self.path), 'sha256': self.sha256, 'size': self.stat.st_size,
+            return {'name': self.path.name, 'capabilities':['persisted_image_annotations_v1'],'source_file_path':self.opened_path,'resolved_source_file_path':str(self.path), 'sha256': self.sha256, 'size': self.stat.st_size,
                 'version': self.project.version, 'reader': 'witio 0.2.0 / bounded PhD Nexus adapter', 'objects': objects}
 
     def entry(self, object_id):
