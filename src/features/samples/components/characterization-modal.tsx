@@ -1,5 +1,7 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+const WipImportDialog = dynamic(() => import('./wip-import-dialog').then(module => module.WipImportDialog), {ssr:false});
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Sample, SampleCharacterization } from '../types';
 import { createCharacterizationAction, updateCharacterizationAction, getGroupCharacterizationTypesAction, getLastCharacterizationParamsAction } from '../actions';
@@ -221,6 +223,9 @@ export function CharacterizationModal({
     const [customTypeName, setCustomTypeName] = useState('');
 
     // UI States
+    const [wipOpen,setWipOpen] = useState(false);
+    const [nativeWip,setNativeWip] = useState(false);
+    useEffect(()=>setNativeWip(hasNativeDrive()),[]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const submittingRef = useRef(false);
     const [isGeneratingDoc, setIsGeneratingDoc] = useState(false);
@@ -629,7 +634,7 @@ export function CharacterizationModal({
 
                 // 2. Process Remaining Keys
                 Object.entries(data).forEach(([k, v]) => {
-                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', 'raman_drive_sync', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image'];
+                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', 'raman_drive_sync', 'wip_import', 'wip_archive_path', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image'];
                     if (!processedKeys.has(k) && !systemKeys.includes(k)) {
                         const { value, unit } = splitValueAndUnit(v);
                         fields.push({ key: k, value, unit });
@@ -716,7 +721,7 @@ export function CharacterizationModal({
                         const order: string[] = Array.isArray(data.__order__) ? data.__order__ : [];
                         const systemKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link',
                             'local_h5_paths', 'original_files', 'local_h5_path', 'original_file',
-                            'raman_spectrum_file_id', 'raman_drive_sync', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
+                            'raman_spectrum_file_id', 'raman_drive_sync', 'wip_import', 'wip_archive_path', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
 
                         const separateUnit = (val: string): { v: string; u: string } => {
                             const match = val.match(/^([\d\.]+)\s*([a-zA-Z%μµ°Ω]+)$/);
@@ -860,6 +865,8 @@ export function CharacterizationModal({
         }
 
         const cleanData: Record<string, any> = {};
+        if(initialData?.data.wip_import)cleanData.wip_import=initialData.data.wip_import;
+        if(initialData?.data.wip_archive_path)cleanData.wip_archive_path=initialData.data.wip_archive_path;
         if (initialData?.data.raman_spectrum_file_id) cleanData.raman_spectrum_file_id = initialData.data.raman_spectrum_file_id;
         if (initialData?.data.raman_drive_sync) cleanData.raman_drive_sync = initialData.data.raman_drive_sync;
         const orderedKeys: string[] = [];
@@ -936,7 +943,7 @@ export function CharacterizationModal({
                         sample_name: sample.name,
                         date: performedAt,
                         equipment: equipment,
-                        parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'raman_spectrum_file_id'].includes(key))),
+                        parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'wip_import', 'wip_archive_path', 'raman_spectrum_file_id'].includes(key))),
                         data: spectrumData
                     };
                     const jsonString = JSON.stringify(payload, null, 2);
@@ -1063,7 +1070,7 @@ export function CharacterizationModal({
 
         if (hasNativeDrive() && cleanData.raman_drive_sync?.status === 'pending') {
             cleanData.raman_drive_sync = { ...cleanData.raman_drive_sync, job_id: crypto.randomUUID(), owner_id: (await desktopDriveIdentity(groupId)).userId, file_id: undefined, payload: { ...cleanData.raman_drive_sync.payload,
-                parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'raman_spectrum_file_id'].includes(key))) } };
+                parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'wip_import', 'wip_archive_path', 'raman_spectrum_file_id'].includes(key))) } };
             cleanData.raman_drive_sync.signature = await desktopDriveCommand('google_drive_sign_job', groupId,
                 { job: cleanData.raman_drive_sync }, cleanData.raman_drive_sync.owner_id);
         }
@@ -1186,7 +1193,8 @@ export function CharacterizationModal({
 
     if (!isOpen) return null;
 
-    return (
+    return (<>
+        {wipOpen && <WipImportDialog groupId={groupId} defaultSampleId={sample.id} folderId={driveSettings?.sampleFolderId||driveSettings?.folderId} onClose={()=>setWipOpen(false)}/>}
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200 p-4">
             <div className="absolute inset-0" onClick={() => { if (!submittingRef.current) onClose(); }} />
             <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200">
@@ -1444,7 +1452,7 @@ export function CharacterizationModal({
                                                         const order: string[] = Array.isArray(data.__order__) ? data.__order__ : [];
                                                         const systemKeys = new Set(['equipment', 'notes', '__order__', 'file_origin',
                                                             'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path',
-                                                            'original_file', 'raman_spectrum_file_id', 'raman_drive_sync', '__bulk_id__', 'file_metadata',
+                                                            'original_file', 'raman_spectrum_file_id', 'raman_drive_sync', 'wip_import', 'wip_archive_path', '__bulk_id__', 'file_metadata',
                                                             'attached_images', 'attached_image']);
                                                         const separateUnit = (val: string): { v: string; u: string } => {
                                                             const m = val.match(/^([\d\.]+)\s*([a-zA-Z%μµ°Ω]+)$/);
@@ -1637,6 +1645,7 @@ export function CharacterizationModal({
                             )}
 
                             {/* Raman / SERS Spectrum Section */}
+                            {type === 'Raman' && nativeWip && <button type="button" disabled={isSubmitting} onClick={()=>setWipOpen(true)} className="border border-violet-200 text-violet-700 bg-violet-50 px-4 py-2 rounded-lg text-sm">Import .wip project</button>}
                             {(type === 'Raman' || type === 'SERS') && (
                                 <div className="p-5 bg-purple-50/50 border border-purple-100 rounded-xl space-y-4">
                                     <div className="flex items-center gap-2">
@@ -1876,5 +1885,5 @@ export function CharacterizationModal({
                 </div>
             </div>
         </div>
-    );
+    </>);
 }

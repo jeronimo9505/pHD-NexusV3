@@ -27,6 +27,8 @@ app = FastAPI(
     description="Local scientific processing sidecar for Raman data",
     version="0.1.0"
 )
+from wip_api import router as wip_router
+app.include_router(wip_router)
 
 # Essential CORS
 app.add_middleware(

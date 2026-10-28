@@ -11,6 +11,9 @@ import { formatCellValue, splitValueAndUnit } from '../utils';
 import { CharacterizationModal } from './characterization-modal';
 import { format } from 'date-fns';
 import { SampleCommentsSection } from './sample-comments-section';
+import { WipSavedImageDialog } from './wip-saved-image-dialog';
+import type { WipGeometry } from '../wip-spatial';
+import { WipMetadataDialog } from './wip-metadata-dialog';
 import { SpectrumGraph } from './spectrum-graph';
 import { isDesktop, SCIENCE_ENGINE_URL } from '@/lib/desktop';
 import { FolderOpen } from 'lucide-react';
@@ -42,6 +45,8 @@ export function SampleDetailSheet({
     parameterOrder, setParameterOrder, driveSettings, initialCharId,
     allSamples = [], onSelectSample
 }: SampleDetailSheetProps) {
+    const [wipImage,setWipImage] = useState<{name:string;path:string;spatial_geometry:WipGeometry}|null>(null);
+    const [wipMetadata,setWipMetadata] = useState<Record<string,any>|null>(null);
     const [activeTab, setActiveTab] = useState<'overview' | 'characterization'>('overview');
     const [characterizations, setCharacterizations] = useState<SampleCharacterization[]>([]);
     const [isLoadingChars, setIsLoadingChars] = useState(false);
@@ -152,7 +157,7 @@ export function SampleDetailSheet({
 
     const getSummaryString = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'raman_drive_sync', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'raman_drive_sync', 'wip_import', 'wip_archive_path', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -177,7 +182,7 @@ export function SampleDetailSheet({
 
     const getParameterRows = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'raman_drive_sync', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'raman_drive_sync', 'wip_import', 'wip_archive_path', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -528,6 +533,8 @@ export function SampleDetailSheet({
                                         </div>
                                     )}
 
+                                    {expandedChar!.data.wip_import && <button type="button" className="text-violet-600 border border-violet-200 bg-violet-50 px-3 py-2 rounded-lg text-xs" onClick={()=>setWipMetadata(expandedChar!.data.wip_import)}>WITec Metadata</button>}
+                                    {isDesktop&&expandedChar!.data.wip_import?.attached_image_metadata?.map((image:any)=><button key={image.id} type="button" className="text-violet-600 border border-violet-200 px-3 py-2 rounded-lg text-xs mr-2" onClick={()=>setWipImage(image)}>Open calibrated image · {image.name}</button>)}
                                     {/* Raman Spectrum Graph */}
                                     {expandedChar!.data.raman_drive_sync?.status === 'pending' && (
                                         <p role="status" className="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg">
@@ -920,6 +927,8 @@ export function SampleDetailSheet({
                 </div>
             </div>
 
+            {wipImage&&<WipSavedImageDialog image={wipImage} groupId={groupId} onClose={()=>setWipImage(null)}/>}
+            {wipMetadata&&<WipMetadataDialog title={wipMetadata.object_name||'Imported WITec object'} metadata={wipMetadata.original_metadata||{}} history={wipMetadata.history||[]} source={wipMetadata} onClose={()=>setWipMetadata(null)}/>}
             <CharacterizationModal
                 groupId={groupId}
                 logbookName={logbookName}

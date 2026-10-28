@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import ts from 'typescript';
+function load(file) {
+    const context={exports:{}};
+    vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
+    return context.exports;
+}
+const {initialWipParameters,characterizationParameters,WIP_PARAMETERS}=load('src/features/samples/wip-parameters.ts');
+const object={kind:'raman',shape:[50,50,1024],metadata:{laser_wavelength_nm:632.8,integration_time_s:.5,objective_magnification:50,accumulations:1,scan_span_x_um:200,scan_span_y_um:200,power:999,analyte:'wrong'}};
+const reviewed=initialWipParameters(object);
+assert.equal(reviewed.spots,'50x50');assert.equal(reviewed.size,'200x200');
+assert.equal(reviewed.analyte,'');assert.equal(reviewed.power,'');
+reviewed.power='500';reviewed['unit:power']='µW';reviewed.analyte='R6G';
+const saved=characterizationParameters(reviewed);
+assert.equal(saved.Power,'500 µW');assert.equal(saved.Spots,'50x50 ixj');assert.equal(saved.Size,'200x200 µm');
+assert.deepEqual(Object.keys(saved),Array.from(WIP_PARAMETERS,field=>field.label));
+assert.equal(object.metadata.power,999,'source metadata remains unchanged');
+assert.equal(initialWipParameters({kind:'raman',metadata:{}}).size,'');
+const {spatialOverlay}=load('src/features/samples/wip-spatial.ts');
+const image={valid:true,project_hash:'same',system_id:'instrument',matrix_um:[[2,0,10],[0,-2,30],[0,0,1]],width:100,height:100};
+const map={...image,matrix_um:[[0,-2,20],[2,0,20],[0,0,1]],width:5,height:3};
+const shape=spatialOverlay(image,map,true);
+assert.deepEqual(JSON.parse(JSON.stringify(shape.polygon)),[[5,5],[5,0],[2,0],[2,5]]);
+assert.equal(shape.points.length,15);
+assert.throws(()=>spatialOverlay(image,{...map,project_hash:'other'}),/coordinate frame/);
+assert.throws(()=>spatialOverlay(image,{...map,valid:false}),/Calibrated/);
+assert.equal(spatialOverlay(image,{...map,width:100,height:100},true).points.length,0);
+console.log('PASS WIP parameters: source preservation, manual analyte/power, units, pixel grid vs physical size; rotated spatial overlays and frame validation');

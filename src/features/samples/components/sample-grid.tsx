@@ -40,6 +40,8 @@ const SampleDetailSheet = dynamic(() => import('./sample-detail-sheet').then(mod
 const ActivityLogDrawer = dynamic(() => import('./activity-log-drawer').then(module => module.ActivityLogDrawer));
 import { CharacterizationSearch } from './characterization-search';
 const RamanWorkspace = dynamic(() => import('./raman-workspace').then(module => module.RamanWorkspace));
+import { hasNativeDrive } from '@/lib/google/desktop-drive';
+const WipImportDialog = dynamic(() => import('./wip-import-dialog').then(module => module.WipImportDialog), {ssr:false});
 import { ScientificText } from '@/components/ScientificText';
 import { useLogbookMeasurements } from '../use-logbook-measurements';
 import { createSampleIndex, selectSampleRows } from '../sample-index';
@@ -78,6 +80,9 @@ export function SampleGrid({
     driveSettings
 }: SampleGridProps) {
     const router = useRouter();
+    const [wipOpen,setWipOpen] = useState(false);
+    const [nativeWip,setNativeWip] = useState(false);
+    useEffect(()=>setNativeWip(hasNativeDrive()),[]);
     useEffect(() => {
         if (consumeSampleRefresh(groupId, logbookId)) router.refresh();
     }, [groupId, logbookId, router]);
@@ -419,6 +424,7 @@ export function SampleGrid({
                     </div>
 
                     <div className="flex items-center gap-2">
+                        {nativeWip && <button type="button" onClick={()=>setWipOpen(true)} className="border border-violet-200 bg-violet-50 text-violet-700 px-3 py-2 rounded-lg text-sm font-medium">Import .wip</button>}
                         {isAdmin && (
                             <button
                                 onClick={() => setConfigOpen(true)}
@@ -811,6 +817,7 @@ export function SampleGrid({
                 </div>
             )}
 
+            {wipOpen&&<WipImportDialog groupId={groupId} folderId={driveSettings?.sampleFolderId||driveSettings?.folderId} onClose={()=>{setWipOpen(false);router.refresh();}}/>}
             {/* ──── BULK CHARACTERIZATION MODAL ──── */}
             {bulkCharOpen && (<BulkCharacterizationModal
                 isOpen={bulkCharOpen}
