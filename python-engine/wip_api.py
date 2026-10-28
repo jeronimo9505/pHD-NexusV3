@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from uuid import UUID
+import sqlite3
 
 ALLOWED = {'http://localhost:3000','http://127.0.0.1:3000','tauri://localhost','http://tauri.localhost','https://tauri.localhost'}
 
@@ -43,7 +44,64 @@ class Annotate(ObjectRequest):
 def call(operation):
     try: return operation()
     except ImportError: raise HTTPException(503, 'Install the updated Python requirements and restart the science engine')
+    except sqlite3.Error: raise HTTPException(422,'Could not update the WITec library index. Existing files were kept; check the library folder permissions.')
     except (ValueError, KeyError, OSError) as error: raise HTTPException(422, str(error))
+
+class LibraryRoot(BaseModel):
+    library_root: str
+
+class LibraryInit(BaseModel):
+    parent_path: str
+
+class LibraryList(LibraryRoot):
+    group_id: UUID
+
+class LibraryRegister(LibraryRoot):
+    file_path: str
+
+class LibraryProject(LibraryRoot):
+    source_hash: str = Field(pattern='^[a-f0-9]{64}$')
+
+class LibraryImport(LibraryProject):
+    group_id: UUID
+    record_id: UUID
+    sample_id: UUID
+    object_ids: list[str] = Field(max_length=100)
+
+class SourceLocation(BaseModel):
+    library_root: str | None = None
+    source_hash: str = Field(pattern='^[a-f0-9]{64}$')
+    original_path: str | None = None
+
+@router.post('/library-init')
+def library_init(request: LibraryInit):
+    from wip_library import initialize
+    return call(lambda:initialize(request.parent_path))
+
+@router.post('/library-list')
+def library_list(request: LibraryList):
+    from wip_library import list_projects
+    return call(lambda:list_projects(request.library_root,str(request.group_id)))
+
+@router.post('/library-register')
+def library_register(request: LibraryRegister):
+    from wip_library import register
+    return call(lambda:register(request.library_root,request.file_path))
+
+@router.post('/library-open')
+def library_open(request: LibraryProject):
+    from wip_library import inspect_managed
+    return call(lambda:inspect_managed(request.library_root,request.source_hash))
+
+@router.post('/library-record-import')
+def library_record_import(request: LibraryImport):
+    from wip_library import record_import
+    return call(lambda:record_import(request.library_root,str(request.group_id),str(request.record_id),request.source_hash,str(request.sample_id),request.object_ids))
+
+@router.post('/source-location')
+def source_location(request: SourceLocation):
+    from wip_library import locate
+    return call(lambda:locate(request.library_root,request.source_hash,request.original_path))
 
 @router.post('/inspect')
 def inspect(request: Inspect):

@@ -319,6 +319,9 @@ class ProjectSession:
                 'spatial_geometry': info['spatial_geometry'],
                 'field_sources': self.details(object_id)['field_sources']}
             details = self.details(object_id)
+            if hasattr(self,'library_trace'):
+                provenance['library']=self.library_trace
+                provenance['original_source_file_path']=self.library_trace['original_paths'][0]
             provenance['structural_metadata'] = details['structural_metadata']
             provenance['related_objects'] = details['related_objects']
             raw_params = entry.trace_record.raw_params if entry.trace_record is not None else []

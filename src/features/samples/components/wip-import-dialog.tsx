@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FolderOpen, Info, X, Loader2 } from 'lucide-react';
-import { getWipSampleCatalogAction } from '../wip-actions';
+import { getWipSampleCatalogAction,getWipImportHistoryAction } from '../wip-actions';
 import { wipRequest, saveWipExtraction } from '../wip-client';
 import { WipMetadataDialog } from './wip-metadata-dialog';
 import type { WipInventory, WipObject, WipSample, WipExtraction } from '../wip-types';
 import { WIP_PARAMETERS, initialWipParameters } from '../wip-parameters';
 import { WipSpatialViewer } from './wip-spatial-viewer';
+import {WipLibraryBrowser} from './wip-library-browser';
+import {ensureWipLibrary,existingWipImport,type WipImportHistory} from '../wip-library';
 import { WipSamplePicker } from './wip-sample-picker';
 import { wipImportPlan, type WipAssignment as Assignment } from '../wip-import-plan';
 import { spatialRelation } from '../wip-spatial';
@@ -28,6 +30,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
     const router=useRouter();
     const [catalog,setCatalog]=useState<WipSample[]>([]);
     const [project,setProject]=useState<WipInventory|null>(null);
+    const [history,setHistory]=useState<WipImportHistory[]>([]),[historyVerified,setHistoryVerified]=useState(false),[libraryRefresh,setLibraryRefresh]=useState(0);
     const [rows,setRows]=useState<Record<string,Assignment>>({});
     const [annotations,setAnnotations]=useState<Record<string,WipAnnotationSettings>>({});
     const [active,setActive]=useState<string>('');
@@ -39,12 +42,12 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
     const [bulkSample,setBulkSample]=useState('');
     const [allowStandaloneImages,setAllowStandaloneImages]=useState(false);
     const plan=wipImportPlan(project?.objects||[],rows,allowStandaloneImages);
-    const lock=useRef(false);const alive=useRef(true);const request=useRef<AbortController|null>(null);
+    const lock=useRef(false);const alive=useRef(true);
     const session=useRef<string|undefined>(undefined);
     useEffect(()=>{
         alive.current=true;
-        getWipSampleCatalogAction(groupId,'',defaultSampleId).then(result=>{if(!alive.current)return;if(result.error)setError(result.error);else setCatalog(result.data||[]);});
-        return ()=>{alive.current=false;request.current?.abort();if(session.current)void wipRequest('close',{session:session.current,object_id:''}).catch(()=>{});};
+        getWipSampleCatalogAction(groupId,'',defaultSampleId).then(result=>{if(!alive.current)return;if(result.error)setError(result.error);else setCatalog(current=>Array.from(new Map([...current,...(result.data||[])].map(sample=>[sample.id,sample])).values()));});
+        return ()=>{alive.current=false;if(session.current)void wipRequest('close',{session:session.current,object_id:''}).catch(()=>{});};
     },[groupId,defaultSampleId]);
     const object=project?.objects.find(item=>item.id===active);
     const row=rows[active];
@@ -62,26 +65,38 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
     },[project,object]);
 
     const update=(id:string,change:Partial<Assignment>)=>setRows(current=>({...current,[id]:{...current[id],...change}}));
+    async function activateProject(result:WipInventory,notice='') {
+        if(!result.capabilities?.includes('persisted_image_annotations_v1'))throw new Error('Restart the Python science engine, then reopen the project.');
+        const imported=await getWipImportHistoryAction(groupId,[result.sha256]);
+        if(!alive.current){void wipRequest('close',{session:result.session,object_id:''}).catch(()=>{});return;}
+        if(session.current&&session.current!==result.session)await wipRequest('close',{session:session.current,object_id:''}).catch(()=>{});
+        session.current=result.session;setProject(result);setAnnotations({});setHistory(imported.data||[]);setHistoryVerified(!imported.error);
+        const known=(imported.data||[]).flatMap(record=>record.sample?[record.sample]:[]);
+        setCatalog(current=>Array.from(new Map([...current,...known].map(sample=>[sample.id,sample])).values()));
+        setRows(Object.fromEntries(result.objects.map(item=>[item.id,{selected:false,sampleId:defaultSampleId||(imported.data||[]).find(record=>record.object_id===item.id||record.attached_ids.includes(item.id))?.sample_id||'',images:[],reviewed:initialWipParameters(item)}])));
+        setActive(result.objects.find(item=>item.importable)?.id||result.objects[0]?.id||'');
+        setMessage(`${notice} ${result.objects.length} project objects indexed. Previously linked measurements are marked.`.trim());
+        if(imported.error)setError(imported.error+' Import is disabled until history can be verified.');
+    }
+    async function openLibraryProject(hash:string){
+        if(lock.current)return;lock.current=true;setBusy(true);setError('');
+        try{const root=await ensureWipLibrary();const result=await wipRequest<WipInventory>('library-open',{library_root:root,source_hash:hash});await activateProject(result);}
+        catch(err){if(alive.current)setError(err instanceof Error?err.message:String(err));}
+        finally{lock.current=false;if(alive.current)setBusy(false);}
+    }
     async function chooseFile() {
         if(lock.current)return;lock.current=true;setBusy(true);setError('');setMessage('');
         try {
+            const root=await ensureWipLibrary();
             const {open}=await import('@tauri-apps/plugin-dialog');
             const path=await open({multiple:false,filters:[{name:'WITec project',extensions:['wip']}]});
             if(!path||typeof path!=='string')return;
-            request.current?.abort();const controller=new AbortController();request.current=controller;
-            setMessage('Reading project structure and acquisition metadata… The original file is read-only.');
-            const result=await wipRequest<WipInventory>('inspect',{file_path:path},controller.signal);
-            if(!alive.current||controller.signal.aborted){void wipRequest('close',{session:result.session,object_id:''}).catch(()=>{});return;}
-            if(!result.capabilities?.includes('persisted_image_annotations_v1')){
-                void wipRequest('close',{session:result.session,object_id:''}).catch(()=>{});
-                throw new Error('Restart the Python science engine to save image areas and scale bars, then reopen this WIP project.');
-            }
-            if(session.current)void wipRequest('close',{session:session.current,object_id:''}).catch(()=>{});
-            session.current=result.session;setProject(result);setAnnotations({});
-            setRows(Object.fromEntries(result.objects.map(item=>[item.id,{selected:false,sampleId:defaultSampleId||'',images:[],
-                reviewed:initialWipParameters(item)}])));
-            setActive(result.objects.find(item=>item.importable)?.id||result.objects[0]?.id||'');
-            setMessage(`${result.objects.length} project objects indexed. Select items and assign their destination samples.`);
+            if(session.current){await wipRequest('close',{session:session.current,object_id:''});session.current=undefined;setProject(null);setRows({});setHistory([]);setHistoryVerified(false);}
+            setMessage('Verifying and moving the project into your WITec library… The original is removed only after the stored copy is verified.');
+            const stored=await wipRequest<{sha256:string;message:string}>('library-register',{library_root:root,file_path:path});
+            if(!alive.current)return;
+            const result=await wipRequest<WipInventory>('library-open',{library_root:root,source_hash:stored.sha256});
+            await activateProject(result,stored.message);setLibraryRefresh(value=>value+1);
         }catch(err){if(alive.current)setError(err instanceof Error?err.message:String(err));}
         finally{lock.current=false;if(alive.current)setBusy(false);}
     }
@@ -94,6 +109,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
 
     async function importSelected() {
         if(lock.current||!project)return;
+        if(!historyVerified){setError('Reopen the project to verify existing imports before creating records.');return;}
         const selected=project.objects.filter(item=>rows[item.id]?.selected&&!rows[item.id]?.done);
         const importPlan=wipImportPlan(project.objects,rows,allowStandaloneImages);
         if(!selected.length){setError('Select at least one supported measurement or image.');return;}
@@ -104,10 +120,18 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
         if(!vault){setError('Configure your local Data Vault in Settings before importing.');return;}
         lock.current=true;setBusy(true);setError('');let imported=0,existing=0,failed=0;
         try {
+            const latest=await getWipImportHistoryAction(groupId,[project.sha256]);
+            if(latest.error){setError(latest.error);return;}
+            setHistory(latest.data||[]);
             for(const [index,{item,imageIds}] of importPlan.entries.entries()) {
                 if(!alive.current)break;
                 const assignment=rows[item.id],sample=catalog.find(s=>s.id===assignment.sampleId);
                 if(!sample){failed++;update(item.id,{result:'The selected sample is unavailable.'});continue;}
+                const prior=existingWipImport(latest.data||[],project.sha256,item.id,sample.id);
+                if(prior){
+                    if(imageIds.some(id=>!prior.attached_ids.includes(id))){failed++;update(item.id,{result:'This Raman record already exists without some selected images. Edit the existing record to attach them; no duplicate was created.'});continue;}
+                    existing++;successful.add(item.id);update(item.id,{done:true,selected:false,result:`Already linked to ${prior.sample_label} — no duplicate created`});continue;
+                }
                 setMessage(`Importing ${index+1} of ${importPlan.entries.length}: ${item.name}`);
                 try {
                     const extraction=await wipRequest<WipExtraction>('extract',{session:project.session,object_id:item.id,image_ids:imageIds,image_annotations:Object.fromEntries((item.kind==='image'?[item.id]:imageIds).map(id=>[id,imageAnnotation(id)])),image_parameters:Object.fromEntries(imageIds.map(id=>[id,rows[id]?.reviewed||{}])),
@@ -115,12 +139,15 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
                         sample_name:sample.name,logbook_name:sample.logbooks?.name||'Samples',parameters:assignment.reviewed});
                     const result=await saveWipExtraction(groupId,sample,extraction,assignment.reviewed,folderId);
                     if(result.created)imported++;else existing++;successful.add(item.id);
+                    if(project.library){try{await wipRequest('library-record-import',{library_root:project.library.library_root,group_id:groupId,source_hash:project.sha256,record_id:result.id||extraction.record_id,sample_id:sample.id,object_ids:[item.id,...imageIds]});}catch{setError('Records were saved, but local history could not be updated. Cloud history will be checked when reopening.');}}
+                    setHistory(current=>[...current,{id:result.id||extraction.record_id,sample_id:sample.id,source_hash:project.sha256,object_id:item.id,attached_ids:imageIds,sample_label:sample.sample_code||sample.display_id,sample}]);
                     if(alive.current)update(item.id,{done:true,selected:false,result:result.created?'Imported':'Already imported — no duplicate created'});
                 }catch(err){failed++;if(alive.current)update(item.id,{result:err instanceof Error?err.message:String(err)});}
             }
             if(alive.current){for(const [imageId,links] of Object.entries(importPlan.imageLinks)){if(links.length&&links.every(id=>successful.has(id)))update(imageId,{done:true,selected:false,result:`Attached to ${links.length} Raman record(s)`});}
-            setMessage(`${imported} imported · ${existing} already present · ${failed} failed. You can assign and import more items from this project.`);router.refresh();}
-        }finally{lock.current=false;if(alive.current)setBusy(false);}
+            setMessage(`${imported} imported · ${existing} already present · ${failed} failed. You can assign and import more items from this project.`);router.refresh();setLibraryRefresh(value=>value+1);}
+        }catch(err){if(alive.current)setError(err instanceof Error?err.message:String(err));}
+        finally{lock.current=false;if(alive.current)setBusy(false);}
     }
 
     const visible=project?.objects.filter(item=>(showSupporting||['raman','image','auxiliary'].includes(item.kind))&&`${item.name} ${item.id}`.toLowerCase().includes(search.toLowerCase()))||[];
@@ -134,7 +161,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
             <div className="p-3 flex flex-wrap gap-3 items-center border-b">
                 <button type="button" disabled={busy} onClick={chooseFile} className="bg-violet-600 text-white px-3 py-2 rounded-lg flex gap-2 items-center disabled:opacity-50">{busy?<Loader2 size={16} className="animate-spin"/>:<FolderOpen size={16}/>}Open .wip</button>
                 {project&&<span className="text-sm">{project.name} · {(project.size/1024**2).toFixed(1)} MB · WITec format {project.version}</span>}
-                <span className="text-xs text-slate-500">Local desktop import · no WIP upload</span>
+                <WipLibraryBrowser groupId={groupId} refresh={libraryRefresh} disabled={busy} onOpen={openLibraryProject}/>
             </div>
             {(message||error)&&<div className="px-5 py-2 text-sm" aria-live="polite">{message&&<p>{message}</p>}{error&&<p className="text-red-600" role="alert">{error}</p>}</div>}
             <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1.1fr_1fr]">
@@ -145,7 +172,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
                     </div>
                     <div className="overflow-auto flex-1 divide-y">{visible.map(item=>{const assignment=rows[item.id];return <div key={item.id} draggable={item.kind==='raman'} onDragStart={event=>event.dataTransfer.setData('application/x-phdnexus-wip-map',item.id)} className={`p-3 flex gap-3 ${active===item.id?'bg-violet-50':''}`}>
                         <input type="checkbox" aria-label={`Select ${item.name}`} disabled={busy||!item.importable||assignment.done} checked={assignment.selected} onChange={e=>update(item.id,{selected:e.target.checked})}/>
-                        <button type="button" className="text-left min-w-0 flex-1" onClick={()=>setActive(item.id)}><p className="text-sm font-medium break-all">{item.name}</p><p className="text-xs text-slate-500">#{item.display_order??item.order+1} · ID {item.id} · {item.kind} · {item.shape?.join(' × ')}</p><p className="text-xs">{item.kind==='image'&&plan.imageLinks[item.id]?.length>0&&!assignment.done&&<span className="block text-violet-600">Will attach to {plan.imageLinks[item.id].length} Raman record(s)</span>}{assignment.done?assignment.result:catalog.find(s=>s.id===assignment.sampleId)?.sample_code||'Not assigned'}{!assignment.done&&assignment.result&&<span className="text-red-600 block">{assignment.result}</span>}</p></button>
+                        <button type="button" className="text-left min-w-0 flex-1" onClick={()=>setActive(item.id)}><p className="text-sm font-medium break-all">{item.name}</p><p className="text-xs text-slate-500">#{item.display_order??item.order+1} · ID {item.id} · {item.kind} · {item.shape?.join(' × ')}</p><p className="text-xs">{history.some(record=>record.object_id===item.id||record.attached_ids.includes(item.id))&&<span className="block text-emerald-700">Already linked: {Array.from(new Set(history.filter(record=>record.object_id===item.id||record.attached_ids.includes(item.id)).map(record=>record.sample_label))).join('; ')}</span>}{item.kind==='image'&&plan.imageLinks[item.id]?.length>0&&!assignment.done&&<span className="block text-violet-600">Will attach to {plan.imageLinks[item.id].length} Raman record(s)</span>}{assignment.done?assignment.result:catalog.find(s=>s.id===assignment.sampleId)?.sample_code||'Not assigned'}{!assignment.done&&assignment.result&&<span className="text-red-600 block">{assignment.result}</span>}</p></button>
                         <button type="button" aria-label={`Metadata for ${item.name}`} className="self-start text-violet-600" onClick={()=>showMetadata(item)}><Info size={18}/></button>
                     </div>;})}{!project&&<p className="p-8 text-sm text-slate-500">Open a local WITec project to inspect its measurements and images.</p>}</div>
                 </section>

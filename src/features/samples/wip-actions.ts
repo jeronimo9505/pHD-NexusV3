@@ -4,6 +4,7 @@ import { createClient, getUser } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import type { WipSample } from './wip-types';
 import type { SpatialMap } from './wip-spatial';
+import type {WipImportHistory} from './wip-library';
 
 async function access(groupId: string) {
     const client = await createClient(); const user = await getUser();
@@ -12,6 +13,28 @@ async function access(groupId: string) {
         .eq('group_id', groupId).eq('user_id', user.id).eq('status', 'active').maybeSingle();
     if (error || !data) throw new Error('Active group membership is required');
     return client;
+}
+
+export async function getWipImportHistoryAction(groupId:string,hashes:string[]):Promise<{data?:WipImportHistory[];error?:string}>{
+    const valid=Array.from(new Set(hashes.filter(hash=>/^[a-f0-9]{64}$/.test(hash))));
+    if(!valid.length)return {data:[]};
+    if(valid.length>1000)return {error:'Narrow the library search to at most 1,000 projects'};
+    try{
+        const client=await access(groupId),records:WipImportHistory[]=[];
+        for(let start=0;start<valid.length;start+=100){
+            for(let offset=0;;offset+=500){
+                const{data,error}=await(client as any).from('sample_characterizations')
+                    .select('id,sample_id,source_hash:data->wip_import->>source_hash,object_id:data->wip_import->>object_id,attached_ids:data->wip_import->attached_object_ids,samples!inner(group_id,sample_code,display_id,name,logbook_id,logbooks(name))')
+                    .eq('samples.group_id',groupId).in('data->wip_import->>source_hash',valid.slice(start,start+100))
+                    .order('id').range(offset,offset+499);
+                if(error)return {error:error.message};
+                records.push(...(data||[]).map((row:any)=>({id:row.id,sample_id:row.sample_id,source_hash:row.source_hash,object_id:row.object_id,
+                    sample:row.samples?{id:row.sample_id,...row.samples}:undefined,attached_ids:Array.isArray(row.attached_ids)?row.attached_ids.map(String):[],sample_label:`${row.samples?.sample_code||row.samples?.display_id||''} · ${row.samples?.name||''}`})));
+                if(!data||data.length<500)break;
+            }
+        }
+        return {data:records};
+    }catch{return {error:'Could not verify imported WIP measurements. Check your connection before importing.'};}
 }
 
 export async function getWipSpatialMapsAction(groupId:string,sourceHash:string):Promise<{data?:SpatialMap[];error?:string}> {

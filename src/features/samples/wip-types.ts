@@ -10,6 +10,7 @@ export interface WipObject {
 }
 export interface WipInventory {
     session: string; sha256: string; name: string; capabilities?:string[]; source_file_path?:string; size: number; version: number; objects: WipObject[];
+    library?:{library_root:string;managed_path:string;original_paths:string[]};
 }
 export interface WipSample {
     id: string; sample_code: string | null; display_id: string; name: string; logbook_id: string | null;

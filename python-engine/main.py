@@ -521,7 +521,7 @@ def list_vault_logbooks(vault_root: str):
     
     logbooks = []
     for item in root_path.iterdir():
-        if item.is_dir() and not item.name.startswith("."):
+        if item.is_dir() and not item.name.startswith(".") and not (item / '.phdnexus-witec.sqlite3').is_file():
             logbooks.append({
                 "id": item.name,
                 "name": item.name.replace("Logbook_", "").replace("_", " "),

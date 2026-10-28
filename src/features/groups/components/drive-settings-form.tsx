@@ -8,6 +8,7 @@ import { DriveFileSelectorModal } from '../../drive-reports/components/drive-fil
 import { open } from '@tauri-apps/plugin-dialog';
 import { isDesktop } from '@/lib/desktop';
 import { DesktopGoogleConnection } from './desktop-google-connection';
+import {WipLibrarySettings} from './wip-library-settings';
 
 interface DriveSettingsFormProps {
     groupId: string;
@@ -154,6 +155,7 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
                 </div>
             )}
 
+            {isDesktop&&<div className="px-6 pb-6"><WipLibrarySettings/></div>}
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
                 <div className="space-y-4">
                     <div className="border-b border-slate-100 pb-4 mb-4">

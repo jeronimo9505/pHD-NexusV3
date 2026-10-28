@@ -11,6 +11,7 @@ import { formatCellValue, splitValueAndUnit } from '../utils';
 import { CharacterizationModal } from './characterization-modal';
 import { format } from 'date-fns';
 import { SampleCommentsSection } from './sample-comments-section';
+import { openWipSource } from '../wip-library';
 import { measurementDisplay } from '../measurement-display';
 import { formatSpectralRange } from '../raman-file-metadata';
 import { WipSavedImageDialog } from './wip-saved-image-dialog';
@@ -448,7 +449,7 @@ export function SampleDetailSheet({
                                         </div>
                                     )}
 
-                                    {expandedChar!.data.wip_import?.source_file_path&&<div><h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-1.5">Source WITec project</h4><p className="text-xs font-mono break-all bg-slate-50 border rounded p-2" title="Original location at import; the WIP was not moved">{expandedChar!.data.wip_import.source_file_path}</p></div>}
+                                    {expandedChar!.data.wip_import?.source_file_path&&<div><h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-1.5">Source WITec project</h4><button type="button" className="text-left w-full text-xs font-mono break-all bg-slate-50 border rounded p-2 text-blue-700 hover:underline" title="Open source WITec project; resolves moved files through the local library" onClick={()=>openWipSource(expandedChar!.data.wip_import).catch(error=>toast.error(error instanceof Error?error.message:String(error)))}>{expandedChar!.data.wip_import.source_file_path}</button><button type="button" className="text-xs text-blue-600 mt-1" onClick={()=>openWipSource(expandedChar!.data.wip_import,true).catch(error=>toast.error(error instanceof Error?error.message:String(error)))}>Open containing folder</button></div>}
                                     {/* Data Vault Files */}
                                     {(expandedChar!.data.local_h5_path || (expandedChar!.data.local_h5_paths && expandedChar!.data.local_h5_paths.length > 0)) && (
                                         <div>

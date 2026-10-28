@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 function load(file) {
-    const context={exports:{},require(name){if(name==='./wip-spatial')return load('src/features/samples/wip-spatial.ts');throw new Error(`Unexpected import ${name}`);}};
+    const context={exports:{},require(name){if(name==='./wip-spatial')return load('src/features/samples/wip-spatial.ts');if(name==='./wip-client')return{};throw new Error(`Unexpected import ${name}`);}};
     vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
     return context.exports;
 }
@@ -94,4 +94,10 @@ assert.equal(measurementDisplay('Laser','633 nm'),'633 nm');
 assert.equal(measurementDisplay('laser_wavelength_nm',632.7999877929688),'632.8');
 assert.equal(measurementDisplay('Power','0.533789 mW'),'0.533789 mW');
 assert.equal(object.metadata.laser_wavelength_nm,632.8,'display formatting never mutates stored values');
+const {existingWipImport}=load('src/features/samples/wip-library.ts');
+const history=[{id:'record',source_hash:'hash',sample_id:'sample',object_id:'21',attached_ids:['27']}];
+assert.equal(existingWipImport(history,'hash','21','sample').id,'record');
+assert.equal(existingWipImport(history,'hash','27','sample').id,'record');
+assert.equal(existingWipImport(history,'hash','21','other'),undefined);
+assert.equal(existingWipImport(history,'different','21','sample'),undefined);
 console.log('PASS WIP parameters: source preservation, manual analyte/power, units, pixel grid vs physical size; rotated spatial overlays and frame validation');
