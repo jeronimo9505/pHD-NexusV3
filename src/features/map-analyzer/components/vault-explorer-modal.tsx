@@ -9,7 +9,7 @@ import {
     ChevronDown, FolderOpen, ExternalLink, Info, Beaker, SlidersHorizontal
 } from 'lucide-react';
 import { fetchVaultLogbooks, fetchVaultFiles } from '@/lib/desktop';
-import { getSamplesAction } from '@/features/samples/actions';
+import { getVaultSamplesAction } from '../actions';
 import { 
     getRamanWorkspacesAction, 
     saveRamanWorkspaceAction, 
@@ -157,6 +157,8 @@ export function VaultExplorerModal({
     const [activeTab, setActiveTab] = useState<'discovery' | 'saved'>('discovery');
     const [step, setStep] = useState<1 | 2 | 3>(1); // 1: Logbook, 2: Sample, 3: Map
     const [loading, setLoading] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const discoveryRequest = useRef(0);
     const [search, setSearch] = useState('');
     
     // Step 1 & 2: Lists
@@ -190,6 +192,10 @@ export function VaultExplorerModal({
 
     // Load initial data
     useEffect(() => {
+        return () => { discoveryRequest.current += 1; };
+    }, [isOpen, groupId]);
+
+    useEffect(() => {
         if (isOpen) {
             loadVaultFolders();
             loadSavedWorkspaces();
@@ -214,22 +220,35 @@ export function VaultExplorerModal({
         return vaultFolders.find(vf => 
             vf.id === dbLb.id || 
             vf.name.includes(dbLb.id) || 
-            vf.name.includes(dbLb.prefix) ||
+            (dbLb.prefix && vf.name.includes(dbLb.prefix)) ||
             vf.name === dbLb.name
         );
     };
 
     const handleSelectLogbook = async (dbLb: any) => {
+        const request = ++discoveryRequest.current;
+        setLoadError(null);
+        setFiles([]);
+        setDbSamples([]);
+        setSelectedPaths(new Set());
+        setStep(3);
+        setSearch('');
+        setFacetFilters({});
+        setStatusFilter('all');
+        setDateFrom('');
+        setDateTo('');
         setLoading(true);
         setSelectedDbLogbook(dbLb);
         setIsLegacyMode(false);
         setSelectedSample(null);
         try {
-            const samplesRes = await getSamplesAction(dbLb.group_id, dbLb.id);
+            const samplesRes = await getVaultSamplesAction(groupId, dbLb.id);
+            if (request !== discoveryRequest.current) return;
+            if (samplesRes.error) throw new Error(samplesRes.error);
             if (samplesRes.data) {
                 const ramanSamples = samplesRes.data.filter((s: any) => 
                     s.characterizations?.some((c: any) => 
-                        c.type === 'Raman' && (c.data.local_h5_paths?.length > 0 || c.data.local_h5_path)
+                        c.type === 'Raman' && (c.data?.local_h5_paths?.length > 0 || c.data?.local_h5_path)
                     )
                 );
                 setDbSamples(ramanSamples);
@@ -237,10 +256,10 @@ export function VaultExplorerModal({
                 const allVaultFiles: VaultFile[] = [];
                 ramanSamples.forEach((sample: any) => {
                     const ramanChars = sample.characterizations.filter((c: any) => 
-                        c.type === 'Raman' && (c.data.local_h5_paths?.length > 0 || c.data.local_h5_path)
+                        c.type === 'Raman' && (c.data?.local_h5_paths?.length > 0 || c.data?.local_h5_path)
                     );
                     ramanChars.forEach((c: any) => {
-                        const h5Paths = c.data.local_h5_paths || (c.data.local_h5_path ? [c.data.local_h5_path] : []);
+                        const h5Paths = Array.from(new Set([...(Array.isArray(c.data?.local_h5_paths) ? c.data.local_h5_paths : []), c.data?.local_h5_path].filter((path): path is string => typeof path === 'string' && path.trim().length > 0)));
                         const meta = c.data.file_metadata || {};
                         
                         h5Paths.forEach((path: string) => {
@@ -281,21 +300,23 @@ export function VaultExplorerModal({
                 setSearch('');
             }
         } catch (err) {
-            toast.error('Error fetching samples');
+            if (request !== discoveryRequest.current) return;
+            setLoadError('Could not load maps from Supabase. Select the logbook to retry.');
+            toast.error('Could not load maps from Supabase');
         } finally {
-            setLoading(false);
+            if (request === discoveryRequest.current) setLoading(false);
         }
     };
 
     const handleSelectSample = (sample: any) => {
         setSelectedSample(sample);
         const ramanChars = sample.characterizations.filter((c: any) => 
-            c.type === 'Raman' && (c.data.local_h5_paths?.length > 0 || c.data.local_h5_path)
+            c.type === 'Raman' && (c.data?.local_h5_paths?.length > 0 || c.data?.local_h5_path)
         );
 
         const vaultFiles: VaultFile[] = [];
         ramanChars.forEach((c: any) => {
-            const h5Paths = c.data.local_h5_paths || (c.data.local_h5_path ? [c.data.local_h5_path] : []);
+            const h5Paths = Array.from(new Set([...(Array.isArray(c.data?.local_h5_paths) ? c.data.local_h5_paths : []), c.data?.local_h5_path].filter((path): path is string => typeof path === 'string' && path.trim().length > 0)));
             const meta = c.data.file_metadata || {};
             
             h5Paths.forEach((path: string) => {
@@ -373,11 +394,16 @@ export function VaultExplorerModal({
             return;
         }
 
+        const request = ++discoveryRequest.current;
+        setLoadError(null);
+        setFiles([]);
+        setSelectedPaths(new Set());
         setLoading(true);
         setSelectedDbLogbook(dbLb);
         setIsLegacyMode(true);
         try {
             const filesRes = await fetchVaultFiles(vaultRoot, linked.id);
+            if (request !== discoveryRequest.current) return;
             if (filesRes.success) {
                 setFiles(filesRes.files);
                 setStep(3); // Go straight to file view
@@ -386,9 +412,9 @@ export function VaultExplorerModal({
                 toast.error('Failed to read local files');
             }
         } catch (err) {
-            toast.error('Error connecting to vault data');
+            if (request === discoveryRequest.current) toast.error('Error connecting to vault data');
         } finally {
-            setLoading(false);
+            if (request === discoveryRequest.current) setLoading(false);
         }
     };
 
@@ -1022,7 +1048,7 @@ export function VaultExplorerModal({
                                             {filteredFiles.length === 0 && (
                                                 <div className="py-20 text-center bg-white border-2 border-dashed border-slate-100 rounded-[2.5rem]">
                                                     <Search size={40} className="text-slate-200 mx-auto mb-4" />
-                                                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">No matching maps found</p>
+                                                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">{loading ? 'Loading maps from ' + (isLegacyMode ? 'local vault…' : 'Supabase…') : loadError || 'No matching maps found'}</p>
                                                 </div>
                                             )}
                                         </div>

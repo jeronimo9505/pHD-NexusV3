@@ -3,6 +3,26 @@
 import { createClient, getUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
+// Vault needs persisted H5 links; the Samples table deliberately omits this data.
+export async function getVaultSamplesAction(groupId: string, logbookId?: string) {
+    if (!groupId || logbookId === '') return { error: 'Select a valid group and logbook' };
+    const supabase = await createClient();
+    const rows: any[] = [];
+    const pageSize = 500;
+    for (let offset = 0; ; offset += pageSize) {
+        let query = supabase.from('samples').select(logbookId
+            ? 'id, name, sample_code, logbook_id, description, composition, attributes, characterizations:sample_characterizations(id, type, data, performed_at, created_at)'
+            : 'id, name, sample_code, logbook_id');
+        query = query.eq('group_id', groupId);
+        if (logbookId) query = query.eq('logbook_id', logbookId).eq('characterizations.type', 'Raman');
+        const { data, error } = await query.order('id').range(offset, offset + pageSize - 1);
+        if (error) return { error: error.message };
+        rows.push(...(data || []));
+        if (!data || data.length < pageSize) break;
+    }
+    return { data: rows };
+}
+
 export async function getRamanWorkspacesAction(groupId: string) {
     const supabase = await createClient();
     const { data, error } = await (supabase as any)

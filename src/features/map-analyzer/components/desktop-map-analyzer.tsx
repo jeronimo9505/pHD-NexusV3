@@ -19,7 +19,8 @@ const DeconvolutionView = dynamic(() => import('./deconvolution-view').then(modu
 const FittingView = dynamic(() => import('./fitting-view').then(module => module.FittingView));
 const RgiView = dynamic(() => import('./rgi-view').then(module => module.RgiView));
 const Rgi2View = dynamic(() => import('./rgi2-view').then(module => module.Rgi2View));
-import { getLogbooksAction, getSamplesAction, registerGroupedH5FileAction } from '@/features/samples/actions';
+import { getLogbooksAction, registerGroupedH5FileAction } from '@/features/samples/actions';
+import { getVaultSamplesAction } from '../actions';
 import { Logbook } from '@/features/samples/types';
 
 export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
@@ -84,7 +85,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                 }
 
                 // Fetch samples for the group to resolve names
-                const { data: samples } = await getSamplesAction(groupId, '');
+                const { data: samples } = await getVaultSamplesAction(groupId);
                 if (samples) setDbSamples(samples);
 
                 // Fetch saved workspaces/comparisons

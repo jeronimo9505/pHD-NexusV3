@@ -126,3 +126,12 @@ Paginación conservando genealogía y búsqueda global, reducción del paquete i
 - Selección global corregida con filtros, campos numéricos 0 preservados y respuestas anteriores que no resucitan filas eliminadas.
 - Migración Supabase aplicada: `sample_mutation_safety`. Funciones SECURITY INVOKER y política de historial limitada al actor y membresía activa. SQL: `db/changes/sample_mutation_safety.sql`; pruebas con ROLLBACK: `db/tests/sample_mutation_safety.sql`; reversión: `db/rollback/sample_mutation_safety.sql`.
 - Base Git `google-integrations-2026-10-26`; etiqueta final `sample-mutation-safety-2026-10-26`. Revertir primero la aplicación y después, si procede, SQL. La reversión no elimina muestras creadas.
+
+### Vault Discovery: restaurar catálogo Supabase — 2026-10-28
+
+- Causa: Vault reutilizaba getSamplesAction después de que Samples dejara de incluir datos completos de caracterización. El catálogo de nombres además solicitaba una bitácora vacía, ahora rechazada por esa acción.
+- Consulta dedicada getVaultSamplesAction: catálogo mínimo de nombres por grupo; detalles Raman únicamente de la bitácora seleccionada, paginación de muestras y autorización RLS habitual. Samples conserva su carga ligera.
+- Estado visible de carga/error; limpieza de selección y filtros al cambiar de bitácora; descarte de respuestas antiguas. Se combina la ruta individual con la lista, incluso si la lista está vacía. El modo manual sigue leyendo el disco local.
+- Verificación Supabase de solo lectura: SERS Au and G tiene 68 registros Raman con enlaces H5 y 92 entradas en local_h5_paths. Esto no garantiza equivalencia con los 122 archivos del disco: los archivos no registrados/procesados requieren revisión de sincronización aparte. No se modificó la base ni archivos científicos.
+- Pruebas: node scripts/test-vault-discovery.mjs, npm run test:samples, npm run typecheck y ESLint de los archivos cambiados. Las pruebas del callback usan respuestas controladas; no sustituyen una navegación autenticada en el WebView del usuario.
+- Base Git: sample-mutation-safety-2026-10-26 (54e0419). Etiqueta de entrega: vault-discovery-2026-10-28. Para revertir: git revert --no-commit sample-mutation-safety-2026-10-26..vault-discovery-2026-10-28, revisar y publicar el commit. Sin reversión SQL. next-env.d.ts generado localmente se excluye.
