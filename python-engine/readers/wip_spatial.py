@@ -77,24 +77,23 @@ def annotate(rgb_image, image_geometry, maps, scale_um, show_grid=False):
         shape=overlay(image_geometry,measurement,show_grid)
         vertices=[tuple(p) for p in shape['polygon']]
         if shape['kind']=='point':
-            x,y=vertices[0];r=max(6,round(width/180));draw.ellipse((x-r,y-r,x+r,y+r),fill=color,outline='white',width=max(1,line//3))
+            x,y=vertices[0];r=max(7,round(width/160));draw.ellipse((x-r,y-r,x+r,y+r),fill=color,outline='white',width=max(1,line//3))
         else:draw.line(vertices+([vertices[0]] if shape['kind']=='area' else []),fill=color,width=line)
         for x,y in shape['points']:draw.ellipse((x-radius,y-radius,x+radius,y+radius),fill=color)
     if scale_um:
         if not image_geometry.get('valid'):raise ValueError('A calibrated image is required for a scale bar.')
         length=float(scale_um)/image_geometry['um_per_pixel_x']
         if not 10<=length<=width*.6:raise ValueError('Choose a scale length appropriate for this image.')
-        font_size=max(14,round(width/70))
+        font_size=max(14,round(height*.028))
         try:
             font=ImageFont.truetype('arial.ttf',font_size)
             label=f'{scale_um:g} µm'
         except OSError:
             font=ImageFont.load_default(size=font_size)
             label=f'{scale_um:g} um'
-        x,y=width*.05,height*.92
-        bbox=draw.textbbox((x,y),label,font=font)
-        draw.rectangle((x-12,y-14,max(x+length,bbox[2])+12,y+font.size+8),fill='black')
-        draw.line((x,y-4,x+length,y-4),fill='white',width=max(3,line*2))
-        draw.text((x,y+2),label,fill='white',font=font)
+        x,y=width*.06,height*.9
+        draw.rectangle((width*.04,height*.87,width*.08+length,height*.96),fill='black')
+        draw.line((x,y,x+length,y),fill='white',width=max(1,round(height*.006)))
+        draw.text((x,height*.94),label,fill='white',font=font,anchor='ls')
     out=io.BytesIO();image.save(out,format='PNG')
     return base64.b64encode(out.getvalue()).decode()

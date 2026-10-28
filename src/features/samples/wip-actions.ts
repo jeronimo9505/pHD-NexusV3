@@ -24,7 +24,7 @@ export async function getWipSpatialMapsAction(groupId:string,sourceHash:string):
                 .eq('samples.group_id',groupId).eq('type','Raman').eq('data->wip_import->>source_hash',sourceHash)
                 .order('id').range(offset,offset+499);
             if(error)return{error:error.message};
-            rows.push(...(data||[]).filter((row:any)=>row.geometry?.width>=1&&row.geometry?.height>=1).map((row:any)=>({id:row.id,name:row.name||row.id,geometry:row.geometry})));
+            rows.push(...(data||[]).filter((row:any)=>row.geometry?.width>=1&&row.geometry?.height>=1).map((row:any)=>({id:String(row.geometry.object_id||row.id),name:row.name||row.id,geometry:row.geometry})));
             if(!data||data.length<500)break;
         }
         return{data:rows};

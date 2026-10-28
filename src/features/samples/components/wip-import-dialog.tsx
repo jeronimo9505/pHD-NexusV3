@@ -12,6 +12,7 @@ import { WipSpatialViewer } from './wip-spatial-viewer';
 import { WipSamplePicker } from './wip-sample-picker';
 import { wipImportPlan, type WipAssignment as Assignment } from '../wip-import-plan';
 import { spatialRelation } from '../wip-spatial';
+import { defaultWipAnnotation,type WipAnnotationSettings } from '../wip-annotations';
 
 
 function suggestedSample(object: WipObject, samples: WipSample[]) {
@@ -28,6 +29,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
     const [catalog,setCatalog]=useState<WipSample[]>([]);
     const [project,setProject]=useState<WipInventory|null>(null);
     const [rows,setRows]=useState<Record<string,Assignment>>({});
+    const [annotations,setAnnotations]=useState<Record<string,WipAnnotationSettings>>({});
     const [active,setActive]=useState<string>('');
     const [metadata,setMetadata]=useState<WipObject|null>(null);
     const [preview,setPreview]=useState<{image?:string;points?:{x:number;y:number|null}[];preview_label?:string}|null>(null);
@@ -46,6 +48,8 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
     },[groupId,defaultSampleId]);
     const object=project?.objects.find(item=>item.id===active);
     const row=rows[active];
+    const spatialMaps=(project?.objects||[]).filter(item=>item.kind==='raman'&&item.spatial_geometry).map(item=>({id:item.id,name:item.name,geometry:item.spatial_geometry!}));
+    const imageAnnotation=(id:string)=>annotations[id]||defaultWipAnnotation(project!.objects.find(item=>item.id===id)!.spatial_geometry!,spatialMaps);
     useEffect(()=>{
         setPreview(null);
         if(!project||!object?.importable)return;
@@ -69,7 +73,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
             const result=await wipRequest<WipInventory>('inspect',{file_path:path},controller.signal);
             if(!alive.current||controller.signal.aborted){void wipRequest('close',{session:result.session,object_id:''}).catch(()=>{});return;}
             if(session.current)void wipRequest('close',{session:session.current,object_id:''}).catch(()=>{});
-            session.current=result.session;setProject(result);
+            session.current=result.session;setProject(result);setAnnotations({});
             setRows(Object.fromEntries(result.objects.map(item=>[item.id,{selected:false,sampleId:defaultSampleId||'',images:[],
                 reviewed:initialWipParameters(item)}])));
             setActive(result.objects.find(item=>item.importable)?.id||result.objects[0]?.id||'');
@@ -102,7 +106,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
                 if(!sample){failed++;update(item.id,{result:'The selected sample is unavailable.'});continue;}
                 setMessage(`Importing ${index+1} of ${importPlan.entries.length}: ${item.name}`);
                 try {
-                    const extraction=await wipRequest<WipExtraction>('extract',{session:project.session,object_id:item.id,image_ids:imageIds,image_parameters:Object.fromEntries(imageIds.map(id=>[id,rows[id]?.reviewed||{}])),
+                    const extraction=await wipRequest<WipExtraction>('extract',{session:project.session,object_id:item.id,image_ids:imageIds,image_annotations:Object.fromEntries((item.kind==='image'?[item.id]:imageIds).map(id=>[id,imageAnnotation(id)])),image_parameters:Object.fromEntries(imageIds.map(id=>[id,rows[id]?.reviewed||{}])),
                         vault_root:vault,group_id:groupId,sample_id:sample.id,sample_code:sample.sample_code||sample.display_id,
                         sample_name:sample.name,logbook_name:sample.logbooks?.name||'Samples',parameters:assignment.reviewed});
                     const result=await saveWipExtraction(groupId,sample,extraction,assignment.reviewed,folderId);
@@ -145,13 +149,14 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
                     <div className="flex justify-between gap-3"><h3 className="font-semibold break-all">{object.name}</h3><button type="button" className="text-violet-600 text-sm shrink-0" onClick={()=>showMetadata(object)}>Metadata</button></div>
                     {previewing&&<p className="text-sm">Loading source preview…</p>}
                     {preview?.image&&object.spatial_geometry&&<WipSpatialViewer key={object.id} imageSource={`data:image/png;base64,${preview.image}`} name={object.name} geometry={object.spatial_geometry}
-                        maps={(project?.objects||[]).filter(item=>item.kind==='raman'&&item.spatial_geometry&&item.shape&&item.shape[0]>=1&&item.shape[1]>=1).map(item=>({id:item.id,name:item.name,geometry:item.spatial_geometry!}))}
+                        maps={spatialMaps} annotation={annotations[object.id]} onAnnotationChange={value=>setAnnotations(current=>({...current,[object.id]:value}))}
                         onExport={(maps,scale,grid)=>wipRequest('annotate',{session:project!.session,object_id:object.id,map_ids:maps.map(map=>map.id),scale_um:scale,show_grid:grid})}/>}
                     {!!polyline&&<div><svg viewBox="0 0 500 190" className="w-full bg-slate-950 rounded-lg" role="img" aria-label="Source Raman spectrum"><polyline points={polyline} fill="none" stroke="#a78bfa" strokeWidth="1.5"/></svg><p className="text-xs text-slate-500">{preview?.preview_label} · Raman shift (cm⁻¹)</p></div>}
+                    {object.kind==='image'&&<p className="text-xs text-violet-600">The visible areas and scale bar will be saved with this image on import. You can hide areas or change the scale before confirming.</p>}
                     {object.warnings.map((warning,index)=><p key={index} className="text-xs text-amber-700">{warning}</p>)}
                     {object.importable&&<><label className="block text-sm font-medium">Destination sample<WipSamplePicker groupId={groupId} value={catalog.find(sample=>sample.id===row.sampleId)||null} disabled={busy||row.done} label="Destination sample" onSelect={sample=>{rememberSample(sample);update(object.id,{sampleId:sample?.id||''});}}/></label>
                         {!row.sampleId&&suggestedSample(object,catalog)&&<button type="button" className="text-xs text-violet-600 underline" onClick={()=>update(object.id,{sampleId:suggestedSample(object,catalog)!.id})}>Use name-based suggestion: {suggestedSample(object,catalog)!.sample_code} (confirm before importing)</button>}
-                        <fieldset disabled={busy||row.done}><legend className="font-semibold text-sm mb-2">Review import metadata</legend><p className="text-xs text-slate-500 mb-3">Values come from acquisition records, never the file name. Original values remain available in Metadata.</p><table className="w-full text-sm border rounded-lg"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-2 text-left">#</th><th className="p-2 text-left">Parameter</th><th className="p-2 text-left">Value</th><th className="p-2 text-left">Unit</th></tr></thead><tbody>{WIP_PARAMETERS.filter(field=>object.kind==='raman'||field.key==='objective_magnification').map((field,index)=><tr key={field.key} className="border-t"><td className="p-2 text-xs text-slate-400">{index+1}</td><th className="p-2 text-left font-medium">{field.label}</th><td className="p-2"><input aria-label={field.label} className="border rounded p-2 w-full min-w-0" value={row.reviewed[field.key]||''} placeholder={['analyte','power'].includes(field.key)?'Enter manually':'Not recovered — optional'} onChange={e=>update(object.id,{reviewed:{...row.reviewed,[field.key]:e.target.value}})}/></td><td className="p-2 text-xs">{'units' in field?<select aria-label={`${field.label} unit`} className="border rounded p-2" value={row.reviewed[`unit:${field.key}`]??field.unit} onChange={e=>update(object.id,{reviewed:{...row.reviewed,[`unit:${field.key}`]:e.target.value}})}>{field.units.map(unit=><option key={unit} value={unit}>{unit||'—'}</option>)}</select>:field.unit}</td></tr>)}</tbody></table><p className="text-xs text-slate-500 mt-2">Spots = pixel grid (i×j). Size = physical scan width × height. Analyte and Power are always entered manually.</p></fieldset>
+                        <fieldset disabled={busy||row.done}><legend className="font-semibold text-sm mb-2">Review import metadata</legend><p className="text-xs text-slate-500 mb-3">Acquisition metadata is preserved. Power may be suggested from the measurement name; Area Scan may use an editable accumulation default. Original values remain available in Metadata.</p><table className="w-full text-sm border rounded-lg"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-2 text-left">#</th><th className="p-2 text-left">Parameter</th><th className="p-2 text-left">Value</th><th className="p-2 text-left">Unit</th></tr></thead><tbody>{WIP_PARAMETERS.filter(field=>object.kind==='raman'||field.key==='objective_magnification').map((field,index)=><tr key={field.key} className="border-t"><td className="p-2 text-xs text-slate-400">{index+1}</td><th className="p-2 text-left font-medium">{field.label}</th><td className="p-2"><input aria-label={field.label} className="border rounded p-2 w-full min-w-0" value={row.reviewed[field.key]||''} title={row.reviewed[`source:${field.key}`]||''} placeholder={['analyte','power'].includes(field.key)?'Enter manually':'Not recovered — optional'} onChange={e=>update(object.id,{reviewed:{...row.reviewed,[field.key]:e.target.value}})}/></td><td className="p-2 text-xs">{'units' in field?<select aria-label={`${field.label} unit`} className="border rounded p-2" value={row.reviewed[`unit:${field.key}`]??field.unit} onChange={e=>update(object.id,{reviewed:{...row.reviewed,[`unit:${field.key}`]:e.target.value}})}>{field.units.map(unit=><option key={unit} value={unit}>{unit||'—'}</option>)}</select>:field.unit}</td></tr>)}</tbody></table>{['power','accumulations'].map(key=>row.reviewed[`source:${key}`]&&<p key={key} className="text-xs text-amber-700 mt-1">{row.reviewed[`source:${key}`]}</p>)}<p className="text-xs text-slate-500 mt-2">Spots = pixel grid (i×j). Size = physical scan width × height. Analyte is manual; Power can be suggested from the measurement name. Confirm or edit all suggested values.</p></fieldset>
                         {object.kind==='raman'&&<fieldset disabled={busy||row.done} className="space-y-2"><legend className="font-semibold text-sm">Attached camera images</legend><p className="text-xs text-slate-500">Images are saved inside this Raman record, together with the map and measurement parameters. Selected images assigned to the same sample are attached when their calibrated positions match.</p>
                             {(()=>{const detected=images.filter(image=>image.spatial_geometry&&object.spatial_geometry&&['inside','overlap'].includes(spatialRelation(image.spatial_geometry,object.spatial_geometry))).map(image=>image.id);return detected.length>0&&<button type="button" className="text-violet-600 text-xs underline" onClick={()=>update(object.id,{images:detected})}>Attach detected images ({detected.length})</button>;})()}
                             <div className="max-h-44 overflow-auto">{images.map(image=><label key={image.id} className="flex items-center gap-2 text-xs py-1"><input type="checkbox" checked={row.images.includes(image.id)||Boolean(plan.imageLinks[image.id]?.includes(object.id))} onChange={e=>{update(object.id,{images:e.target.checked?[...row.images,image.id]:row.images.filter(id=>id!==image.id)});if(!e.target.checked&&rows[image.id]?.selected)update(image.id,{selected:false});}}/><span className="flex-1">{image.name}</span><button type="button" className="underline" onClick={()=>setActive(image.id)}>Preview</button></label>)}</div>

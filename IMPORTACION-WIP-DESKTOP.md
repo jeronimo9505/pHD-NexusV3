@@ -6,7 +6,7 @@ In Tauri, open **Import .wip** from Samples, or **Add .wip** in a Raman characte
 
 The list follows the source Data sequence. Captions are preserved; object IDs distinguish repeated names. Filename sample matches and image-position matches are suggestions requiring confirmation.
 
-The parameter order matches manual Raman entry: Analyte, Laser, Power, Objective, Acquisition Time, Accumulations, Spots, Size. Analyte and Power start blank and offer unit selection. Spots uses the stored pixel dimensions; Size uses the physical scan span in micrometres. For example, 50×50 pixels over 200×200 µm remains two different values. Missing metadata stays blank. Original acquisition metadata and reviewed values are kept separately.
+The parameter order matches manual Raman entry: Analyte, Laser, Power, Objective, Acquisition Time, Accumulations, Spots, Size. Analyte starts blank. Power can be prefilled from an explicit uW/µW/mW token in the measurement caption and offers unit selection; the suggestion is marked for review. Spots uses the stored pixel dimensions; Size uses the physical scan span in micrometres. For example, 50×50 pixels over 200×200 µm remains two different values. Missing metadata stays blank except the labelled, editable 1-ac default for a recognized Area Scan when no explicit accumulation count exists. Original acquisition metadata and reviewed values are kept separately.
 
 **Metadata** opens Measurements, Data History and Source Details before import and from the saved characterization. Source Details retains calibration references, source byte ranges, unknown acquisition parameters and the original file hash.
 
@@ -53,3 +53,16 @@ Select a Raman acquisition and camera image, assign them to the same sample and 
 Attached-image provenance includes its original and reviewed metadata, history, raw acquisition parameters, spatial geometry and calibration references. **Image metadata** opens these values from the Raman detail sheet. Image parameters do not replace the Raman parameters. A shared image may accompany several Raman acquisitions, each remaining one complete Raman record.
 
 Standalone Optical Image records require the explicit **Create standalone image records when no Raman measurement is linked** option. An unlinked selected image otherwise blocks import with an explanation instead of silently creating a separate record. Partial failures retain failed selections for retry and mark an image complete only after all its planned Raman links succeed. Existing separate Optical Image/Raman records are unchanged, as requested.
+
+
+## Persisted image annotations, source traceability and display precision
+
+Detected measurement areas and a suitable scale bar start enabled. The import preview keeps per-image choices (including hidden areas, scale length, and point grid) when navigating between objects. On confirmed import, the local engine saves a derived annotated PNG as the characterization's displayed attachment, retains the original RGB PNG separately, and stores the chosen settings and source measurement geometries alongside image provenance. The calibrated viewer opens the original image with the saved settings, avoiding double annotation. Hiding all areas and the scale explicitly preserves that choice. Export and import use the same calibrated coordinates and scale.
+
+`source_file_path` records the selected WIP location exactly as supplied; `resolved_source_file_path` also records the resolved path. The original project is not moved or uploaded. The detail sheet shows **Source WITec project**. This applies to new imports; older records without a stored path are not assigned a guessed location.
+
+The WITec scan-pattern GUID `{4C398196-DD48-4EE4-95F4-1E23F2AF96C1}` is labelled **Area Scan**, matching the provided WITec Meta Info. When the source has no explicit accumulation count, the review uses 1 ac as a labelled editable default. This is not represented as an original instrument count and never replaces an explicit count. Other unknown methods remain unset.
+
+Power suggestions accept bounded tokens such as `-500uW-`, `-0.5mW-`, `µW` and `μW` in the measurement caption. Conflicting power tokens remain blank. The source caption and the suggestion's origin remain available separately from reviewed values. No other filename metadata is inferred.
+
+Laser values display at most one decimal (632.7999877929688 → 632.8 nm) in the characterization table, history summary and metadata table. Full precision remains in stored acquisition metadata and Source Details.

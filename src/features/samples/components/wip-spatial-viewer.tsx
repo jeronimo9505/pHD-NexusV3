@@ -1,20 +1,28 @@
 'use client';
 import {useRef,useState} from 'react';
 import {spatialOverlay,spatialRelation,type WipGeometry,type SpatialMap} from '../wip-spatial';
+import {defaultWipAnnotation,type WipAnnotationSettings} from '../wip-annotations';
 const overlayColor='#ef4444';
 
-export function WipSpatialViewer({imageSource,name,geometry,maps,onExport}: {
+export function WipSpatialViewer({imageSource,name,geometry,maps,onExport,annotation,onAnnotationChange,initialAnnotation}: {
     imageSource:string;name:string;geometry:WipGeometry;maps:SpatialMap[];
+    initialAnnotation?:WipAnnotationSettings;annotation?:WipAnnotationSettings;onAnnotationChange?:(value:WipAnnotationSettings)=>void;
     onExport?:(selected:SpatialMap[],scale:number,grid:boolean)=>Promise<{image:string}>;
 }) {
     const [showAll,setShowAll]=useState(false);
-    const [selected,setSelected]=useState<string[]>([]),[grid,setGrid]=useState(false),[zoom,setZoom]=useState(1);
-    const [scale,setScale]=useState<number|null>(null),[error,setError]=useState(''),[exporting,setExporting]=useState(false);
+    const [localAnnotation,setLocalAnnotation]=useState<WipAnnotationSettings|null>(initialAnnotation||null),[zoom,setZoom]=useState(1);
+    const [error,setError]=useState(''),[exporting,setExporting]=useState(false);
+    const current=annotation||localAnnotation||defaultWipAnnotation(geometry,maps);
+    const selected=current.map_ids,grid=current.show_grid;
+    function change(value:Partial<WipAnnotationSettings>){const next={...current,...value};if(onAnnotationChange)onAnnotationChange(next);else setLocalAnnotation(next);}
+    function setSelected(value:string[]|((current:string[])=>string[])){change({map_ids:typeof value==='function'?value(selected):value});}
+    const setGrid=(value:boolean)=>change({show_grid:value});
+    const setScale=(value:number)=>change({scale_um:value});
     const frame=useRef<HTMLDivElement>(null),pan=useRef<{x:number;y:number;left:number;top:number}|null>(null);
     const width=geometry.width||640,height=geometry.height||480;
     const lengths=geometry.valid&&geometry.um_per_pixel_x?[1,2,5,10,20,40,50,100,200,500,1000].filter(value=>{
         const pixels=value/geometry.um_per_pixel_x!;return pixels>=20&&pixels<=width*.5;}):[];
-    const scaleLength=scale??(lengths.includes(40)?40:lengths.filter(value=>value/geometry.um_per_pixel_x!<=width*.3).at(-1)||lengths[0]||0);
+    const scaleLength=current.scale_um;
     const detected=maps.map(item=>({item,relation:spatialRelation(geometry,item.geometry)}));
     const visible=detected.filter(({relation})=>showAll||relation==='inside'||relation==='overlap');
     const inImage=detected.filter(({relation})=>relation==='inside'||relation==='overlap');

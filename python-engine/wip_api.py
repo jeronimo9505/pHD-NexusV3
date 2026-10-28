@@ -18,9 +18,15 @@ class ObjectRequest(BaseModel):
     session: str = Field(min_length=32,max_length=32)
     object_id: str
 
+class ImageAnnotation(BaseModel):
+    map_ids: list[str] = Field(default_factory=list,max_length=12)
+    scale_um: float = Field(default=0,ge=0,le=1000000,allow_inf_nan=False)
+    show_grid: bool = False
+
 class Extract(ObjectRequest):
     image_ids: list[str] = Field(default_factory=list,max_length=40)
     image_parameters: dict[str,dict] = Field(default_factory=dict)
+    image_annotations: dict[str,ImageAnnotation] = Field(default_factory=dict,max_length=40)
     vault_root: str
     group_id: UUID
     sample_id: UUID
@@ -66,6 +72,7 @@ def extract(request: Extract):
         from readers.wip_project import get_session
         metadata = request.model_dump(exclude={'session','object_id','image_ids','vault_root'},mode='json')
         if not metadata['image_parameters']:metadata.pop('image_parameters')
+        if not metadata['image_annotations']:metadata.pop('image_annotations')
         session = get_session(request.session)
         metadata['technique'] = 'Optical Image' if session.entry(request.object_id).class_name == 'TDBitmap' else 'Raman'
         return session.extract(request.object_id, request.image_ids, metadata, request.vault_root)

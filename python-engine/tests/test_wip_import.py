@@ -148,4 +148,42 @@ class ReferenceTests(unittest.TestCase):
                 stored=json.loads(archive.attrs['wip_provenance'])
                 self.assertEqual(stored['attached_image_metadata'],result['provenance']['attached_image_metadata'])
 
+    def test_annotation_settings_source_path_and_original_image(self):
+        from readers.wip_spatial import overlay
+        from PIL import Image
+        objects=self.inventory['objects'];pair=None
+        for image in objects:
+            if image['kind']!='image' or not image['importable'] or not image['spatial_geometry']['valid']:continue
+            for measurement in objects:
+                if measurement['kind']!='raman' or not measurement['spatial_geometry']['valid']:continue
+                try:polygon=overlay(image['spatial_geometry'],measurement['spatial_geometry'])['polygon']
+                except ValueError:continue
+                if all(0<=x<=image['shape'][0] and 0<=y<=image['shape'][1] for x,y in polygon):pair=(measurement,image);break
+            if pair:break
+        self.assertIsNotNone(pair)
+        measurement,image=pair
+        settings={'group_id':'11111111-1111-1111-1111-111111111111','sample_id':'22222222-2222-2222-2222-222222222222',
+            'sample_code':'TEST','sample_name':'Annotations','logbook_name':'WIP Validation','technique':'Raman','parameters':{},
+            'image_annotations':{image['id']:{'map_ids':[measurement['id']],'scale_um':40,'show_grid':True}}}
+        with temporary() as vault:
+            result=self.session.extract(measurement['id'],[image['id']],settings,vault)
+            attached=result['provenance']['attached_image_metadata'][0]
+            self.assertEqual(result['provenance']['source_file_path'],str(self.path))
+            self.assertEqual(attached['annotation']['map_ids'],[measurement['id']])
+            self.assertEqual(attached['annotation']['scale_um'],40)
+            self.assertTrue(attached['annotation']['show_grid'])
+            self.assertEqual(len(attached['annotation']['maps']),1)
+            self.assertEqual(result['attached_images'],[attached['annotated_path']])
+            original=np.transpose(self.session.entry(image['id']).array(),(1,0,2))
+            np.testing.assert_array_equal(np.asarray(Image.open(Path(vault)/attached['path'])),original)
+            self.assertFalse(np.array_equal(np.asarray(Image.open(Path(vault)/attached['annotated_path'])),original))
+            repeated=self.session.extract(measurement['id'],[image['id']],settings,vault)
+            self.assertEqual(result['record_id'],repeated['record_id'])
+            settings['image_annotations'][image['id']]={'map_ids':[],'scale_um':0,'show_grid':False}
+            hidden=self.session.extract(measurement['id'],[image['id']],settings,vault)
+            self.assertNotEqual(result['record_id'],hidden['record_id'])
+            hidden_image=hidden['provenance']['attached_image_metadata'][0]
+            self.assertEqual(hidden_image['path'],hidden_image['annotated_path'])
+            self.assertEqual(hidden_image['annotation']['map_ids'],[])
+
 if __name__=='__main__':unittest.main(verbosity=2)

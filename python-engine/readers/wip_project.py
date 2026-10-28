@@ -104,6 +104,7 @@ def scalar(entry, key, default=None):
 
 class ProjectSession:
     def __init__(self, path):
+        self.opened_path = str(path)
         self.path = Path(path).resolve(strict=True)
         if self.path.suffix.lower() != '.wip': raise ValueError('Select a .wip project')
         self.stat = self.path.stat()
@@ -126,6 +127,9 @@ class ProjectSession:
     def describe(self, entry, order):
         from readers.wip_spatial import geometry
         metadata = json_value(entry.measurement_metadata)
+        # This pattern GUID matches the Area Scan shown by WITec Meta Info.
+        if metadata.get('scan_pattern_guid')=='{4C398196-DD48-4EE4-95F4-1E23F2AF96C1}':
+            metadata['scan_method']='Area Scan'
         shape, axis, warnings = None, None, []
         kind, can_import = 'supporting', False
         if entry.class_name in ('TDBitmap', 'TDImage'):
@@ -179,6 +183,8 @@ class ProjectSession:
             reverse = {v: k for k,v in TRACE_PARAM_GUID_FIELD_MAP.items()}
             info['field_sources'] = {key: {'param_guid': reverse.get(key),
                 'trace_guid': info['metadata'].get('trace_guid'), 'method': 'witio Trace decoder'} for key in info['metadata']}
+            if 'scan_method' in info['metadata']:
+                info['field_sources']['scan_method']={'method':'WITec scan-pattern GUID label','param_guid':reverse.get('scan_pattern_guid'),'value_guid':info['metadata']['scan_pattern_guid']}
             if 'intensity_unit' in info['metadata']:
                 info['field_sources']['intensity_unit'] = {'method': 'Linked ZInterpretationID / UnitName',
                     'object_id': info['references'].get('ZInterpretationID')}
@@ -222,7 +228,7 @@ class ProjectSession:
                     if None not in (ix, iy, sx, sy) and abs(x-ix) <= abs(sx)/2 and abs(y-iy) <= abs(sy)/2:
                         obj['suggested_images'].append(image['id'])
             self.check_source()
-            return {'name': self.path.name, 'sha256': self.sha256, 'size': self.stat.st_size,
+            return {'name': self.path.name, 'source_file_path':self.opened_path,'resolved_source_file_path':str(self.path), 'sha256': self.sha256, 'size': self.stat.st_size,
                 'version': self.project.version, 'reader': 'witio 0.2.0 / bounded PhD Nexus adapter', 'objects': objects}
 
     def entry(self, object_id):
@@ -265,6 +271,8 @@ class ProjectSession:
             directory.mkdir(parents=True, exist_ok=True)
             target = directory / f"WIP_{record_id}{'.h5' if info['kind']=='raman' else '.hdf5'}"
             image_paths = []
+            display_paths = []
+            image_annotations = {}
             attached = image_ids if info['kind'] == 'raman' else [str(entry.id)]
             for image_id in attached:
                 image_path = directory / f'WIP_{record_id}_image_{image_id}.png'
@@ -276,7 +284,33 @@ class ProjectSession:
                         temporary.replace(image_path)
                     finally: temporary.unlink(missing_ok=True)
                 image_paths.append(image_path.relative_to(root).as_posix())
-            provenance = {'source_hash': self.sha256, 'source_name': self.path.name, 'object_id': str(entry.id),
+                from readers.wip_spatial import annotate
+                image_info=self.describe(self.entry(image_id),0)
+                image_geometry=image_info['spatial_geometry']
+                settings=metadata.get('image_annotations',{}).get(image_id)
+                if settings is None:
+                    settings={'map_ids':[str(entry.id)] if info['kind']=='raman' and info['spatial_geometry']['valid'] and image_geometry['valid'] else [],'scale_um':0,'show_grid':False}
+                settings=dict(settings)
+                identifiers=list(dict.fromkeys(map(str,settings.get('map_ids',[]))))
+                if len(identifiers)>12:raise ValueError('Show at most 12 measurements on one image')
+                snapshots=[]
+                for identifier in identifiers:
+                    measurement=self.describe(self.entry(identifier),0)
+                    if measurement['kind']!='raman' or not measurement['importable']:raise ValueError('Annotations require supported Raman measurements')
+                    snapshots.append({'id':identifier,'name':measurement['name'],'geometry':measurement['spatial_geometry']})
+                settings.update(map_ids=identifiers,maps=snapshots)
+                image_annotations[image_id]=settings
+                display_path=image_path
+                if identifiers or settings.get('scale_um',0):
+                    display_path=image_path.with_name(image_path.stem+'_annotated.png')
+                    if not display_path.exists():
+                        scene=Image.fromarray(np.transpose(self.entry(image_id).array(),(1,0,2)))
+                        encoded=annotate(scene,image_geometry,[snapshot['geometry'] for snapshot in snapshots],settings.get('scale_um',0),settings.get('show_grid',False))
+                        temporary=display_path.with_suffix(f'.{uuid.uuid4().hex}.tmp')
+                        try:temporary.write_bytes(base64.b64decode(encoded));temporary.replace(display_path)
+                        finally:temporary.unlink(missing_ok=True)
+                display_paths.append(display_path.relative_to(root).as_posix())
+            provenance = {'source_hash': self.sha256, 'source_name': self.path.name, 'source_file_path':self.opened_path,'resolved_source_file_path':str(self.path),'object_id': str(entry.id),
                 'object_name': entry.caption, 'source_path': info['source_path'], 'source_range': info['source_range'],
                 'version': self.project.version, 'reader': 'witio 0.2.0', 'validation': info['validation'],
                 'original_metadata': info['metadata'], 'reviewed_metadata': metadata.get('parameters', {}),
@@ -293,7 +327,7 @@ class ProjectSession:
             for index,image_id in enumerate(attached):
                 image_info=self.details(image_id)
                 provenance['attached_image_metadata'].append(dict(id=image_id,
-                    path=image_paths[index],name=self.entries[image_id].caption,
+                    path=image_paths[index],annotated_path=display_paths[index],annotation=image_annotations[image_id],name=self.entries[image_id].caption,
                     spatial_geometry=image_info['spatial_geometry'],original_metadata=image_info['metadata'],
                     reviewed_metadata=metadata.get('image_parameters',{}).get(image_id,{}),
                     history=image_info['history'],references=image_info['references'],
@@ -337,7 +371,7 @@ class ProjectSession:
                     y[present] = np.nanmedian(np.where(np.isfinite(values[:, present]), values[:, present], np.nan), axis=0)
                     representative = [{'x': float(a), 'y': float(b)} for a,b in zip(x,y) if np.isfinite(a) and np.isfinite(b)]
             return {'record_id': record_id, 'h5_relative_path': relative if info['kind']=='raman' else None,
-                'archive_relative_path': relative, 'attached_images': image_paths, 'provenance': provenance,
+                'archive_relative_path': relative, 'attached_images': display_paths, 'provenance': provenance,
                 'shape': dimensions, 'kind': info['kind'], 'representative': representative}
 
 

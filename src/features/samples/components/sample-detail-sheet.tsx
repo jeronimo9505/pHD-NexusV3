@@ -11,6 +11,7 @@ import { formatCellValue, splitValueAndUnit } from '../utils';
 import { CharacterizationModal } from './characterization-modal';
 import { format } from 'date-fns';
 import { SampleCommentsSection } from './sample-comments-section';
+import { measurementDisplay } from '../measurement-display';
 import { formatSpectralRange } from '../raman-file-metadata';
 import { WipSavedImageDialog } from './wip-saved-image-dialog';
 import type { WipGeometry } from '../wip-spatial';
@@ -169,7 +170,7 @@ export function SampleDetailSheet({
         } else {
             keys = Object.keys(data).filter(k => !ignoreKeys.has(k));
         }
-        return keys.filter(key => !ignoreKeys.has(key) && data[key]).map(key => String(data[key])).join(' - ') || '';
+        return keys.filter(key => !ignoreKeys.has(key) && data[key]).map(key => measurementDisplay(key,data[key])).join(' - ') || '';
     };
 
     const separateUnit = (val: string): { v: string; u: string } => {
@@ -197,10 +198,10 @@ export function SampleDetailSheet({
         return keys.filter(k => !ignoreKeys.has(k)).map(key => {
             const raw = data[key];
             if (raw && typeof raw === 'object' && 'value' in raw) {
-                return { name: key, value: raw.value ?? '', unit: raw.unit ?? '' };
+                return { name: key, value: measurementDisplay(key,raw.value??''), unit: raw.unit ?? '' };
             }
             const { value, unit } = splitValueAndUnit(raw);
-            return { name: key, value, unit };
+            return { name: key, value:measurementDisplay(key,value), unit };
         });
     };
 
@@ -447,6 +448,7 @@ export function SampleDetailSheet({
                                         </div>
                                     )}
 
+                                    {expandedChar!.data.wip_import?.source_file_path&&<div><h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-1.5">Source WITec project</h4><p className="text-xs font-mono break-all bg-slate-50 border rounded p-2" title="Original location at import; the WIP was not moved">{expandedChar!.data.wip_import.source_file_path}</p></div>}
                                     {/* Data Vault Files */}
                                     {(expandedChar!.data.local_h5_path || (expandedChar!.data.local_h5_paths && expandedChar!.data.local_h5_paths.length > 0)) && (
                                         <div>

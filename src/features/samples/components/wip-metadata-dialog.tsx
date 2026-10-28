@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { measurementDisplay } from '../measurement-display';
 import { X, Copy } from 'lucide-react';
 
 export function WipMetadataDialog({ title,metadata,history=[],source,onClose }: {
@@ -23,7 +24,7 @@ export function WipMetadataDialog({ title,metadata,history=[],source,onClose }: 
             <div className="p-5 overflow-auto space-y-4">{copyError&&<p role="alert" className="text-sm text-red-600">{copyError}</p>}
                 <p className="text-xs text-slate-500">Original source values. Import corrections are stored separately. File names are not used to fill missing metadata.</p>
                 {tab==='measurements'&&<><input className="border rounded p-2 w-full" placeholder="Search metadata…" aria-label="Search metadata" value={search} onChange={event=>setSearch(event.target.value)}/>
-                    {Object.entries(groups).map(([group,rows])=><section key={group}><h3 className="font-semibold bg-slate-100 p-2">{group}</h3><table className="w-full text-sm"><tbody>{rows.map(([key,value])=><tr key={key} className="border-b"><th className="p-2 text-left font-medium w-1/2">{key.replaceAll('_',' ')}</th><td className="p-2 break-all">{typeof value==='object'?JSON.stringify(value):String(value??'Not available')}</td></tr>)}</tbody></table></section>)}
+                    {Object.entries(groups).map(([group,rows])=><section key={group}><h3 className="font-semibold bg-slate-100 p-2">{group}</h3><table className="w-full text-sm"><tbody>{rows.map(([key,value])=><tr key={key} className="border-b"><th className="p-2 text-left font-medium w-1/2">{key.replaceAll('_',' ')}</th><td className="p-2 break-all">{typeof value==='object'?JSON.stringify(value):measurementDisplay(key,value??'Not available')}</td></tr>)}</tbody></table></section>)}
                     {!Object.keys(groups).length&&<p>No matching acquisition metadata was recovered.</p>}</>}
                 {tab==='history'&&<><table className="w-full text-sm"><thead><tr className="text-left"><th>Date as stored</th><th>Recorded action</th></tr></thead><tbody>{history.map((item,index)=><tr key={index} className="border-b"><td className="p-2">{item.date||'Not available'}</td><td className="p-2">{item.text||'No description'}</td></tr>)}</tbody></table>
                     {!history.length&&<p>No Data History entries were recovered. Acquisition trace information is shown below where available.</p>}
