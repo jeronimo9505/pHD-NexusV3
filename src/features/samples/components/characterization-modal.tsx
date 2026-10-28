@@ -1637,7 +1637,6 @@ export function CharacterizationModal({
                             )}
 
                             {/* Raman / SERS Spectrum Section */}
-                            {type === 'Raman' && <DesktopGoogleConnection key={groupId} groupId={groupId} />}
                             {(type === 'Raman' || type === 'SERS') && (
                                 <div className="p-5 bg-purple-50/50 border border-purple-100 rounded-xl space-y-4">
                                     <div className="flex items-center gap-2">
@@ -1851,6 +1850,7 @@ export function CharacterizationModal({
                                     )}
                                 </div>
                             )}
+                            {type === 'Raman' && <DesktopGoogleConnection key={groupId} groupId={groupId} />}
                         </div>
                     </div>
                 </div>
