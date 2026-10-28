@@ -96,9 +96,12 @@ def register(library_root,file_path):
             db.execute('UPDATE projects SET original_paths=? WHERE sha256=?',(json.dumps(locations),source_hash))
             return {'sha256':source_hash,'managed_path':str(target),'duplicate':True,'moved':False,
                 'original_path':original,'message':'Library copy restored; the selected copy was kept.' if restored else 'Already in the library. The existing project was opened; the selected copy was kept.'}
-        directory=(root/'Projects'/source_hash).resolve();directory.relative_to(root)
-        directory.mkdir(parents=True,exist_ok=True)
-        target=(directory/source.name).resolve();target.relative_to(directory)
+        from vault_naming import safe_name
+        directory=(root/'Projects').resolve();directory.relative_to(root);directory.mkdir(parents=True,exist_ok=True)
+        target=directory/(safe_name(source.stem,120)+source.suffix);suffix=2
+        while target.exists() and digest(target)!=source_hash:
+            target=directory/f'{safe_name(source.stem,110)} ({suffix}){source.suffix}';suffix+=1
+        target=target.resolve();target.relative_to(directory)
         temporary=directory/f'.{uuid.uuid4().hex}.tmp'
         try:
             if target.exists():
@@ -131,10 +134,25 @@ def inspect_managed(library_root,source_hash):
     with connection(root) as db:row=db.execute('SELECT * FROM projects WHERE sha256=?',(source_hash,)).fetchone()
     if row is None:raise ValueError('Project is not registered in this library')
     path=project_path(root,row)
+    if path.parent.name==source_hash and path.is_file():
+        from vault_naming import safe_name
+        previous=path
+        destination=(root/'Projects'/(safe_name(Path(row['name']).stem,120)+Path(row['name']).suffix)).resolve();destination.relative_to(root)
+        suffix=2
+        while destination.exists():destination=root/'Projects'/f'{safe_name(Path(row["name"]).stem,110)} ({suffix}){Path(row["name"]).suffix}';suffix+=1
+        try:
+            with connection(root) as db:
+                db.execute('UPDATE projects SET relative_path=? WHERE sha256=?',(destination.relative_to(root).as_posix(),source_hash))
+                previous.rename(destination)
+            path=destination
+            try:previous.parent.rmdir()
+            except OSError:pass
+        except (OSError,sqlite3.Error):
+            if not previous.exists() and destination.exists():destination.rename(previous)
     if not path.is_file() or digest(path)!=source_hash:raise ValueError('The library file is missing or changed. Use Open .wip to register the current version.')
     result=inspect_project(str(path))
     with connection(root) as db:db.execute('UPDATE projects SET objects=? WHERE sha256=?',(sum(1 for obj in result['objects'] if obj['importable']),source_hash))
-    trace={'library_root':str(root),'managed_path':str(path),'original_paths':json.loads(row['original_paths'])}
+    trace={'library_root':str(root),'relative_path':path.relative_to(root).as_posix(),'managed_path':str(path),'original_paths':json.loads(row['original_paths'])}
     get_session(result['session']).library_trace=trace
     result['library']=trace
     return result

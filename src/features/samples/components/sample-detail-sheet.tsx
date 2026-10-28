@@ -11,6 +11,7 @@ import { formatCellValue, splitValueAndUnit } from '../utils';
 import { CharacterizationModal } from './characterization-modal';
 import { format } from 'date-fns';
 import { SampleCommentsSection } from './sample-comments-section';
+import {deleteCharacterizationWithAssets} from '../characterization-assets';
 import { openWipSource } from '../wip-library';
 import { measurementDisplay } from '../measurement-display';
 import { formatSpectralRange } from '../raman-file-metadata';
@@ -160,7 +161,7 @@ export function SampleDetailSheet({
 
     const getSummaryString = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'raman_drive_sync', 'wip_import', 'wip_archive_path', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'raman_drive_sync', 'asset_manifest', 'wip_import', 'wip_archive_path', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -185,7 +186,7 @@ export function SampleDetailSheet({
 
     const getParameterRows = (char: SampleCharacterization) => {
         const { type, data } = char;
-        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'raman_drive_sync', 'wip_import', 'wip_archive_path', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
+        const ignoreKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'raman_spectrum_file_id', 'raman_drive_sync', 'asset_manifest', 'wip_import', 'wip_archive_path', 'local_h5_path', 'local_h5_paths', 'original_file', 'original_files', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
         let keys: string[] = [];
         if (data.__order__ && Array.isArray(data.__order__)) {
             keys = data.__order__;
@@ -220,9 +221,9 @@ export function SampleDetailSheet({
     const handleDeleteChar = async (charId: string) => {
         if (!confirm('Are you sure you want to delete this record?')) return;
         setIsLoadingChars(true);
-        const res = await deleteCharacterizationAction(charId, groupId);
+        const res = await deleteCharacterizationWithAssets(charId, groupId);
         if (res.error) toast.error(res.error);
-        else { toast.success('Record deleted'); if (expandedChar?.id === charId) setExpandedChar(null); loadCharacterizations(); }
+        else { if('warning' in res&&res.warning)toast.warning(res.warning);else toast.success('Record deleted; unshared files moved to recovery'); if (expandedChar?.id === charId) setExpandedChar(null); loadCharacterizations(); }
         setIsLoadingChars(false);
     };
 

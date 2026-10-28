@@ -41,6 +41,7 @@ const ActivityLogDrawer = dynamic(() => import('./activity-log-drawer').then(mod
 import { CharacterizationSearch } from './characterization-search';
 const RamanWorkspace = dynamic(() => import('./raman-workspace').then(module => module.RamanWorkspace));
 import { hasNativeDrive } from '@/lib/google/desktop-drive';
+const VaultFilesDialog=dynamic(()=>import('./vault-files-dialog').then(module=>module.VaultFilesDialog),{ssr:false});
 const WipImportDialog = dynamic(() => import('./wip-import-dialog').then(module => module.WipImportDialog), {ssr:false});
 import { ScientificText } from '@/components/ScientificText';
 import { useLogbookMeasurements } from '../use-logbook-measurements';
@@ -81,6 +82,7 @@ export function SampleGrid({
 }: SampleGridProps) {
     const router = useRouter();
     const [wipOpen,setWipOpen] = useState(false);
+    const [vaultFilesOpen,setVaultFilesOpen]=useState(false);
     const [nativeWip,setNativeWip] = useState(false);
     useEffect(()=>setNativeWip(hasNativeDrive()),[]);
     useEffect(() => {
@@ -424,6 +426,7 @@ export function SampleGrid({
                     </div>
 
                     <div className="flex items-center gap-2">
+                        {nativeWip&&<button type="button" className="border rounded-lg px-3 py-2 text-sm" onClick={()=>setVaultFilesOpen(true)}>Vault files</button>}
                         {nativeWip && <button type="button" onClick={()=>setWipOpen(true)} className="border border-violet-200 bg-violet-50 text-violet-700 px-3 py-2 rounded-lg text-sm font-medium">Import .wip</button>}
                         {isAdmin && (
                             <button
@@ -817,6 +820,7 @@ export function SampleGrid({
                 </div>
             )}
 
+            {vaultFilesOpen&&<VaultFilesDialog groupId={groupId} onClose={()=>{setVaultFilesOpen(false);router.refresh();}}/>}
             {wipOpen&&<WipImportDialog groupId={groupId} folderId={driveSettings?.sampleFolderId||driveSettings?.folderId} onClose={()=>{setWipOpen(false);router.refresh();}}/>}
             {/* ──── BULK CHARACTERIZATION MODAL ──── */}
             {bulkCharOpen && (<BulkCharacterizationModal

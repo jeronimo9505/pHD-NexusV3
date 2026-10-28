@@ -3,6 +3,7 @@
 import React, { useMemo } from 'react';
 import { Sample } from '../types';
 import { Calendar, ChevronRight, Hash, FlaskConical, ExternalLink, ClipboardList, Activity } from 'lucide-react';
+import {CHARACTERIZATION_SYSTEM_KEYS} from '../characterization-data';
 import { formatDate } from '../utils';
 import { cn } from '@/lib/utils';
 
@@ -17,7 +18,7 @@ export function CharacterizationSearch({ samples, search, typeFilter, onSelectSa
     // Summary generator for high density
     const getSentenceSummary = (data: any) => {
         const priority = ['analyte', 'laser', 'power', 'objective', 'acquisition_time', 'accumulation', 'acc'];
-        const ignore = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', '__bulk_id__', 'manual_date', 'attached_images', 'attached_image']);
+        const ignore = new Set([...CHARACTERIZATION_SYSTEM_KEYS,'manual_date']);
 
         const parts: string[] = [];
 

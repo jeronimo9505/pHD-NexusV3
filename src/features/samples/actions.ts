@@ -3,6 +3,7 @@
 import { createClient, getUser } from "@/lib/supabase/server";
 import { updateSampleRecord } from "./server/update-sample";
 import { createSampleRecord, deleteSampleRecords } from "./server/mutations";
+import {normalizeCharacterizationData} from "./characterization-data";
 import { revalidatePath } from "next/cache";
 
 
@@ -273,29 +274,23 @@ export async function updateSampleAction(input: UpdateSampleInput, groupId: stri
 // Characterization Actions
 
 export async function createCharacterizationAction(input: {
-    sample_id: string;
-    group_id: string;
-    type: string;
-    data: Record<string, any>;
-    performed_at?: string;
+    sample_id:string;group_id:string;type:string;data:Record<string,any>;performed_at?:string;record_id?:string;
 }) {
-    const supabase = await createClient();
-    const user = await supabase.auth.getUser();
-
-    const payload = {
-        sample_id: input.sample_id,
-        type: input.type,
-        data: input.data,
-        created_by: user.data.user?.id,
-        performed_at: input.performed_at || new Date().toISOString()
-    };
-
-    const { error } = await supabase.from('sample_characterizations').insert(payload);
-
-    if (error) return { error: error.message };
-
-    revalidatePath(`/${input.group_id}/samples`);
-    return { success: true };
+    const supabase=await createClient(),user=await getUser();
+    if(!user)return{error:'Unauthorized'};
+    const{data:member}=await supabase.from('group_members').select('id').eq('group_id',input.group_id).eq('user_id',user.id).eq('status','active').maybeSingle();
+    if(!member)return{error:'Active group membership required'};
+    const{data:sample,error:sampleError}=await supabase.from('samples').select('id,group_id').eq('id',input.sample_id).eq('group_id',input.group_id).maybeSingle();
+    if(sampleError||!sample)return{error:'Sample not found in this group'};
+    const data=normalizeCharacterizationData(input.data,input.type);
+    if(input.record_id){const{data:prior}=await supabase.from('sample_characterizations').select('id,sample_id').eq('id',input.record_id).maybeSingle();if(prior)return prior.sample_id===input.sample_id?{success:true,id:prior.id,created:false}:{error:'Record identifier belongs to another sample'};}
+    if(data.wip_import&&input.record_id){
+        const result=await(supabase as any).rpc('import_wip_characterization_safe',{p_group_id:input.group_id,p_sample_id:input.sample_id,p_record_id:input.record_id,p_data:data,p_type:input.type,p_performed_at:input.performed_at||null});
+        if(result.error)return{error:result.error.message};revalidatePath(`/${input.group_id}/samples`);return{success:true,...result.data};
+    }
+    const{id:recordId}= {id:input.record_id||crypto.randomUUID()};
+    const{data:created,error}=await supabase.from('sample_characterizations').insert({id:recordId,sample_id:input.sample_id,type:input.type,data,created_by:user.id,performed_at:input.performed_at||new Date().toISOString()}).select('id').single();
+    if(error)return{error:error.message};revalidatePath(`/${input.group_id}/samples`);return{success:true,id:created.id,created:true};
 }
 
 export async function createBulkCharacterizationAction(input: {
@@ -307,12 +302,18 @@ export async function createBulkCharacterizationAction(input: {
 }) {
     const supabase = await createClient();
     const user = await supabase.auth.getUser();
+    if(!user.data.user)return{error:'Unauthorized'};
+    const{data:member}=await supabase.from('group_members').select('id').eq('group_id',input.group_id).eq('user_id',user.data.user.id).eq('status','active').maybeSingle();
+    if(!member)return{error:'Active group membership required'};
+    const uniqueIds=Array.from(new Set(input.sample_ids));
+    const{data:targets,error:targetError}=await supabase.from('samples').select('id').eq('group_id',input.group_id).in('id',uniqueIds);
+    if(targetError||!targets?.length||targets.length!==uniqueIds.length)return{error:'Every destination sample must belong to this group'};
     const bulkId = crypto.randomUUID();
 
-    const payloads = input.sample_ids.map(id => ({
+    const payloads = uniqueIds.map(id => ({
         sample_id: id,
         type: input.type,
-        data: { ...input.data, __bulk_id__: bulkId },
+        data: normalizeCharacterizationData({ ...input.data, __bulk_id__: bulkId },input.type),
         created_by: user.data.user?.id,
         performed_at: input.performed_at || new Date().toISOString()
     }));
@@ -335,26 +336,33 @@ export async function updateCharacterizationAction(input: {
     updateBatch?: boolean;
 }) {
     const supabase = await createClient();
+    const actor=await getUser();if(!actor)return{error:'Unauthorized'};
+    const{data:member}=await supabase.from('group_members').select('id').eq('group_id',input.group_id).eq('user_id',actor.id).eq('status','active').maybeSingle();if(!member)return{error:'Active group membership required'};
 
     // 1. Get current record to check for bulk_id
     const { data: current } = await supabase
         .from('sample_characterizations')
-        .select('data')
+        .select('data,type,samples!inner(group_id)')
+        .eq('samples.group_id',input.group_id)
         .eq('id', input.id)
         .single();
 
+    if(!current)return{error:'Record not found in this group'};
+    input={...input,data:normalizeCharacterizationData(input.data,input.type||current.type||'Raman')};
     const bulkId = (current?.data as any)?.__bulk_id__;
 
     if (input.updateBatch && bulkId) {
-        // Update all related records
+        const {data:batch,error:batchError}=await supabase.from('sample_characterizations').select('id,samples!inner(group_id)').eq('samples.group_id',input.group_id).contains('data',{__bulk_id__:bulkId});
+        if(batchError)return{error:batchError.message};
+        // Update only related records in the authorized group.
         const { error } = await supabase
             .from('sample_characterizations')
             .update({
-                data: { ...input.data, __bulk_id__: bulkId },
+                data: normalizeCharacterizationData({ ...input.data, __bulk_id__: bulkId },input.type||current.type||'Raman'),
                 type: input.type,
                 performed_at: input.performed_at
             })
-            .contains('data', { __bulk_id__: bulkId });
+            .in('id',(batch||[]).map(record=>record.id));
 
         if (error) return { error: error.message };
     } else {
@@ -375,17 +383,9 @@ export async function updateCharacterizationAction(input: {
     return { success: true };
 }
 
-export async function deleteCharacterizationAction(id: string, groupId: string) {
-    const supabase = await createClient();
-    const { error } = await supabase
-        .from('sample_characterizations')
-        .delete()
-        .eq('id', id);
-
-    if (error) return { error: error.message };
-
-    revalidatePath(`/${groupId}/samples`);
-    return { success: true };
+export async function deleteCharacterizationAction(id:string,groupId:string){
+    const supabase=await createClient();const{data,error}=await(supabase as any).rpc('delete_characterization_recoverable',{p_id:id,p_group_id:groupId});
+    if(error)return{error:error.message};revalidatePath(`/${groupId}/samples`);return{success:true,recovery:data};
 }
 
 export async function getGroupCharacterizationTypesAction(groupId: string) {

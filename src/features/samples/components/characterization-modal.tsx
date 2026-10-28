@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 const WipImportDialog = dynamic(() => import('./wip-import-dialog').then(module => module.WipImportDialog), {ssr:false});
+import {prepareCharacterizationSave,finishCharacterizationSave} from '../characterization-assets';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Sample, SampleCharacterization } from '../types';
 import { createCharacterizationAction, updateCharacterizationAction, getGroupCharacterizationTypesAction, getLastCharacterizationParamsAction } from '../actions';
@@ -228,6 +229,8 @@ export function CharacterizationModal({
     useEffect(()=>setNativeWip(hasNativeDrive()),[]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const submittingRef = useRef(false);
+    const saveRequestId=useRef(crypto.randomUUID());
+    useEffect(()=>{if(isOpen)saveRequestId.current=initialData?.id||crypto.randomUUID();},[isOpen,initialData?.id,sample?.id]);
     const [isGeneratingDoc, setIsGeneratingDoc] = useState(false);
     const [scriptsLoaded, setScriptsLoaded] = useState(false);
     const [updateBatch, setUpdateBatch] = useState(false);
@@ -634,7 +637,7 @@ export function CharacterizationModal({
 
                 // 2. Process Remaining Keys
                 Object.entries(data).forEach(([k, v]) => {
-                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', 'raman_drive_sync', 'wip_import', 'wip_archive_path', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image'];
+                    const systemKeys = ['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path', 'original_file', 'raman_spectrum_file_id', 'raman_drive_sync', 'asset_manifest', 'wip_import', 'wip_archive_path', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image'];
                     if (!processedKeys.has(k) && !systemKeys.includes(k)) {
                         const { value, unit } = splitValueAndUnit(v);
                         fields.push({ key: k, value, unit });
@@ -721,7 +724,7 @@ export function CharacterizationModal({
                         const order: string[] = Array.isArray(data.__order__) ? data.__order__ : [];
                         const systemKeys = new Set(['equipment', 'notes', '__order__', 'file_origin', 'drive_file_link',
                             'local_h5_paths', 'original_files', 'local_h5_path', 'original_file',
-                            'raman_spectrum_file_id', 'raman_drive_sync', 'wip_import', 'wip_archive_path', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
+                            'raman_spectrum_file_id', 'raman_drive_sync', 'asset_manifest', 'wip_import', 'wip_archive_path', '__bulk_id__', 'file_metadata', 'attached_images', 'attached_image']);
 
                         const separateUnit = (val: string): { v: string; u: string } => {
                             const match = val.match(/^([\d\.]+)\s*([a-zA-Z%μµ°Ω]+)$/);
@@ -864,7 +867,7 @@ export function CharacterizationModal({
             return;
         }
 
-        const cleanData: Record<string, any> = {};
+        let cleanData: Record<string, any> = {};
         if(initialData?.data.wip_import)cleanData.wip_import=initialData.data.wip_import;
         if(initialData?.data.wip_archive_path)cleanData.wip_archive_path=initialData.data.wip_archive_path;
         if (initialData?.data.raman_spectrum_file_id) cleanData.raman_spectrum_file_id = initialData.data.raman_spectrum_file_id;
@@ -943,7 +946,7 @@ export function CharacterizationModal({
                         sample_name: sample.name,
                         date: performedAt,
                         equipment: equipment,
-                        parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'wip_import', 'wip_archive_path', 'raman_spectrum_file_id'].includes(key))),
+                        parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'asset_manifest', 'wip_import', 'wip_archive_path', 'raman_spectrum_file_id'].includes(key))),
                         data: spectrumData
                     };
                     const jsonString = JSON.stringify(payload, null, 2);
@@ -1028,49 +1031,13 @@ export function CharacterizationModal({
             setParameterOrder(prev => ({ ...prev, [type]: orderedKeys }));
         }
 
-        // Desktop: physical file renaming on parameter edit
-        if (isDesktop && initialData?.id && h5RelativePaths.length > 0) {
-            const vaultRoot = typeof window !== 'undefined' ? localStorage.getItem('phdnexus_vault_root') : null;
-            if (vaultRoot) {
-                try {
-                    const renameRes = await renameVaultFiles({
-                        vault_root: vaultRoot,
-                        h5_relative_paths: h5RelativePaths,
-                        metadata: {
-                            ...cleanData,
-                            sample_code: sample.sample_code,
-                            sample_name: sample.name,
-                            logbook_name: logbookName,
-                            technique: finalType
-                        }
-                    });
-
-                    if (renameRes.success && renameRes.renamed_paths) {
-                        const updatedPaths = h5RelativePaths.map(p => renameRes.renamed_paths[p] || p);
-                        
-                        // Update cleanData with the new renamed paths
-                        cleanData['local_h5_paths'] = updatedPaths;
-                        if (cleanData['local_h5_path']) {
-                            cleanData['local_h5_path'] = updatedPaths[0] || '';
-                        }
-                        if (cleanData['original_file']) {
-                            cleanData['original_file'] = updatedPaths[0] || '';
-                        }
-                        
-                        // Update state so the modal stays in sync
-                        setH5RelativePaths(updatedPaths);
-                        toast.success("Local files renamed successfully!");
-                    }
-                } catch (renameErr: any) {
-                    console.error("Failed to rename local files:", renameErr);
-                    toast.error(`Could not rename physical files on disk: ${renameErr.message}`);
-                }
-            }
-        }
+        const assetSave=await prepareCharacterizationSave(groupId,finalType,cleanData,{
+            sample_id:sample.id,sample_code:sample.sample_code||sample.display_id,sample_name:sample.name,logbook_name:logbookName},initialData?.id||saveRequestId.current);
+        cleanData=assetSave.data;
 
         if (hasNativeDrive() && cleanData.raman_drive_sync?.status === 'pending') {
             cleanData.raman_drive_sync = { ...cleanData.raman_drive_sync, job_id: crypto.randomUUID(), owner_id: (await desktopDriveIdentity(groupId)).userId, file_id: undefined, payload: { ...cleanData.raman_drive_sync.payload,
-                parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'wip_import', 'wip_archive_path', 'raman_spectrum_file_id'].includes(key))) } };
+                parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'asset_manifest', 'wip_import', 'wip_archive_path', 'raman_spectrum_file_id'].includes(key))) } };
             cleanData.raman_drive_sync.signature = await desktopDriveCommand('google_drive_sign_job', groupId,
                 { job: cleanData.raman_drive_sync }, cleanData.raman_drive_sync.owner_id);
         }
@@ -1088,17 +1055,20 @@ export function CharacterizationModal({
             res = await createCharacterizationAction({
                 group_id: groupId,
                 sample_id: sample.id,
+                record_id:saveRequestId.current,
                 type: finalType,
                 data: cleanData,
                 performed_at: performedAt ? new Date(performedAt).toISOString() : undefined
             });
         }
 
-        setIsSubmitting(false);
-
         if (res.error) {
+            await finishCharacterizationSave(groupId,assetSave,false,initialData?.id).catch(error=>toast.error(`Original files kept; staged files need review: ${error.message}`));
             toast.error(res.error);
         } else {
+            await finishCharacterizationSave(groupId,assetSave,res.created!==false,initialData?.id||res.id).catch(error=>toast.warning(`Record saved; previous file versions are retained for review: ${error.message}`));
+            if(res.created===false)toast.info('This measurement was already saved. Use Edit Record for further changes.');
+            if(cleanData.local_h5_paths)setH5RelativePaths(cleanData.local_h5_paths);
             // Save current parameter keys, units and values to localStorage for next autofill & load structure
             if (typeof window !== 'undefined') {
                 const paramsToSave = dataFields
@@ -1452,7 +1422,7 @@ export function CharacterizationModal({
                                                         const order: string[] = Array.isArray(data.__order__) ? data.__order__ : [];
                                                         const systemKeys = new Set(['equipment', 'notes', '__order__', 'file_origin',
                                                             'drive_file_link', 'local_h5_paths', 'original_files', 'local_h5_path',
-                                                            'original_file', 'raman_spectrum_file_id', 'raman_drive_sync', 'wip_import', 'wip_archive_path', '__bulk_id__', 'file_metadata',
+                                                            'original_file', 'raman_spectrum_file_id', 'raman_drive_sync', 'asset_manifest', 'wip_import', 'wip_archive_path', '__bulk_id__', 'file_metadata',
                                                             'attached_images', 'attached_image']);
                                                         const separateUnit = (val: string): { v: string; u: string } => {
                                                             const m = val.match(/^([\d\.]+)\s*([a-zA-Z%μµ°Ω]+)$/);

@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient, getUser } from '@/lib/supabase/server';
-import { revalidatePath } from 'next/cache';
+import {createCharacterizationAction} from './actions';
 import type { WipSample } from './wip-types';
 import type { SpatialMap } from './wip-spatial';
 import type {WipImportHistory} from './wip-library';
@@ -71,13 +71,5 @@ export async function saveWipCharacterizationAction(input: {
     groupId: string; sampleId: string; recordId: string; data: Record<string, unknown>;
     type: 'Raman' | 'Optical Image'; performedAt?: string;
 }): Promise<{ id?: string; created?: boolean; error?: string }> {
-    try {
-        const client = await access(input.groupId);
-        const { data, error } = await (client as any).rpc('import_wip_characterization_safe', {
-            p_group_id:input.groupId,p_sample_id:input.sampleId,p_record_id:input.recordId,
-            p_data:input.data,p_type:input.type,p_performed_at:input.performedAt || null });
-        if (error) return { error:error.message };
-        revalidatePath(`/${input.groupId}/samples`);
-        return data;
-    } catch (error) { return { error:error instanceof Error ? error.message : 'Could not link the extracted data to this sample' }; }
+    return createCharacterizationAction({group_id:input.groupId,sample_id:input.sampleId,record_id:input.recordId,type:input.type,data:input.data,performed_at:input.performedAt});
 }

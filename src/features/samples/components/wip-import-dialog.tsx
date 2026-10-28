@@ -141,7 +141,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
                     if(result.created)imported++;else existing++;successful.add(item.id);
                     if(project.library){try{await wipRequest('library-record-import',{library_root:project.library.library_root,group_id:groupId,source_hash:project.sha256,record_id:result.id||extraction.record_id,sample_id:sample.id,object_ids:[item.id,...imageIds]});}catch{setError('Records were saved, but local history could not be updated. Cloud history will be checked when reopening.');}}
                     setHistory(current=>[...current,{id:result.id||extraction.record_id,sample_id:sample.id,source_hash:project.sha256,object_id:item.id,attached_ids:imageIds,sample_label:sample.sample_code||sample.display_id,sample}]);
-                    if(alive.current)update(item.id,{done:true,selected:false,result:result.created?'Imported':'Already imported — no duplicate created'});
+                    if(alive.current)update(item.id,{done:true,selected:false,result:result.warning?`Imported; ${result.warning}`:result.created?'Imported':'Already imported — no duplicate created'});
                 }catch(err){failed++;if(alive.current)update(item.id,{result:err instanceof Error?err.message:String(err)});}
             }
             if(alive.current){for(const [imageId,links] of Object.entries(importPlan.imageLinks)){if(links.length&&links.every(id=>successful.has(id)))update(imageId,{done:true,selected:false,result:`Attached to ${links.length} Raman record(s)`});}

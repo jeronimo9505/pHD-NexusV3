@@ -6,7 +6,7 @@ from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from test_wip_import import synthetic,temporary,ROOT
-from wip_library import initialize,register,list_projects,record_import,locate,inspect_managed,digest
+from wip_library import initialize,register,list_projects,record_import,locate,inspect_managed,digest,connection
 from readers.wip_project import close_session,get_session
 
 class LibraryTests(unittest.TestCase):
@@ -68,6 +68,19 @@ class LibraryTests(unittest.TestCase):
             base,source,root=self.setup_files(folder);stored=register(root,str(source))
             Path(stored['managed_path']).write_bytes(synthetic().replace(b'Same name',b'Else name'))
             with self.assertRaisesRegex(ValueError,'missing or changed'):inspect_managed(root,stored['sha256'])
+
+    def test_legacy_hash_directory_reopens_with_readable_portable_path(self):
+        with temporary() as folder:
+            base,source,root=self.setup_files(folder);stored=register(root,str(source))
+            readable=Path(stored['managed_path']);legacy=Path(root)/'Projects'/stored['sha256']/readable.name
+            legacy.parent.mkdir();readable.rename(legacy)
+            with connection(Path(root)) as db:
+                db.execute('UPDATE projects SET relative_path=? WHERE sha256=?',(legacy.relative_to(root).as_posix(),stored['sha256']))
+            opened=inspect_managed(root,stored['sha256'])
+            self.assertEqual(opened['library']['relative_path'],'Projects/project.wip')
+            self.assertEqual(digest(Path(opened['library']['managed_path'])),stored['sha256'])
+            close_session(opened['session'])
+            self.assertFalse(legacy.parent.exists())
 
     def test_missing_library_copy_can_be_reconnected(self):
         with temporary() as folder:

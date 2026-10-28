@@ -14,6 +14,7 @@ const client={from(table){calls.push(['from',table]);return {
 const context={exports:{},require(name){
     if(name==='@/lib/supabase/server')return{createClient:async()=>client,getUser:async()=>({id:'user'})};
     if(name==='next/cache')return{revalidatePath(){}};
+    if(name==='./actions')return{createCharacterizationAction:async input=>({id:input.record_id,created:true})};
     throw new Error(`Unexpected import ${name}`);
 }};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/features/samples/wip-actions.ts','utf8'),{

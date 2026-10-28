@@ -29,6 +29,8 @@ app = FastAPI(
 )
 from wip_api import router as wip_router
 app.include_router(wip_router)
+from vault_assets_api import router as vault_assets_router
+app.include_router(vault_assets_router)
 
 # Essential CORS
 app.add_middleware(
@@ -1257,210 +1259,14 @@ class RenameResponse(BaseModel):
 
 @app.post("/api/map/rename", response_model=RenameResponse)
 def rename_map_files(request: RenameRequest):
-    """
-    Renames physical H5 files when parameters are updated,
-    strictly retaining the original spot counter.
-    """
-    import re
-    import shutil
-    from processor import _build_vault_subpath
-    
-    vault_root = Path(request.vault_root)
-    renamed_paths = {}
-    
-    try:
-        for rel_path in request.h5_relative_paths:
-            old_abs_path = vault_root / rel_path
-            if not old_abs_path.exists():
-                print(f"Rename warning: file not found at {old_abs_path}")
-                continue
-                
-            # 1. Read existing H5 attributes to preserve and merge
-            existing_attrs = {}
-            try:
-                with h5py.File(old_abs_path, "r") as f:
-                    for k in f.attrs.keys():
-                        existing_attrs[k] = f.attrs[k]
-            except Exception as e:
-                print(f"Error reading attributes from {rel_path}: {e}")
-                
-            # Decode existing attributes if they are bytes/strings
-            def decode_val(val):
-                if isinstance(val, bytes):
-                    return val.decode("utf-8", "ignore")
-                return val
-                
-            existing_attrs = {k: decode_val(v) for k, v in existing_attrs.items()}
-            
-            # Merge existing attributes with new metadata
-            merged_metadata = {**existing_attrs, **request.metadata}
-            
-            # 2. Extract spot number from the old filename
-            old_name = old_abs_path.name
-            match = re.search(r'Spot(\d+)', old_name, re.IGNORECASE)
-            spot_str = f"Spot{match.group(1)}" if match else "Spot1"
-            
-            # 3. Build new filename
-            parts = []
-            sample = (
-                merged_metadata.get("sample_code") or
-                merged_metadata.get("sample_name") or
-                merged_metadata.get("sample_id") or "unknown"
-            )
-            # Sanitise: µ → u, strip anything not filename-safe, cap at 25 chars
-            def sanitise(val: str, maxlen: int = 25) -> str:
-                val = str(val).replace("µ", "u").replace("μ", "u")
-                val = re.sub(r'[^a-zA-Z0-9\-\.]', '', val)
-                return val[:maxlen]
-
-            def is_junk_value(val: str) -> bool:
-                """Return True for values that should NOT appear in the filename."""
-                v = str(val)
-                if len(v) > 60:                                  # too long → skip
-                    return True
-                if re.search(r'\.(txt|csv|mat|h5|hdf5)$', v, re.IGNORECASE):  # raw filename
-                    return True
-                if re.search(r'\d{4}-\d{2}-\d{2}', v):          # contains a date
-                    return True
-                if re.match(r'^\d+\.\d+\.\d+', v):               # version string x.y.z
-                    return True
-                if re.match(r'^\d+\.\d+$', v) and float(v) < 0.01:  # tiny float artifact
-                    return True
-                if '\\' in v or '/' in v:                         # filesystem path
-                    return True
-                return False
-
-            parts.append(sanitise(sample, 20))
-
-            technique = merged_metadata.get("technique", "raman")
-            parts.append(sanitise(technique.upper(), 10))
-
-            # Extract ordered custom keys
-            ordered_keys = merged_metadata.get("__order__", [])
-            if isinstance(ordered_keys, str):
-                import json
-                try:
-                    ordered_keys = json.loads(ordered_keys)
-                except Exception:
-                    ordered_keys = []
-
-            system_keys = {
-                'equipment', 'notes', '__order__', 'file_origin', 'drive_file_link',
-                'local_h5_paths', 'original_files', 'local_h5_path', 'original_file',
-                'raman_spectrum_file_id', '__bulk_id__', 'file_metadata', 'attached_images',
-                'attached_image', 'group_id', 'sample_id', 'sample_code', 'sample_name',
-                'logbook_name', 'technique', 'performed_at', 'created_at', 'updated_at',
-                'points', 'spectra', 'range', 'start_time', 'end_time',
-            }
-
-            params = {}
-            for k in ordered_keys:
-                if k in merged_metadata and k.lower() not in system_keys:
-                    params[k] = merged_metadata[k]
-
-            # Add any remaining non-system keys not already captured
-            for k, v in merged_metadata.items():
-                if k.lower() not in system_keys and k not in params:
-                    params[k] = v
-
-            # Append clean, short tokens — skip junk values
-            for k, v in params.items():
-                if not v:
-                    continue
-                raw = str(v)
-                if is_junk_value(raw):
-                    continue
-                clean_v = sanitise(raw, 20)
-                if clean_v:
-                    parts.append(clean_v)
-
-            parts.append(spot_str)
-
-            # Build filename and hard-cap at 150 chars stem to stay well under MAX_PATH
-            stem = "_".join(parts)
-            if len(stem) > 150:
-                # Keep sample id + technique + spot, truncate the middle
-                core = f"{parts[0]}_{parts[1]}"
-                tail = f"_{spot_str}"
-                budget = 150 - len(core) - len(tail)
-                middle = "_".join(parts[2:-1])[:max(0, budget)]
-                stem = f"{core}_{middle}{tail}" if middle else f"{core}{tail}"
-
-            new_filename = stem + ".h5"
-            
-            # 4. Determine new directory subpath
-            new_subpath = _build_vault_subpath(merged_metadata)
-            new_dir = vault_root / new_subpath
-            new_dir.mkdir(parents=True, exist_ok=True)
-            
-            new_abs_path = new_dir / new_filename
-            
-            # Ensure no overwrite if file with new name already exists
-            if new_abs_path.exists() and new_abs_path != old_abs_path:
-                stem = new_abs_path.stem
-                ext = new_abs_path.suffix
-                counter = 1
-                while new_abs_path.exists():
-                    new_abs_path = new_dir / f"{stem}_{counter}{ext}"
-                    counter += 1
-            # 5. Physically rename / move the file
-            if old_abs_path != new_abs_path:
-                shutil.move(str(old_abs_path), str(new_abs_path))
-
-            # 5b. Cascade rename: find pipeline children (_preprocessed*.h5) and
-            #     rename them to use the new stem, preserving the _preprocessed suffix.
-            old_stem = old_abs_path.stem  # e.g. "A12-B2-B1_RAMAN_..._Spot3"
-            new_stem = new_abs_path.stem  # e.g. "A12-B2-B1_RAMAN_..._Spot3" (new params)
-            if old_stem != new_stem:
-                # Search in the OLD directory for any sibling preprocessed files.
-                # They may still live in the old dir if the dir changed too.
-                search_dirs = {old_abs_path.parent, new_abs_path.parent}
-                for search_dir in search_dirs:
-                    if not search_dir.exists():
-                        continue
-                    for child_path in list(search_dir.glob(f"{re.escape(old_stem)}_preprocessed*.h5")):
-                        # Build new child name: replace old_stem prefix with new_stem
-                        child_suffix = child_path.name[len(old_stem):]  # e.g. "_preprocessed_1.h5"
-                        new_child_name = new_stem + child_suffix
-                        new_child_path = new_abs_path.parent / new_child_name
-                        try:
-                            shutil.move(str(child_path), str(new_child_path))
-                            child_rel = child_path.relative_to(vault_root).as_posix()
-                            new_child_rel = new_child_path.relative_to(vault_root).as_posix()
-                            renamed_paths[child_rel] = new_child_rel
-                            print(f"Cascade rename: {child_path.name} → {new_child_name}")
-                        except Exception as ce:
-                            print(f"Warning: could not cascade-rename {child_path}: {ce}")
-
-            # 6. Open the new file in r+ mode and update all attributes
-            try:
-                with h5py.File(new_abs_path, "r+") as f:
-                    for k, v in merged_metadata.items():
-                        if v is not None:
-                            try:
-                                if isinstance(v, (dict, list)):
-                                    import json
-                                    f.attrs[k] = json.dumps(v)
-                                else:
-                                    f.attrs[k] = str(v)
-                            except Exception:
-                                pass
-            except Exception as e:
-                print(f"Error updating new H5 attributes for {new_abs_path}: {e}")
-                
-            # Keep track of renamed path
-            new_rel_path = new_abs_path.relative_to(vault_root).as_posix()
-            renamed_paths[rel_path] = new_rel_path
-            
-        return RenameResponse(
-            success=True,
-            renamed_paths=renamed_paths,
-            message="Successfully renamed and updated local HDF5 files."
-        )
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"File renaming failed: {str(e)}")
+    # Compatibility adapter: use the same naming/staging implementation as both import paths.
+    # Original files remain until the caller confirms a database save through rename-finish.
+    from vault_assets import rename_prepare,root_path,bounded
+    metadata=dict(request.metadata)
+    if not metadata.get('group_id') and request.h5_relative_paths:
+        with h5py.File(bounded(root_path(request.vault_root),request.h5_relative_paths[0]),'r') as file:metadata['group_id']=str(file.attrs.get('group_id',''))
+    result=rename_prepare(request.vault_root,request.h5_relative_paths,metadata,[])
+    return RenameResponse(success=True,renamed_paths=result['renamed_paths'],message='Readable file copies prepared. Originals retained until save confirmation.')
 
 
 # =============================================================================

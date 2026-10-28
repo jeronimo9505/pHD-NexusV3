@@ -3,6 +3,7 @@ import { desktopDriveCommand, desktopDriveIdentity } from '@/lib/google/desktop-
 import { saveWipCharacterizationAction } from './wip-actions';
 import type { WipExtraction, WipSample } from './wip-types';
 import { characterizationParameters } from './wip-parameters';
+import {prepareCharacterizationSave,finishCharacterizationSave} from './characterization-assets';
 import { wipFileMetadata } from './raman-file-metadata';
 
 export async function wipRequest<T>(action: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -34,11 +35,15 @@ export async function saveWipExtraction(groupId: string, sample: WipSample, extr
         job.signature=await desktopDriveCommand('google_drive_sign_job',groupId,{job},userId);
         data.raman_drive_sync=job;
     }
+    const assetSave=await prepareCharacterizationSave(groupId,extracted.kind==='raman'?'Raman':'Optical Image',data,{
+        sample_id:sample.id,sample_code:sample.sample_code||sample.display_id,sample_name:sample.name,logbook_name:sample.logbooks?.name||'Samples'},extracted.record_id);
     const result=await saveWipCharacterizationAction({groupId,sampleId:sample.id,recordId:extracted.record_id,
-        type:extracted.kind==='raman'?'Raman':'Optical Image',data,
+        type:extracted.kind==='raman'?'Raman':'Optical Image',data:assetSave.data,
         performedAt:extracted.provenance.original_metadata?.trace_creation_time_utc});
-    if(result.error)throw new Error(`${result.error}. The local extraction is preserved; retry to link it.`);
+    if(result.error){await finishCharacterizationSave(groupId,assetSave,false,extracted.record_id);throw new Error(`${result.error}. Original extracted files are preserved for retry.`);}
+    let warning:string|undefined;
+    await finishCharacterizationSave(groupId,assetSave,result.created!==false,result.id).catch(error=>{warning=error instanceof Error?error.message:String(error);});
     if (!result.id) throw new Error('Supabase did not confirm the import. Retry this item.');
     if(result.created)window.dispatchEvent(new Event('phdnexus-raman-pending'));
-    return result;
+    return {...result,warning};
 }

@@ -13,53 +13,8 @@ import shutil
 
 
 def _build_h5_filename(metadata: Dict[str, Any], target_dir: Path) -> str:
-    """
-    Smart rename: {SampleCode}_{Technique}_{Param1}..._Spot{X}.h5
-    Falls back gracefully if metadata is missing. Auto-increments Spot {X}.
-    """
-    parts = []
-    
-    # Prefer sample_code or sample_name as the primary identifier
-    sample = metadata.get("sample_code") or metadata.get("sample_name") or metadata.get("analyte") or metadata.get("sample_id") or "unknown"
-    parts.append(str(sample)[:20])
-    
-    technique = metadata.get("technique", "raman")
-    parts.append(technique.upper())
-    
-    params = metadata.get("parameters", {})
-    if params:
-        # Append parameters with their exact strings (e.g. 70 uW, 1 s)
-        for k, v in params.items():
-            if v:
-                clean_v = str(v).replace(" ", "")
-                parts.append(clean_v)
-    else:
-        # Fallback for old endpoints
-        laser = metadata.get("laser_wavelength_nm")
-        if laser:
-            parts.append(f"{laser}nm")
-        power = metadata.get("laser_power_uw")
-        if power:
-            parts.append(f"{float(power):.1f}uW")
-
-    import re
-    existing_spots = []
-    if target_dir.exists():
-        for f in target_dir.glob("*.h5"):
-            # Check all .h5 files that start with the Sample code to count spots globally for this sample folder
-            if f.name.startswith(parts[0]):
-                match = re.search(r'Spot(\d+)\.h5$', f.name, re.IGNORECASE)
-                if match:
-                    existing_spots.append(int(match.group(1)))
-                    
-    next_spot = max(existing_spots) + 1 if existing_spots else 1
-    parts.append(f"Spot{next_spot}")
-    
-    filename = "_".join(parts) + ".h5"
-    
-    # Safely clean out invalid characters but keep greek micro symbols
-    filename = re.sub(r'[^a-zA-Z0-9_\-\.μµ]', '_', filename)
-    return filename
+    from vault_naming import measurement_filename
+    return measurement_filename(metadata,target_dir)
 
 
 def _clean_name(s: str) -> str:

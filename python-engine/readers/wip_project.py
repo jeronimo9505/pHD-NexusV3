@@ -255,6 +255,7 @@ class ProjectSession:
 
     def extract(self, object_id, image_ids, metadata, vault_root):
         from processor import _build_vault_subpath
+        from vault_naming import measurement_filename
         with self.lock:
             entry = self.entry(object_id)
             info = self.describe(entry, self.project.data.index(entry))
@@ -269,13 +270,20 @@ class ProjectSession:
             directory = (root / _build_vault_subpath(metadata)).resolve()
             directory.relative_to(root)
             directory.mkdir(parents=True, exist_ok=True)
-            target = directory / f"WIP_{record_id}{'.h5' if info['kind']=='raman' else '.hdf5'}"
+            extension='.h5' if info['kind']=='raman' else '.hdf5'
+            target=None
+            for candidate in directory.glob('*'+extension):
+                try:
+                    with h5py.File(candidate,'r') as existing:
+                        if existing.attrs.get('wip_import_key')==record_id:target=candidate;break
+                except OSError:continue
+            if target is None:target=directory/measurement_filename(metadata,directory,extension=extension)
             image_paths = []
             display_paths = []
             image_annotations = {}
             attached = image_ids if info['kind'] == 'raman' else [str(entry.id)]
             for image_id in attached:
-                image_path = directory / f'WIP_{record_id}_image_{image_id}.png'
+                image_path = directory / f'{target.stem}_image_{image_id}_original.png'
                 if not image_path.exists():
                     rgb = self.entry(image_id).array()
                     temporary = image_path.with_suffix(f'.{uuid.uuid4().hex}.tmp')
