@@ -1,4 +1,4 @@
-import { ramanDriveFetch } from '@/lib/google/desktop-drive';
+import { ramanDriveFetch, desktopDriveCommand } from '@/lib/google/desktop-drive';
 import { getPendingRamanReferencesAction, updateRamanReferenceSyncAction } from './raman-reference-actions';
 
 const active = new Set<string>();
@@ -16,6 +16,8 @@ export async function syncPendingRamanReferences(groupId: string, isCurrent = ()
             try {
             const job = (row.data as any)?.raman_drive_sync;
             if (!job?.payload || !job.name || !job.job_id) continue;
+            const verified = await desktopDriveCommand<boolean>('google_drive_verify_job', groupId, { job }, job.owner_id);
+            if (!verified) throw new Error('Reference was modified after saving. Save it again in Tauri before uploading.');
             let fileId: string = job.file_id;
             if (!fileId) {
                 const generated = await ramanDriveFetch('https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files', {}, groupId, job.owner_id);

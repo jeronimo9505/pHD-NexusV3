@@ -6,7 +6,7 @@ import { createCharacterizationAction, updateCharacterizationAction, getGroupCha
 import { toast } from 'sonner';
 import { X, Save, FileText, Plus, Trash2, Microscope, FileJson, ChevronUp, ChevronDown, Loader2, ExternalLink, FolderOpen, GripVertical, List, Activity, HardDrive, CheckCircle2, AlertCircle, Clipboard, Image, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { hasNativeDrive, desktopDriveIdentity } from '@/lib/google/desktop-drive';
+import { hasNativeDrive, desktopDriveIdentity, desktopDriveCommand } from '@/lib/google/desktop-drive';
 import { DesktopGoogleConnection } from '@/features/groups/components/desktop-google-connection';
 import { uploadFileToDrive } from '@/lib/google/upload';
 import { ensureAuth } from '@/lib/google/auth';
@@ -1064,6 +1064,8 @@ export function CharacterizationModal({
         if (hasNativeDrive() && cleanData.raman_drive_sync?.status === 'pending') {
             cleanData.raman_drive_sync = { ...cleanData.raman_drive_sync, job_id: crypto.randomUUID(), owner_id: (await desktopDriveIdentity(groupId)).userId, file_id: undefined, payload: { ...cleanData.raman_drive_sync.payload,
                 parameters: Object.fromEntries(Object.entries(cleanData).filter(([key]) => !['raman_drive_sync', 'raman_spectrum_file_id'].includes(key))) } };
+            cleanData.raman_drive_sync.signature = await desktopDriveCommand('google_drive_sign_job', groupId,
+                { job: cleanData.raman_drive_sync }, cleanData.raman_drive_sync.owner_id);
         }
         let res;
         if (initialData?.id) {

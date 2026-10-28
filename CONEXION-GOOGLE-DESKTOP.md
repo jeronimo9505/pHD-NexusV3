@@ -12,7 +12,9 @@ La renovación se serializa, respeta la caducidad con margen de un minuto, se re
 
 Raman conserva el enlace previo y guarda primero la caracterización en Supabase con `raman_drive_sync`: identidad del trabajo/usuario, estado pendiente, espectro representativo y parámetros. No sube H5 completos. El sincronizador procesa solo pendientes del usuario/grupo actuales, con sesión y membresía activa comprobadas en servidor.
 
-Se activa al guardar, conectar Google, recuperar internet, volver a la ventana y cada minuto. Se reserva un ID Drive y se guarda antes de subir; los reintentos usan el mismo ID. Un 409 requiere verificar que el archivo sea del mismo trabajo. El enlace se actualiza únicamente al confirmar Drive. La actualización compara la instantánea completa para no pisar ediciones concurrentes y retira el cuerpo pendiente al completar. Una referencia inaccesible no bloquea las demás.
+Se activa al guardar, conectar Google, recuperar internet, volver a la ventana y cada minuto. Se reserva un ID Drive y se guarda antes de subir; los reintentos usan el mismo ID. Un 409 requiere verificar que el archivo sea del mismo trabajo. El enlace se actualiza únicamente al confirmar Drive. La confirmación usa una función Postgres SECURITY INVOKER que bloquea la fila y combina los datos actuales para conservar ediciones concurrentes, sin enviar espectros en URL y retira el cuerpo pendiente al completar. Una referencia inaccesible no bloquea las demás.
+
+Cada pendiente está firmado con una clave del almacén seguro de este equipo. El sincronizador verifica la firma antes de subir, para impedir que una edición remota del JSON provoque escrituras no autorizadas con tu conexión Google. Las tareas deben reintentarse desde el equipo donde se guardaron.
 
 Las tareas sobreviven al cierre porque están en Supabase; se retoman al abrir la app y conectarse. No hay servicio de Windows que sincronice con la app cerrada. Se indica pendiente en el detalle y existe reintento explícito con errores visibles.
 
@@ -42,6 +44,6 @@ No se subieron referencias científicas reales como parte de las pruebas automat
 
 Base `pipeline-templates-cloud-2026-10-28` (`063fbe2`). Etiqueta final `google-desktop-renewal-2026-10-28`.
 
-Revertir con `git revert --no-commit pipeline-templates-cloud-2026-10-28..google-desktop-renewal-2026-10-28`, revisar, crear commit y publicar; recompilar desktop. No hay migración SQL. Los datos y pendientes permanecen. Usar **Desconectar en este equipo** antes de revertir para retirar la conexión Windows. Se excluyen `next-env.d.ts`, la captura del formulario y el JSON de credenciales.
+Revertir con `git revert --no-commit pipeline-templates-cloud-2026-10-28..google-desktop-renewal-2026-10-28`, revisar, crear commit y publicar; recompilar desktop. Migración aditiva aplicada: `db/changes/raman_reference_sync.sql`; pruebas RLS/reserva/confirmación/espectro grande/concurrencia con ROLLBACK: `db/tests/raman_reference_sync.sql`. Después de revertir la aplicación se puede retirar la función con `db/rollback/raman_reference_sync.sql`. Los datos y pendientes permanecen. Usar **Desconectar en este equipo** antes de revertir para retirar la conexión Windows. Se excluyen `next-env.d.ts`, la captura del formulario y el JSON de credenciales.
 
 Fuentes: [OAuth desktop Google](https://developers.google.com/identity/protocols/oauth2/native-app), [almacenes seguros keyring](https://docs.rs/keyring/3.6.3/keyring/).

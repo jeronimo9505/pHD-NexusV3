@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use hmac::{Hmac, Mac};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13,6 +14,72 @@ use tauri_plugin_shell::ShellExt;
 const SERVICE: &str = "phdnexus.google-drive.v1";
 const SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 static GATE: Mutex<()> = Mutex::new(());
+
+fn canonical_job(job: &serde_json::Value, user_id: &str) -> Result<Vec<u8>, String> {
+    if job.get("owner_id").and_then(|v| v.as_str()) != Some(user_id) {
+        return Err("Reference belongs to a different account".into());
+    }
+    serde_json::to_vec(
+        &serde_json::json!({ "job_id": job["job_id"], "owner_id": job["owner_id"],
+        "name": job["name"], "folder_id": job["folder_id"], "payload": job["payload"] }),
+    )
+    .map_err(|_| "Invalid reference payload".into())
+}
+
+#[tauri::command]
+pub async fn google_drive_sign_job(
+    user_id: String,
+    group_id: String,
+    job: serde_json::Value,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = GATE.lock().map_err(|_| "Connection is busy")?;
+        let credential = entry(&format!("signing:{}", identity(&user_id, &group_id)?))?;
+        let key = match credential.get_password() {
+            Ok(key) => key,
+            Err(keyring::Error::NoEntry) => {
+                let key = random();
+                credential
+                    .set_password(&key)
+                    .map_err(|_| "Cannot protect pending reference")?;
+                key
+            }
+            Err(_) => return Err("Cannot access reference signing key".into()),
+        };
+        let mut mac =
+            Hmac::<Sha256>::new_from_slice(key.as_bytes()).map_err(|_| "Cannot sign reference")?;
+        mac.update(&canonical_job(&job, &user_id)?);
+        Ok(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
+    })
+    .await
+    .map_err(|_| "Reference signing failed".to_string())?
+}
+
+#[tauri::command]
+pub async fn google_drive_verify_job(
+    user_id: String,
+    group_id: String,
+    job: serde_json::Value,
+) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = entry(&format!("signing:{}", identity(&user_id, &group_id)?))?
+            .get_password()
+            .map_err(|_| "Retry this reference from the computer where it was saved".to_string())?;
+        let signature = job
+            .get("signature")
+            .and_then(|v| v.as_str())
+            .ok_or("Reference is unsigned. Save it again in Tauri.")?;
+        let signature = URL_SAFE_NO_PAD
+            .decode(signature)
+            .map_err(|_| "Invalid reference signature")?;
+        let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes())
+            .map_err(|_| "Cannot verify reference")?;
+        mac.update(&canonical_job(&job, &user_id)?);
+        Ok(mac.verify_slice(&signature).is_ok())
+    })
+    .await
+    .map_err(|_| "Reference verification failed".to_string())?
+}
 #[derive(Serialize, Deserialize, Clone)]
 struct ClientConfig {
     client_id: String,
@@ -257,17 +324,32 @@ pub async fn google_drive_disconnect(user_id: String, group_id: String) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reference_signature_covers_payload_and_ignores_reservation() {
+        let mut job = serde_json::json!({"owner_id":"user", "job_id":"job", "name":"s.json", "payload":{"data":[1,2]}});
+        let original = canonical_job(&job, "user").unwrap();
+        job["file_id"] = serde_json::json!("reserved");
+        assert_eq!(original, canonical_job(&job, "user").unwrap());
+        job["payload"]["data"] = serde_json::json!([9, 9]);
+        assert_ne!(original, canonical_job(&job, "user").unwrap());
+        assert!(canonical_job(&job, "other-user").is_err());
+    }
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_secure_store_roundtrip() {
         let name = format!("probe-{}", random());
         let credential = keyring::Entry::new("phdnexus.google-drive.tests", &name).unwrap();
-        credential.set_password("synthetic-test-value-no-real-token").unwrap();
+        credential
+            .set_password("synthetic-test-value-no-real-token")
+            .unwrap();
         let retrieved = credential.get_password();
         let removed = credential.delete_credential();
         assert_eq!(retrieved.unwrap(), "synthetic-test-value-no-real-token");
         assert!(removed.is_ok());
-        assert!(matches!(credential.get_password(), Err(keyring::Error::NoEntry)));
+        assert!(matches!(
+            credential.get_password(),
+            Err(keyring::Error::NoEntry)
+        ));
     }
     #[test]
     fn random_pkce_and_identity() {

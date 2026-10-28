@@ -5,10 +5,10 @@ import ts from 'typescript';
 import crypto from 'node:crypto';
 const compile = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 const rows = [{ id: 'c1', data: { raman_drive_sync: { status: 'pending', job_id: 'job-1', name: 'reference.json', payload: { data: [{ x: 1, y: 2 }] } } } }];
-let networkFailure = true, uploads = [], writes = [], conflict = false;
+let networkFailure = true, uploads = [], writes = [], conflict = false, verified = true;
 const requests = [];
 const context = { exports: {}, Blob, crypto, require(name) {
-    if (name === '@/lib/google/desktop-drive') return { ramanDriveFetch: async (url, options = {}) => {
+    if (name === '@/lib/google/desktop-drive') return { desktopDriveCommand: async()=>verified, ramanDriveFetch: async (url, options = {}) => {
         requests.push(url);
         if (url.includes('generateIds')) return { ok: true, json: async () => ({ ids: ['stable-id'] }) };
         if (options.method === 'POST') {
@@ -44,7 +44,8 @@ assert.equal(writes.filter(w => w.complete).length, 1, 'only confirmed files are
 rows[0].data.raman_drive_sync.status = 'pending'; conflict = true;
 await assert.rejects(sync('group'), /different reference/);
 assert.equal(rows[0].data.raman_drive_sync.status, 'pending');
-let length = requests.length; await sync('group', () => false); assert.equal(requests.length, length);
+let length = requests.length; verified=false; await assert.rejects(sync('group'), /modified after saving/); assert.equal(requests.length,length); verified=true;
+await sync('group', () => false); assert.equal(requests.length, length);
 
 // Real token/fetch adapter: native detection, account scoping, one refresh on 401.
 let forceCalls = [], attempts = 0;
@@ -61,35 +62,31 @@ assert.deepEqual(forceCalls, [false, true]);
 await assert.rejects(adapter.exports.ramanDriveToken(undefined, false, 'other-user'), /Session changed/);
 delete adapter.window.__TAURI_INTERNALS__; assert.equal(adapter.exports.hasNativeDrive(), false, 'localhost alone is not native');
 
-// Execute the actual server snapshot update with concurrent edits and a changed job.
-let snapshot = { old: 'preserved', raman_spectrum_file_id: 'old-ref', raman_drive_sync: { job_id: 'job', owner_id: 'user', status: 'pending' } };
-let concurrent = false, member = true;
-const server = { exports: {}, console, require(name) {
-    if (name === '@/lib/supabase/server') return { getUser: async () => ({ id: 'user' }), createClient: async () => ({ from(table) {
-        let update, equals = [];
-        const query = { select() { return query; }, eq(k,v) { equals.push([k,v]); return query; }, update(v) { update=v; return query; },
-            single: async () => ({ data: { id: 'c', data: structuredClone(snapshot) } }),
-            maybeSingle: async () => {
-                if (table === 'group_members') return { data: member ? { id: 'membership' } : null };
-                assert.ok(equals.some(([k,v]) => k === 'data' && v === JSON.stringify(snapshot)));
-                if (concurrent) return { data: null };
-                snapshot = update.data; return { data: { id: 'c' } };
-            } };
-        return query;
-    } }) };
+// Server adapter: only small RPC parameters leave the server; Postgres concurrency
+// and RLS behavior are tested against the real DB in a ROLLBACK transaction.
+let member = true, rpcResult = {data:{fileId:'new-ref'}}, rpcCalls=[];
+const server = { exports: {}, require(name) {
+    if(name==='@/lib/supabase/server')return {
+        getUser:async()=>({id:'user'}),createClient:async()=>({
+            from(table){assert.equal(table,'group_members');const query={select(){return query;},eq(){return query;},maybeSingle:async()=>({data:member?{id:'m'}:null})};return query;},
+            rpc:async(name,params)=>{rpcCalls.push({name,params});return rpcResult;}
+        })
+    };
     throw Error(name);
-} };
+}};
 vm.runInNewContext(compile(fs.readFileSync('src/features/samples/raman-reference-actions.ts','utf8')),server);
-const update = server.exports.updateRamanReferenceSyncAction;
-result = await update({ groupId:'g', id:'c', jobId:'job', fileId:'new-ref' });
-assert.equal(result.fileId,'new-ref'); assert.equal(snapshot.raman_spectrum_file_id,'old-ref');
-concurrent=true; result=await update({ groupId:'g',id:'c',jobId:'job',fileId:'new-ref',complete:true });
-assert.equal(result.stale,true);assert.equal(snapshot.raman_spectrum_file_id,'old-ref');
-concurrent=false; result=await update({ groupId:'g',id:'c',jobId:'job',fileId:'new-ref',complete:true });
-assert.equal(snapshot.old,'preserved'); assert.equal(snapshot.raman_spectrum_file_id,'new-ref');
-assert.equal(snapshot.raman_drive_sync.status,'synced');assert.equal(snapshot.raman_drive_sync.payload,undefined);
-member=false;result=await update({groupId:'g',id:'c',jobId:'job',fileId:'new-ref'});assert.ok(result.error);
-console.log('Raman Drive: native refresh, no popup, durable retries, stable IDs, confirmation, scope and concurrent edits passed');
+const update=server.exports.updateRamanReferenceSyncAction;
+let confirmed=await update({groupId:'g',id:'c',jobId:'job',fileId:'new-ref',complete:true});
+assert.equal(confirmed.fileId,'new-ref');
+assert.equal(rpcCalls[0].name,'update_raman_reference_sync_safe');
+assert.equal(rpcCalls[0].params.p_complete,true);
+assert.equal(rpcCalls[0].params.p_job_id,'job');
+assert.equal(Object.keys(rpcCalls[0].params).length,5,'no spectrum snapshot in request URL');
+rpcResult={data:{stale:true}};assert.equal((await update({groupId:'g',id:'c',jobId:'job',fileId:'new-ref'})).stale,true);
+rpcResult={error:{message:'write rejected'}};assert.equal((await update({groupId:'g',id:'c',jobId:'job',fileId:'new-ref'})).error,'write rejected');
+member=false;const callsBefore=rpcCalls.length;assert.ok((await update({groupId:'g',id:'c',jobId:'job',fileId:'new-ref'})).error);assert.equal(rpcCalls.length,callsBefore);
+console.log('Raman Drive: native refresh, durable retries, stable IDs, confirmation, identity and scoped RPC passed');
+
 // Real Raman submit callback: preserve old link, enqueue before any Drive call,
 // and block a second click while Supabase is saving.
 const modal = fs.readFileSync('src/features/samples/components/characterization-modal.tsx','utf8');
@@ -98,7 +95,7 @@ let saveResolve, submitted=[], events=[], saveErrors=[];
 const { File } = await import('node:buffer');
 const submitContext = { exports:{}, Blob, File, crypto, console,
     submittingRef:{current:false},setIsSubmitting(){},type:'Raman',scriptsLoaded:true,
-    hasNativeDrive:()=>true,desktopDriveIdentity:async()=>({userId:'owner'}),isAddingCustomType:false,customTypeName:'',dataFields:[],initialData:{id:'existing',data:{raman_spectrum_file_id:'old-file'}},
+    hasNativeDrive:()=>true,desktopDriveIdentity:async()=>({userId:'owner'}),desktopDriveCommand:async()=> 'signature',isAddingCustomType:false,customTypeName:'',dataFields:[],initialData:{id:'existing',data:{raman_spectrum_file_id:'old-file'}},
     notes:'',equipment:'',fileOrigin:'',driveFileLink:'',h5RelativePaths:[],localFilePaths:[],fileMetadata:{},
     isDesktop:true,ramanSpectrum:'1 2\n3 4',performedAt:'',sample:{id:'sample',sample_code:'A1',name:'Example'},
     driveSettings:{sampleFolderId:'folder'},pastedImages:[],setParameterOrder(){},updateBatch:false,groupId:'group',

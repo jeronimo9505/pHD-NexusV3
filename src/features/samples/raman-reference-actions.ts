@@ -23,29 +23,18 @@ export async function getPendingRamanReferencesAction(groupId: string) {
     } catch { return { error: 'Could not read pending Raman references' }; }
 }
 
-// Compare the whole snapshot to avoid overwriting edits made during an upload.
+// Lock and merge inside Postgres: never put the spectrum snapshot in a URL.
 export async function updateRamanReferenceSyncAction(input: {
     groupId: string; id: string; jobId: string; fileId: string; complete?: boolean;
-}) {
+}): Promise<{ fileId?: string; stale?: boolean; error?: string }> {
     if (!/^[\w-]{1,200}$/.test(input.fileId) || !/^[\w-]{1,100}$/.test(input.jobId)) return { error: 'Invalid reference identifier' };
     try {
-        const { client, userId } = await access(input.groupId);
-        const { data: current, error } = await client.from('sample_characterizations')
-            .select('id, data, samples!inner(group_id)').eq('id', input.id).eq('samples.group_id', input.groupId).eq('type', 'Raman').single();
-        if (error || !current) return { error: 'Raman reference is unavailable' };
-        const data = current.data as Record<string, any>;
-        const job = data.raman_drive_sync;
-        if (job?.job_id !== input.jobId || job.status !== 'pending' || job.owner_id !== userId) return { stale: true };
-        if (!input.complete && job.file_id) return { fileId: job.file_id as string };
-        if (input.complete && job.file_id !== input.fileId) return { stale: true };
-        const updated = input.complete
-            ? { ...data, raman_spectrum_file_id: input.fileId, raman_drive_sync: {
-                job_id: input.jobId, owner_id: userId, status: 'synced', file_id: input.fileId, synced_at: new Date().toISOString() } }
-            : { ...data, raman_drive_sync: { ...job, file_id: input.fileId } };
-        const { data: written, error: writeError } = await client.from('sample_characterizations').update({ data: updated })
-            .eq('id', input.id).eq('data', JSON.stringify(current.data)).select('id').maybeSingle();
-        if (writeError) return { error: writeError.message };
-        if (!written) return { stale: true };
-        return { fileId: input.fileId };
+        const { client } = await access(input.groupId);
+        const { data, error } = await (client as any).rpc('update_raman_reference_sync_safe', {
+            p_group_id: input.groupId, p_id: input.id, p_job_id: input.jobId,
+            p_file_id: input.fileId, p_complete: Boolean(input.complete)
+        });
+        if (error) return { error: error.message };
+        return data as { fileId?: string; stale?: boolean };
     } catch { return { error: 'Could not confirm the Raman reference in Supabase' }; }
 }

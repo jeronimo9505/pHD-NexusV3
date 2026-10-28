@@ -14,7 +14,8 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .invoke_handler(tauri::generate_handler![open_local_folder, google_drive::google_drive_import_client,
       google_drive::google_drive_status, google_drive::google_drive_connect, google_drive::google_drive_token,
-      google_drive::google_drive_disconnect])
+      google_drive::google_drive_disconnect, google_drive::google_drive_sign_job,
+      google_drive::google_drive_verify_job])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
