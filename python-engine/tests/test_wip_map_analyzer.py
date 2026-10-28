@@ -27,11 +27,12 @@ class WipAnalyzerTests(unittest.TestCase):
             original=root/result['h5_relative_path'];renamed=original.with_name('WRONG_RAMAN_999nm_Spot1.h5');original.rename(renamed)
             relative=renamed.relative_to(root).as_posix()
             hidden=root/'.phdnexus-recovery'/'hidden.h5';hidden.parent.mkdir();shutil.copyfile(renamed,hidden)
+            with h5py.File(root/'Optical_Image.h5','w') as image:image.create_dataset('image/rgb_xy',data=np.zeros((2,2,3),dtype=np.uint8))
             with h5py.File(renamed,'r') as data:
                 values=data['spectrum/intensities'][:];axis=data['spectrum/wavenumbers'][:]
             with TestClient(app,base_url='http://127.0.0.1:8888') as client:
                 files=client.get('/api/vault-files',params={'vault_root':folder}).json()['files']
-                self.assertEqual(len(files),1,'Recovery copies must not appear as active maps')
+                self.assertEqual(len(files),1,'Recovery copies and image-only archives must not appear as active maps')
                 info=files[0];self.assertEqual(info['sample_code'],'A23-c3');self.assertIn('632.799987',info['parameters']['Laser'])
                 self.assertEqual(info['map_width'],item['shape'][0]);self.assertEqual(info['map_height'],item['shape'][1])
                 body={'vault_root':folder,'group_id':group,'paths':[relative]}

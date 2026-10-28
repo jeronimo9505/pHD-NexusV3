@@ -562,6 +562,8 @@ def list_vault_files(vault_root: str, group_id: str = None):
             continue
         try:
             with h5py.File(p, "r") as f:
+                if 'spectrum/intensities' not in f or 'spectrum/wavenumbers' not in f:
+                    continue
                 meta = dict(f.attrs)
                 
                 def decode_attr(val, default=""):
