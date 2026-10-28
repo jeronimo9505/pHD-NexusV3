@@ -741,6 +741,8 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 />
                             ) : mode === 'pipeline' ? (
                                 <PipelineEditor
+                                    key={groupId}
+                                    groupId={groupId}
                                     vaultRoot={vaultRoot}
                                     h5Path={selectedH5}
                                     onFileCreated={(file) => handleImport([file])}

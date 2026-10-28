@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { Play, Save, FolderOpen, Trash2, Plus, ChevronRight, Settings2, CheckCircle2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { usePipelineTemplates } from '../use-pipeline-templates';
 import { cn } from '@/lib/utils';
 import { SCIENCE_ENGINE_URL } from '@/lib/desktop';
 import dynamic from 'next/dynamic';
@@ -27,12 +29,13 @@ const LAYOUT_BASE = {
 };
 
 interface PipelineEditorProps {
+    groupId: string;
     vaultRoot: string;
     h5Path: string;
     onFileCreated?: (file: any) => void;
 }
 
-export function PipelineEditor({ vaultRoot, h5Path, onFileCreated }: PipelineEditorProps) {
+export function PipelineEditor({ groupId, vaultRoot, h5Path, onFileCreated }: PipelineEditorProps) {
     const [steps, setSteps] = useState<any[]>([]);
     const [originalData, setOriginalData] = useState<any[]>([]);
     const [processedData, setProcessedData] = useState<any[]>([]);
@@ -42,18 +45,12 @@ export function PipelineEditor({ vaultRoot, h5Path, onFileCreated }: PipelineEdi
     const [activeStepIndex, setActiveStepIndex] = useState<number | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [savedTemplates, setSavedTemplates] = useState<Record<string, any[]>>({});
+    const templateStore = usePipelineTemplates(groupId);
+    const savedTemplates = templateStore.templates;
     const [showTemplates, setShowTemplates] = useState(false);
     const [activeTemplateName, setActiveTemplateName] = useState<string | null>(null);
     const [saveNameInput, setSaveNameInput] = useState('');
     const [showSaveInput, setShowSaveInput] = useState(false);
-    
-    useEffect(() => {
-        const t = localStorage.getItem('phdnexus_pipeline_templates');
-        if (t) {
-            try { setSavedTemplates(JSON.parse(t)); } catch(e){}
-        }
-    }, []);
     
     useEffect(() => {
         setOriginalData([]);
@@ -193,15 +190,18 @@ export function PipelineEditor({ vaultRoot, h5Path, onFileCreated }: PipelineEdi
         }
     };
 
-    const saveTemplate = (name?: string) => {
-        const finalName = name || saveNameInput.trim();
+    const saveTemplate = async (name?: string) => {
+        const finalName = (name || saveNameInput).trim();
         if (!finalName) return;
-        const newTemplates = { ...savedTemplates, [finalName]: steps };
-        setSavedTemplates(newTemplates);
-        localStorage.setItem('phdnexus_pipeline_templates', JSON.stringify(newTemplates));
-        setActiveTemplateName(finalName);
-        setSaveNameInput('');
-        setShowSaveInput(false);
+        try {
+            if (!await templateStore.save(finalName, steps)) return;
+            setActiveTemplateName(finalName);
+            setSaveNameInput('');
+            setShowSaveInput(false);
+            toast.success('Template saved to Supabase');
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Could not save template');
+        }
     };
 
     const saveTemplateChanges = () => {
@@ -314,7 +314,7 @@ export function PipelineEditor({ vaultRoot, h5Path, onFileCreated }: PipelineEdi
                                 <div className="text-xs font-bold text-indigo-700">{activeTemplateName}</div>
                             </div>
                             {JSON.stringify(savedTemplates[activeTemplateName]) !== JSON.stringify(steps) && (
-                                <button onClick={saveTemplateChanges} className="text-[9px] font-bold bg-indigo-600 text-white px-2 py-1 rounded-md hover:bg-indigo-700 transition-colors whitespace-nowrap">
+                                <button disabled={templateStore.loading || templateStore.saving || !!templateStore.error} onClick={saveTemplateChanges} className="text-[9px] font-bold bg-indigo-600 text-white px-2 py-1 rounded-md hover:bg-indigo-700 transition-colors whitespace-nowrap">
                                     Guardar Cambios
                                 </button>
                             )}
@@ -331,7 +331,7 @@ export function PipelineEditor({ vaultRoot, h5Path, onFileCreated }: PipelineEdi
                                 placeholder="Nombre del template..."
                                 className="flex-1 text-xs border border-slate-300 rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400"
                             />
-                            <button onClick={() => saveTemplate()} className="px-2 py-1 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors">
+                            <button disabled={templateStore.loading || templateStore.saving || !!templateStore.error} onClick={() => saveTemplate()} className="px-2 py-1 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors">
                                 OK
                             </button>
                         </div>
@@ -464,8 +464,25 @@ export function PipelineEditor({ vaultRoot, h5Path, onFileCreated }: PipelineEdi
                                 <h4 className="font-bold text-slate-800">Pipeline Templates</h4>
                                 <button onClick={() => setShowTemplates(false)} className="text-slate-400 hover:text-slate-600">✕</button>
                             </div>
+                            <div className="px-4 py-3 text-xs text-slate-500 space-y-2" aria-live="polite">
+                                <p>{templateStore.loading ? 'Loading from Supabase…' : templateStore.saving ? 'Saving to Supabase…' : 'Templates saved in Supabase · shared with this group'}</p>
+                                {templateStore.error && <p role="alert">{templateStore.error} <button onClick={templateStore.retry} className="underline">Retry</button></p>}
+                                {templateStore.localCount > 0 && <button
+                                    disabled={templateStore.loading || templateStore.saving || !!templateStore.error}
+                                    className="text-indigo-600 underline disabled:opacity-50"
+                                    onClick={async () => {
+                                        try {
+                                            const count = await templateStore.importLocal();
+                                            toast.success(`${count} local templates copied to this group. Local backup retained.`);
+                                        } catch (err) {
+                                            toast.error(err instanceof Error ? err.message : 'Import failed. You can retry.');
+                                        }
+                                    }}>
+                                    Copy {templateStore.localCount} local templates to this group
+                                </button>}
+                            </div>
                             <div className="p-2 max-h-96 overflow-y-auto">
-                                {Object.keys(savedTemplates).length === 0 ? (
+                                {!templateStore.loading && !templateStore.error && Object.keys(savedTemplates).length === 0 ? (
                                     <div className="p-8 text-center text-slate-400 text-sm">No saved templates yet</div>
                                 ) : (
                                     Object.keys(savedTemplates).map(name => (

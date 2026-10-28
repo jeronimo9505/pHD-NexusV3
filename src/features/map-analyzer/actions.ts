@@ -100,7 +100,8 @@ export async function deleteRamanWorkspaceAction(id: string, groupId: string) {
 }
 
 export async function getPipelineTemplatesAction(groupId: string) {
-    const supabase = await createClient();
+    const { supabase, user, error: accessError } = await getPipelineAccess(groupId);
+    if (accessError) return { error: accessError };
     const { data, error } = await (supabase as any)
         .from('pipeline_templates')
         .select('*')
@@ -117,12 +118,16 @@ export async function savePipelineTemplateAction(input: {
     steps: any[];
     id?: string;
 }) {
-    const supabase = await createClient();
-    const user = await getUser();
+    if (!input.name?.trim() || input.name.trim().length > 200 || !Array.isArray(input.steps)
+        || input.steps.length > 100 || JSON.stringify(input.steps).length > 100000) {
+        return { error: 'Invalid template name or steps' };
+    }
+    const { supabase, user, error: accessError } = await getPipelineAccess(input.group_id);
+    if (accessError) return { error: accessError };
 
     const payload: any = {
         group_id: input.group_id,
-        name: input.name,
+        name: input.name.trim(),
         steps: input.steps,
         updated_at: new Date().toISOString()
     };
@@ -137,6 +142,7 @@ export async function savePipelineTemplateAction(input: {
             .from('pipeline_templates')
             .update(payload)
             .eq('id', input.id)
+            .eq('group_id', input.group_id)
             .select()
             .single();
     } else {
@@ -149,7 +155,9 @@ export async function savePipelineTemplateAction(input: {
 
     if (res.error) {
         console.error("Error saving pipeline template:", res.error);
-        return { error: res.error.message };
+        return { error: res.error.code === '23505'
+            ? 'A template with this name already exists. Reload templates before retrying.'
+            : res.error.message };
     }
 
     revalidatePath(`/${input.group_id}/map-analyzer`);
@@ -157,11 +165,13 @@ export async function savePipelineTemplateAction(input: {
 }
 
 export async function deletePipelineTemplateAction(id: string, groupId: string) {
-    const supabase = await createClient();
+    const { supabase, error: accessError } = await getPipelineAccess(groupId);
+    if (accessError) return { error: accessError };
     const { error } = await (supabase as any)
         .from('pipeline_templates')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('group_id', groupId);
 
     if (error) return { error: error.message };
 
@@ -169,3 +179,12 @@ export async function deletePipelineTemplateAction(id: string, groupId: string) 
     return { success: true };
 }
 
+
+async function getPipelineAccess(groupId: string) {
+    const supabase = await createClient();
+    const user = await getUser();
+    if (!user || !groupId) return { supabase, user, error: 'Sign in to access group templates' };
+    const { data, error } = await supabase.from('group_members').select('id')
+        .eq('group_id', groupId).eq('user_id', user.id).eq('status', 'active').maybeSingle();
+    return { supabase, user, error: error || !data ? 'Active group membership is required' : null };
+}
