@@ -17,6 +17,7 @@ from readers.witec import read_witec_txt
 from readers.matlab import read_matlab_mat
 from readers.lightnovo import read_mrspectra
 from processor import convert_to_h5, generate_preview, get_representative_spectrum
+from vault_naming import parameters as measurement_parameters
 import h5py
 import numpy as np
 from scipy.signal import savgol_filter
@@ -555,8 +556,10 @@ def list_vault_files(vault_root: str, group_id: str = None):
         return {"success": False, "files": []}
 
     files = []
-    # Use rglob for recursive finding
+    # Recovery and staging files are not active scientific acquisitions.
     for p in search_path.rglob("*.h5"):
+        if any(part.startswith(".") for part in p.relative_to(root_path).parts):
+            continue
         try:
             with h5py.File(p, "r") as f:
                 meta = dict(f.attrs)
@@ -587,6 +590,9 @@ def list_vault_files(vault_root: str, group_id: str = None):
                     "h5_relative_path": rel_path,
                     "name": p.name,
                     "sample_name": decode_attr(meta.get("sample_name") or meta.get("sample_code", "Unknown")).strip(),
+                    "sample_id": decode_attr(meta.get("sample_id", "")).strip(),
+                    "sample_code": decode_attr(meta.get("sample_code", "")).strip(),
+                    "parameters": measurement_parameters(meta),
                     "technique": decode_attr(meta.get("technique", "Unknown")).strip(),
                     "measured_at": decode_attr(meta.get("measured_at", "")).strip(),
                     "created_at": decode_attr(meta.get("created_at", "")),
@@ -1041,6 +1047,9 @@ def apply_pipeline_to_file(request: PipelineApplyRequest):
             "h5_relative_path": relative_path,
             "name": new_filename,
             "sample_name": decode_attr(metadata.get("sample_name") or metadata.get("sample_code", "Unknown")).strip(),
+            "sample_id": decode_attr(metadata.get("sample_id", "")).strip(),
+            "sample_code": decode_attr(metadata.get("sample_code", "")).strip(),
+            "parameters": measurement_parameters(metadata),
             "technique": decode_attr(metadata.get("technique", "raman")).strip(),
             "measured_at": decode_attr(metadata.get("measured_at", "")).strip(),
             "created_at": decode_attr(metadata.get("processed_at", "")).strip(),
@@ -1225,6 +1234,9 @@ def group_map_files(request: GroupRequest):
             "h5_relative_path": relative_path,
             "name": target_path.name,
             "sample_name": base_metadata.get("sample_name") or base_metadata.get("sample_code", "Unknown"),
+            "sample_id": str(base_metadata.get("sample_id", "")),
+            "sample_code": str(base_metadata.get("sample_code", "")),
+            "parameters": measurement_parameters(base_metadata),
             "technique": base_metadata.get("technique", "raman"),
             "measured_at": base_metadata.get("measured_at") or base_metadata.get("created_at") or "",
             "created_at": base_metadata["created_at"],
@@ -2102,6 +2114,9 @@ def rgi_save_results(request: RgiSaveRequest):
                 "h5_relative_path": relative_path,
                 "name": target_path.name,
                 "sample_name": decode_attr(meta.get("sample_name") or meta.get("sample_code", "Unknown")).strip(),
+                "sample_id": decode_attr(meta.get("sample_id", "")).strip(),
+                "sample_code": decode_attr(meta.get("sample_code", "")).strip(),
+                "parameters": measurement_parameters(meta),
                 "technique": decode_attr(meta.get("technique", "Unknown")).strip(),
                 "measured_at": decode_attr(meta.get("measured_at", "")).strip(),
                 "created_at": decode_attr(meta.get("created_at", "")),
@@ -2498,6 +2513,9 @@ def _rgi2_file_details(vault_root_path: Path, target_path: Path) -> dict:
         "h5_relative_path": relative_path,
         "name": target_path.name,
         "sample_name": _decode_h5_attr(meta.get("sample_name") or meta.get("sample_code", "Unknown")).strip(),
+        "sample_id": _decode_h5_attr(meta.get("sample_id", "")).strip(),
+        "sample_code": _decode_h5_attr(meta.get("sample_code", "")).strip(),
+        "parameters": measurement_parameters(meta),
         "technique": _decode_h5_attr(meta.get("technique", "Unknown")).strip(),
         "measured_at": _decode_h5_attr(meta.get("measured_at", "")).strip(),
         "created_at": _decode_h5_attr(meta.get("created_at", "")),

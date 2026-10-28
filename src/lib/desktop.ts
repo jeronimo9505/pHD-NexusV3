@@ -179,6 +179,9 @@ export async function fetchVaultFiles(vaultRoot: string, groupId?: string): Prom
         h5_relative_path: string;
         name: string;
         sample_name: string;
+        sample_id?: string;
+        sample_code?: string;
+        parameters?: Record<string, unknown>;
         technique: string;
         measured_at: string;
         created_at: string;

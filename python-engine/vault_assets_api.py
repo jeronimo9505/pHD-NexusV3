@@ -26,6 +26,8 @@ class Finish(Restore):
 def describe(request:Paths):return call(lambda:vault_assets.describe(request.vault_root,request.paths,str(request.group_id)))
 @router.post('/resolve')
 def resolve(request:Paths):return call(lambda:vault_assets.resolve_paths(request.vault_root,request.paths))
+@router.post('/workspace-metadata')
+def workspace_metadata(request:Paths):return call(lambda:vault_assets.workspace_metadata(request.vault_root,request.paths,str(request.group_id)))
 @router.post('/audit')
 def audit(request:Audit):return call(lambda:vault_assets.audit(request.vault_root,request.paths,str(request.group_id)))
 @router.post('/quarantine')

@@ -85,6 +85,20 @@ def describe(vault_root,paths,group_id):
     root=root_path(vault_root)
     return {'version':1,'assets':[describe_one(root,path,group_id) for path in dict.fromkeys(paths)]}
 
+def workspace_metadata(vault_root,paths,group_id):
+    """Read acquisition headers and array shapes, without hashing/loading spectral arrays."""
+    root=root_path(vault_root);files=[]
+    for relative in dict.fromkeys(paths):
+        path=bounded(root,relative)
+        with h5py.File(path,'r') as file:
+            attrs={str(key):parsed(value) for key,value in file.attrs.items() if key not in ('asset_manifest','raman_drive_sync')}
+            if attrs.get('group_id') and str(attrs['group_id'])!=str(group_id):raise ValueError('This asset belongs to another group')
+            array=file['spectrum/intensities']
+            files.append({'h5_relative_path':relative,'sample_id':str(attrs.get('sample_id','')),'sample_code':str(attrs.get('sample_code','')),
+                'parameters':parameters(attrs),'map_width':int(attrs.get('map_width',0)),'map_height':int(attrs.get('map_height',0)),
+                'n_spectra':int(array.shape[0]) if array.ndim>1 else 1})
+    return {'files':files}
+
 def audit(vault_root,referenced_paths,group_id):
     root=root_path(vault_root);linked=set();assets=[];errors=[]
     for value in referenced_paths:

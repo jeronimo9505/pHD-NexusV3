@@ -16,6 +16,7 @@ import {
     deleteRamanWorkspaceAction 
 } from '../actions';
 import { cn } from '@/lib/utils';
+import { measurementChips, reviewedMeasurementParameters, laserAppearance } from '../workspace-display';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -30,6 +31,9 @@ interface VaultFile {
     h5_relative_path: string;
     name: string;
     sample_name: string;
+    sample_id?: string;
+    sample_code?: string;
+    parameters?: Record<string, unknown>;
     technique: string;
     measured_at: string;
     created_at: string;
@@ -265,7 +269,7 @@ export function VaultExplorerModal({
                         h5Paths.forEach((path: string) => {
                             const fileName = path.split(/[/\\]/).pop() || 'Untitled';
                             const fileMeta = meta[path] || {};
-                            const params = c.data || {};
+                            const params = {...c.data, ...reviewedMeasurementParameters(c.data || {})};
                             
                             const findKey = (searchStr: string) => {
                                 const keys = Object.keys(params);
@@ -277,13 +281,16 @@ export function VaultExplorerModal({
                                 id: `${c.id}-${path}`,
                                 h5_relative_path: path,
                                 name: fileName,
-                                sample_name: sample.sample_code || sample.name,
+                                sample_name: sample.name,
+                    sample_id: sample.id,
+                    sample_code: sample.sample_code,
+                    parameters: reviewedMeasurementParameters(c.data || {}),
                                 technique: 'Raman',
                                 measured_at: c.performed_at || c.created_at,
                                 created_at: c.created_at,
                                 n_spectra: fileMeta.spectra || 0,
-                                map_width: fileMeta.range?.x || 0,
-                                map_height: fileMeta.range?.y || 0,
+                                map_width: fileMeta.grid?.x || fileMeta.range?.x || 0,
+                                map_height: fileMeta.grid?.y || fileMeta.range?.y || 0,
                                 metadata: {
                                     laser: findKey('laser'),
                                     power: findKey('power'),
@@ -322,7 +329,7 @@ export function VaultExplorerModal({
             h5Paths.forEach((path: string) => {
                 const fileName = path.split(/[/\\]/).pop() || 'Untitled';
                 const fileMeta = meta[path] || {};
-                const params = c.data || {};
+                const params = {...c.data, ...reviewedMeasurementParameters(c.data || {})};
                 
                 const findKey = (search: string) => {
                     const keys = Object.keys(params);
@@ -334,13 +341,16 @@ export function VaultExplorerModal({
                     id: `${c.id}-${path}`,
                     h5_relative_path: path,
                     name: fileName,
-                    sample_name: sample.sample_code || sample.name,
+                    sample_name: sample.name,
+                    sample_id: sample.id,
+                    sample_code: sample.sample_code,
+                    parameters: reviewedMeasurementParameters(c.data || {}),
                     technique: 'Raman',
                     measured_at: c.performed_at || c.created_at,
                     created_at: c.created_at,
                     n_spectra: fileMeta.spectra || 0,
-                    map_width: fileMeta.range?.x || 0,
-                    map_height: fileMeta.range?.y || 0,
+                    map_width: fileMeta.grid?.x || fileMeta.range?.x || 0,
+                    map_height: fileMeta.grid?.y || fileMeta.range?.y || 0,
                     metadata: {
                         laser: findKey('laser'),
                         power: findKey('power'),
@@ -924,19 +934,12 @@ export function VaultExplorerModal({
                                                             const isSelected = selectedPaths.has(file.h5_relative_path);
                                                             const isInWorkspace = currentSessionFiles.some(f => f.h5_relative_path === file.h5_relative_path);
                                                             
-                                                            // Parse filename tokens: SampleCode_TECHNIQUE_param1_param2..._SpotN.h5
-                                                            const stem = file.name.replace(/\.h5$/i, '');
-                                                            const parts = stem.split('_');
-                                                            const spotIdx = parts.findLastIndex((p: string) => /^spot\d+$/i.test(p));
-                                                            const spotToken = spotIdx >= 0 ? parts[spotIdx] : null;
-                                                            const techIdx = parts.findIndex((p: string) => /^(raman|sers|tem|xrd|afm|sem|xps|ftir)$/i.test(p));
-                                                            const techToken = techIdx >= 0 ? parts[techIdx] : file.technique;
-                                                            const idToken = parts[0] || file.sample_name;
-                                                            const paramTokens = parts.slice(
-                                                                Math.max(1, techIdx >= 0 ? techIdx + 1 : 1),
-                                                                spotIdx >= 0 ? spotIdx : undefined
-                                                            ).filter((p: string) => p.length > 0);
-                                                            
+                                                            const parsed = measurementChips(file);
+                                                            const spotToken = parsed.spot;
+                                                            const techToken = file.technique;
+                                                            const idToken = file.sample_code || file.sample_name;
+                                                            const paramTokens = parsed.chips;
+
                                                             return (
                                                                 <div 
                                                                     key={file.id}
@@ -981,27 +984,18 @@ export function VaultExplorerModal({
 
                                                                     {/* Parameters col */}
                                                                     <div className="flex items-center gap-1 flex-wrap min-w-0">
-                                                                        {paramTokens.slice(0, 6).map((p: string, i: number) => (
+                                                                        {paramTokens.slice(0, 8).map((chip, i: number) => (
                                                                             <span
                                                                                 key={i}
-                                                                                className={cn(
-                                                                                    "text-[9px] font-semibold px-1.5 py-0.5 rounded-md whitespace-nowrap",
-                                                                                    // Color-code by token type
-                                                                                    /^\d+nm$/i.test(p) ? "bg-amber-50 text-amber-700 border border-amber-200" :      // laser wavelength
-                                                                                    /^\d+[uμm]W$/i.test(p) ? "bg-rose-50 text-rose-700 border border-rose-200" :      // power
-                                                                                    /^\d+[sx]$/i.test(p) || /^\d+s$/i.test(p) ? "bg-sky-50 text-sky-700 border border-sky-200" :  // time
-                                                                                    /^\d+ac$/i.test(p) ? "bg-sky-50 text-sky-700 border border-sky-200" :             // accumulations
-                                                                                    /^\d+x\d+[uμ]m$/i.test(p) ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : // area
-                                                                                    /^\d+x\d+[ij]$/i.test(p) ? "bg-teal-50 text-teal-700 border border-teal-200" :    // grid
-                                                                                    /^RG?\d+/i.test(p) ? "bg-orange-50 text-orange-700 border border-orange-200" :    // grating
-                                                                                    "bg-slate-100 text-slate-600 border border-slate-200"
-                                                                                )}
+                                                                                title={chip.type === 'laser' ? laserAppearance(chip.label).band : chip.type}
+                                                                                className={cn('px-1.5 py-0.5 rounded border text-[10px] font-medium', chip.type === 'laser' ? laserAppearance(chip.label).className : 'bg-slate-50 text-slate-700 border-slate-200')}
+
                                                                             >
-                                                                                {p}
+                                                                                {chip.label}{chip.type === 'laser' && ['UV', 'NIR', 'IR'].includes(laserAppearance(chip.label).band) ? ` · ${laserAppearance(chip.label).band}` : ''}
                                                                             </span>
                                                                         ))}
-                                                                        {paramTokens.length > 6 && (
-                                                                            <span className="text-[9px] text-slate-400 font-bold">+{paramTokens.length - 6}</span>
+                                                                        {paramTokens.length > 8 && (
+                                                                            <span className="text-[9px] text-slate-400 font-bold">+{paramTokens.length - 8}</span>
                                                                         )}
                                                                     </div>
 

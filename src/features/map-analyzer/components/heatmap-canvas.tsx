@@ -12,6 +12,7 @@ interface HeatmapProps {
     mapWidth: number;
     mapHeight: number;
     stepSize?: number;
+    physicalSize?: {width: number; height: number};
     nSpectra: number;
     wavenumberRange?: [number, number];
     selectedPixelIndex: number;
@@ -23,7 +24,7 @@ interface HeatmapProps {
 }
 
 export function HeatmapCanvas({
-    vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1.0, nSpectra, wavenumberRange, selectedPixelIndex, onPixelSelect, onToggleGraphene, onUpdateDimensions, isDismissed, onDismiss
+    vaultRoot, h5Path, mapWidth, mapHeight, stepSize = 1.0, physicalSize, nSpectra, wavenumberRange, selectedPixelIndex, onPixelSelect, onToggleGraphene, onUpdateDimensions, isDismissed, onDismiss
 }: HeatmapProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -216,7 +217,7 @@ export function HeatmapCanvas({
                         "text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase",
                         isMetadataMismatch && !isUserOverridden ? "bg-amber-100 text-amber-700 animate-pulse" : "text-slate-500"
                     )}>
-                        Grid: {w}×{h} px | {Math.round(w * stepSize)}×{Math.round(h * stepSize)} µm
+                        Grid: {w}×{h} px | {physicalSize ? `${Number(physicalSize.width.toFixed(2))}×${Number(physicalSize.height.toFixed(2))} µm` : `${Math.round(w * stepSize)}×${Math.round(h * stepSize)} µm (step setting)`}
                     </span>
                     {wavenumberRange && (
                         <div className="flex items-center gap-1.5 ml-2">

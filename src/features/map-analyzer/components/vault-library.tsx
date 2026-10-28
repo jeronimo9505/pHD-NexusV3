@@ -9,6 +9,7 @@ import {
     Bookmark, History
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { resolveWorkspaceSample, measurementChips, laserAppearance, type ChipType } from '../workspace-display';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
@@ -22,6 +23,9 @@ interface VaultFile {
     h5_relative_path: string;
     name: string;
     sample_name: string;
+    sample_id?: string;
+    sample_code?: string;
+    parameters?: Record<string, unknown>;
     technique: string;
     measured_at: string;
     created_at: string;
@@ -43,6 +47,7 @@ interface SampleGroup {
     name: string;
     displayName: string;
     sampleCode?: string;
+    parentCode?: string;
     composition?: { category: string; value: string; code: string }[];
     description?: string;
     status?: string;
@@ -190,12 +195,14 @@ const isPipelineFile = (f: VaultFile) =>
 const getAncestors = (file: VaultFile, allFiles: VaultFile[]): string[] => {
     const ancestors = [file.h5_relative_path];
     let current = file;
+    const visited = new Set([file.h5_relative_path]);
     
     while (true) {
         // 1. Try metadata parent_file first
         if (current.parent_file) {
             const parent = allFiles.find(f => f.h5_relative_path === current.parent_file);
-            if (parent) {
+            if (parent && !visited.has(parent.h5_relative_path)) {
+                visited.add(parent.h5_relative_path);
                 ancestors.push(parent.h5_relative_path);
                 current = parent;
                 continue;
@@ -209,7 +216,8 @@ const getAncestors = (file: VaultFile, allFiles: VaultFile[]): string[] => {
         if (match && match.index !== undefined && match.index > 0) {
             const parentStem = currentStem.substring(0, match.index);
             const parent = allFiles.find(f => f.name.replace(/\.h5$/i, '').toLowerCase() === parentStem.toLowerCase());
-            if (parent) {
+            if (parent && !visited.has(parent.h5_relative_path)) {
+                visited.add(parent.h5_relative_path);
                 ancestors.push(parent.h5_relative_path);
                 current = parent;
                 continue;
@@ -222,11 +230,10 @@ const getAncestors = (file: VaultFile, allFiles: VaultFile[]): string[] => {
     return ancestors;
 };
 
-const getUltimateParentStem = (file: VaultFile, allFiles: VaultFile[]) => {
+const getUltimateParentPath = (file: VaultFile, allFiles: VaultFile[]) => {
     const ancestors = getAncestors(file, allFiles);
     const ultimateParentPath = ancestors[ancestors.length - 1];
-    const ultimateParent = allFiles.find(f => f.h5_relative_path === ultimateParentPath);
-    return ultimateParent ? ultimateParent.name.replace(/\.h5$/i, '') : file.name.replace(/\.h5$/i, '');
+    return ultimateParentPath;
 };
 
 export function VaultLibrary({ 
@@ -269,6 +276,7 @@ export function VaultLibrary({
     onGroupFiles?: (files: VaultFile[]) => void;
 }) {
     const [search, setSearch] = useState('');
+    const [sessionsOpen, setSessionsOpen] = useState(false);
     const [expandedSamples, setExpandedSamples] = useState<Record<string, boolean>>({});
     const [openOverview, setOpenOverview] = useState<string | null>(null);
     const [overviewPosition, setOverviewPosition] = useState({ top: 0, left: 0 });
@@ -282,22 +290,20 @@ export function VaultLibrary({
 
     const groupedData = useMemo(() => {
         // ── helpers ──────────────────────────────────────────────────────────
-        const getStem = (f: VaultFile) => f.name.replace(/\.h5$/i, '');
 
         // ── group by sample ──────────────────────────────────────────────────
         const groups = sessionFiles.reduce((acc, file) => {
             const rawSName = (file.sample_name || 'Uncategorized').trim();
-            const dbMatch =
-                dbSamples.find(s => s.sample_code === rawSName) ||
-                dbSamples.find(s => file.name.includes(s.sample_code)) ||
-                dbSamples.find(s => s.name === rawSName);
-            const sName = dbMatch ? dbMatch.sample_code : rawSName;
+            const dbMatch = resolveWorkspaceSample(file, dbSamples);
+            const sName = dbMatch?.id || file.sample_id || file.sample_code || rawSName;
+            const parent = dbSamples.find(sample => sample.id === dbMatch?.parent_id);
 
             if (!acc[sName]) {
                 acc[sName] = {
                     name: sName,
-                    displayName: dbMatch?.name || sName,
-                    sampleCode: dbMatch?.sample_code,
+                    displayName: dbMatch?.name || rawSName,
+                    sampleCode: dbMatch?.sample_code || file.sample_code,
+                    parentCode: parent?.sample_code,
                     composition: dbMatch?.composition || [],
                     description: dbMatch?.description || '',
                     status: dbMatch?.status,
@@ -322,13 +328,13 @@ export function VaultLibrary({
 
             // Record: original stem → FileNode
             const nodeRecord: Record<string, FileNode> = {};
-            originals.forEach(f => { nodeRecord[getStem(f)] = { file: f, children: [] }; });
+            originals.forEach(f => { nodeRecord[f.h5_relative_path] = { file: f, children: [] }; });
 
             // Attach each pipeline to its parent; orphans become root nodes
             const orphanNodes: FileNode[] = [];
             pipelines.forEach(pf => {
-                const parentStem = getUltimateParentStem(pf, group.files);
-                const parentNode = nodeRecord[parentStem];
+                const parentPath = getUltimateParentPath(pf, group.files);
+                const parentNode = nodeRecord[parentPath];
                 if (parentNode) {
                     parentNode.children.push(pf);
                 } else {
@@ -363,16 +369,15 @@ export function VaultLibrary({
 
         if (!searchLower) return allGroups;
 
-        return allGroups.filter(group => {
+        return allGroups.flatMap(group => {
             const groupMatch =
                 group.name.toLowerCase().includes(searchLower) ||
                 group.displayName.toLowerCase().includes(searchLower) ||
                 (group.sampleCode && group.sampleCode.toLowerCase().includes(searchLower));
-            if (groupMatch) return true;
-            return group.files.some(f =>
-                f.name.toLowerCase().includes(searchLower) ||
-                (f.pipeline_name && f.pipeline_name.toLowerCase().includes(searchLower))
-            );
+            if (groupMatch || group.parentCode?.toLowerCase().includes(searchLower)) return [group];
+            const fileNodes = group.fileNodes.filter(node => [node.file, ...node.children].some(file =>
+                file.name.toLowerCase().includes(searchLower) || file.pipeline_name?.toLowerCase().includes(searchLower) || measurementChips(file).chips.some(chip => chip.label.toLowerCase().includes(searchLower))));
+            return fileNodes.length ? [{...group, fileNodes}] : [];
         });
     }, [sessionFiles, search, dbSamples]);
 
@@ -437,14 +442,22 @@ export function VaultLibrary({
                     <input 
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Filter workspace..." 
+                        placeholder="Search sample ID, name, laser or pipeline..."
+                        aria-label="Search workspace measurements"
                         className="w-full bg-white text-xs text-slate-900 border border-slate-200 rounded-xl py-2.5 pl-10 pr-3 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500/50 transition-all font-medium"
                     />
                 </div>
             </div>
 
+            <div className="px-4 py-2 flex items-center justify-between gap-2 border-b border-slate-100 text-[10px] text-slate-500">
+                <span>{groupedData.length} samples · {compareFiles.length} selected</span>
+                <div className="flex gap-3">
+                    <button type="button" className="hover:text-indigo-700" onClick={() => setExpandedSamples({})}>Expand all</button>
+                    <button type="button" className="hover:text-indigo-700" onClick={() => setExpandedSamples(Object.fromEntries(groupedData.map(group => [group.name, false])))}>Collapse all</button>
+                </div>
+            </div>
             {/* Library Content */}
-            <div className="flex-1 overflow-y-auto bg-white custom-scrollbar px-2 py-2">
+            <div className="flex-1 min-h-0 overflow-hidden bg-white custom-scrollbar px-2 py-2">
                 {isLoading ? (
                     <div className="flex flex-col h-full overflow-hidden animate-pulse">
                         {/* Skeleton Header */}
@@ -506,10 +519,10 @@ export function VaultLibrary({
                         {/* Table Headers */}
                         <div className="flex items-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50/80 border-b border-slate-200 shrink-0">
                              <div className="w-10 border-r border-slate-200 py-2.5 flex items-center justify-center">
-                                 <div className="w-3.5 h-3.5 rounded border border-slate-300 bg-white" />
+                                 <Layers size={12} className="text-slate-400" />
                              </div>
-                             <div className="w-24 border-r border-slate-200 px-3 py-2.5">Code</div>
-                             <div className="flex-1 px-3 py-2.5">Name</div>
+                             <div className="w-24 border-r border-slate-200 px-3 py-2.5">Sample ID</div>
+                             <div className="flex-1 px-3 py-2.5">Nomenclature / measurement</div>
                              <div className="w-10 border-l border-slate-200 py-2.5"></div>
                         </div>
                         
@@ -525,19 +538,26 @@ export function VaultLibrary({
                                     {/* Sample Header Row */}
                                     <div
                                         className="flex items-center text-[11px] border-b border-slate-100 hover:bg-slate-50/50 group/row cursor-pointer"
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-expanded={expandedSamples[group.name] !== false}
+                                        onKeyDown={event => {if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {event.preventDefault();toggleSample(group.name);}}}
                                         onClick={() => toggleSample(group.name)}
                                     >
                                         <div className="w-10 border-r border-slate-100 py-2.5 flex items-center justify-center shrink-0">
-                                            <div className="w-3.5 h-3.5 rounded border border-slate-300 bg-white" />
+                                            <Layers size={12} className="text-slate-400" />
                                         </div>
                                         <div className="w-24 border-r border-slate-100 px-3 py-2.5 font-black text-indigo-600 shrink-0">
-                                            {group.sampleCode || group.name}
+                                            <span className="break-words">{group.sampleCode || group.displayName}</span>
                                         </div>
                                         <div className="flex-1 px-3 py-2.5 flex items-center gap-2 min-w-0">
                                             <div className="p-0.5 hover:bg-slate-200 rounded transition-colors shrink-0">
                                                 {expandedSamples[group.name] !== false ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                                             </div>
-                                            <span className="font-bold text-slate-700 truncate">{group.displayName || group.name}</span>
+                                            <div className="min-w-0">
+                                                <span className="block font-bold text-slate-700 break-words" title={group.displayName}>{group.displayName || group.name}</span>
+                                                {group.parentCode && <span className="text-[10px] text-slate-500">Parent {group.parentCode}</span>}
+                                            </div>
 
                                             <button
                                                 onClick={(e) => {
@@ -546,7 +566,7 @@ export function VaultLibrary({
                                                     setOverviewPosition({ top: rect.top, left: rect.right + 12 });
                                                     setOpenOverview(prev => prev === group.name ? null : group.name);
                                                 }}
-                                                className="p-1 text-slate-300 hover:text-indigo-500 opacity-0 group-hover/row:opacity-100 transition-all"
+                                                className="p-1 text-slate-300 hover:text-indigo-500 opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 transition-all"
                                             >
                                                 <Info size={12} />
                                             </button>
@@ -608,15 +628,16 @@ export function VaultLibrary({
             {/* Saved Sessions Section */}
             {savedWorkspaces.length > 0 && (
                 <div className="shrink-0 border-t border-slate-100 bg-slate-50/50">
-                    <div className="p-4 py-3 flex items-center justify-between">
+                    <button type="button" className="w-full px-4 py-2 flex items-center justify-between hover:bg-slate-100" aria-expanded={sessionsOpen} aria-controls="workspace-saved-sessions" onClick={() => setSessionsOpen(open => !open)}>
                         <div className="flex items-center gap-2">
+                            {sessionsOpen ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
                             <History size={14} className="text-slate-400" />
                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Saved Sessions</span>
                         </div>
                         <span className="bg-slate-200 text-slate-600 text-[9px] font-bold px-1.5 py-0.5 rounded-md">{savedWorkspaces.length}</span>
-                    </div>
-                    <div className="max-h-48 overflow-y-auto px-2 pb-4 space-y-1 custom-scrollbar">
-                        {savedWorkspaces.slice(0, 8).map((ws) => (
+                    </button>
+                    {sessionsOpen && <div id="workspace-saved-sessions" className="max-h-48 overflow-y-auto px-2 pb-4 space-y-1 custom-scrollbar">
+                        {savedWorkspaces.map((ws) => (
                             <button
                                 key={ws.id}
                                 onClick={() => onLoadWorkspace?.(ws)}
@@ -639,7 +660,7 @@ export function VaultLibrary({
                                 <ChevronRight size={14} className="text-slate-300 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all" />
                             </button>
                         ))}
-                    </div>
+                    </div>}
                 </div>
             )}
             
@@ -659,50 +680,6 @@ export function VaultLibrary({
 }
 
 // ─── Filename → parameter chips parser ─────────────────────────────────────
-type ChipType = 'analyte' | 'laser' | 'power' | 'objective' | 'time' | 'acc' | 'map' | 'misc';
-interface Chip { label: string; type: ChipType; }
-
-function parseFileChips(name: string): { chips: Chip[]; spot: string | null } {
-    // Strip .h5 and _preprocessed(_N)? suffix
-    let stem = name.replace(/\.h5$/i, '').replace(/_preprocessed(_\d+)?$/, '');
-
-    // Split into tokens
-    const raw = stem.split('_').filter(Boolean);
-
-    // Skip leading sample-code token(s): tokens that look like "A12-B2-B1" (letters+digits+hyphen, no units)
-    // and skip technique tokens: RAMAN, SERS, TERS, FTIR...
-    const TECHNIQUES = new Set(['RAMAN', 'SERS', 'TERS', 'FTIR', 'PL', 'XRD', 'XPS', 'AFM']);
-    let i = 0;
-    // skip sample code (first token)
-    i = 1;
-    // skip technique
-    if (i < raw.length && TECHNIQUES.has(raw[i].toUpperCase())) i++;
-
-    const paramTokens = raw.slice(i);
-
-    // Extract spot (last token matching SpotN)
-    const spotIdx = paramTokens.findLastIndex((t: string) => /^Spot\d+$/i.test(t));
-    const spot = spotIdx >= 0 ? paramTokens[spotIdx] : null;
-    const tokens = spotIdx >= 0 ? paramTokens.slice(0, spotIdx) : paramTokens;
-
-    const chips: Chip[] = [];
-    let usedIndices = new Set<number>();
-
-    tokens.forEach((t: string, idx: number) => {
-        if (usedIndices.has(idx)) return;
-        if (/^\d+nm$/i.test(t))                                chips.push({ label: t, type: 'laser' });
-        else if (/^\d+[µu]W$/i.test(t) || /^\d+mW$/i.test(t)) chips.push({ label: t, type: 'power' });
-        else if (/^\d+x$/i.test(t) && parseInt(t) <= 200)     chips.push({ label: t, type: 'objective' });
-        else if (/^\d+s$/i.test(t))                            chips.push({ label: t, type: 'time' });
-        else if (/^\d+ac$/i.test(t))                           chips.push({ label: t, type: 'acc' });
-        else if (/^\d+$/.test(t) && parseInt(t) <= 500)        chips.push({ label: t + 'ac', type: 'acc' });
-        else if (/\d+x\d+/i.test(t) || /µm$/i.test(t))   { /* skip map size tokens */ }
-        else if (t.length <= 30)                           chips.push({ label: t, type: 'analyte' });
-    });
-
-    return { chips, spot };
-}
-
 const CHIP_STYLES: Record<ChipType, string> = {
     analyte:   'bg-rose-50   text-rose-700   border border-rose-200',
     laser:     'bg-blue-50   text-blue-700   border border-blue-200',
@@ -737,7 +714,7 @@ function PipelineStepsModal({ name, history, onClose }: { name: string, history:
                     <div>
                         <div className="text-[10px] font-black uppercase tracking-widest text-orange-100">Pipeline Template</div>
                         <div className="text-lg font-black text-white">{name}</div>
-                        <div className="text-xs text-orange-100 mt-0.5">{history.length} steps aplicados</div>
+                        <div className="text-xs text-orange-100 mt-0.5">{history.length} steps applied</div>
                     </div>
                     <button onClick={onClose} className="p-2 bg-white/20 hover:bg-white/30 rounded-xl transition-colors">
                         <X size={16} className="text-white" />
@@ -766,7 +743,7 @@ function PipelineStepsModal({ name, history, onClose }: { name: string, history:
                     ))}
                     {history.length === 0 && (
                         <div className="text-center py-12 text-slate-400">
-                            <p className="text-sm">No hay pasos registrados en este pipeline</p>
+                            <p className="text-sm">No steps recorded for this pipeline</p>
                         </div>
                     )}
                 </div>
@@ -798,7 +775,7 @@ function FileItem({
     })();
 
     // Parse filename into parameter chips
-    const { chips, spot } = parseFileChips(file.name);
+    const { chips, spot, source } = measurementChips(file);
     const MAX_CHIPS = 8;
     const visibleChips = chips.slice(0, MAX_CHIPS);
     const hiddenCount = chips.length - MAX_CHIPS;
@@ -808,7 +785,9 @@ function FileItem({
             role="button"
             tabIndex={0}
             onClick={() => onSelect(file)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(file); }}
+            title={`${file.name} · Parameters from ${source === 'metadata' ? 'stored metadata' : 'legacy filename'}`}
+            aria-current={isSelected ? 'true' : undefined}
+            onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {e.preventDefault();onSelect(file);} }}
             className={cn(
                 "flex items-center text-[11px] border-b border-slate-50 transition-all cursor-pointer group/row min-h-[36px]",
                 isSelected ? "bg-indigo-50/50" : "hover:bg-slate-50/80",
@@ -817,15 +796,9 @@ function FileItem({
         >
             {/* Col 1: Checkbox */}
             <div className="w-10 border-r border-slate-100 py-2 flex items-center justify-center shrink-0">
-                <div
-                    className={cn(
-                        "w-3.5 h-3.5 rounded border flex items-center justify-center transition-all bg-white shadow-sm cursor-pointer",
-                        isCompared ? "border-orange-500 text-orange-500 bg-orange-50/30" : "border-slate-300 text-transparent"
-                    )}
-                    onClick={(e) => { e.stopPropagation(); onToggleCompare?.(file); }}
-                >
-                    <Check size={10} strokeWidth={4} className={cn(!isCompared && "opacity-0 group-hover/row:opacity-20 text-slate-400")} />
-                </div>
+                <input type="checkbox" checked={!!isCompared} disabled={!onToggleCompare}
+                    aria-label={`Compare ${file.name}`} className="w-3.5 h-3.5 accent-orange-600 cursor-pointer"
+                    onClick={event => event.stopPropagation()} onChange={() => onToggleCompare?.(file)} />
             </div>
 
             {/* Col 2: Tree connector only — no repeated sample code */}
@@ -879,11 +852,11 @@ function FileItem({
                                 <span
                                     key={i}
                                     className={cn(
-                                        "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0",
-                                        CHIP_STYLES[chip.type]
+                                        "inline-flex items-center border px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0",
+                                        chip.type === 'laser' ? laserAppearance(chip.label).className : CHIP_STYLES[chip.type]
                                     )}
                                 >
-                                    {chip.label}
+                                    {chip.label}{chip.type === 'laser' && ['NIR', 'IR', 'UV'].includes(laserAppearance(chip.label).band) ? ` · ${laserAppearance(chip.label).band}` : ''}
                                 </span>
                             ))}
                             {hiddenCount > 0 && (
@@ -905,7 +878,7 @@ function FileItem({
             </div>
 
             {/* Col 4: Actions */}
-            <div className="w-8 border-l border-slate-100 py-2 flex items-center justify-center shrink-0 opacity-0 group-hover/row:opacity-100 transition-all">
+            <div className="w-8 border-l border-slate-100 py-2 flex items-center justify-center shrink-0 opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 transition-all">
                 {!confirmDelete ? (
                     <button
                         onClick={(e) => {
@@ -916,7 +889,7 @@ function FileItem({
                             "p-1 transition-colors",
                             isPipelineFile(file) ? "text-slate-300 hover:text-red-500" : "text-slate-300 hover:text-indigo-500"
                         )}
-                        title={isPipelineFile(file) ? "Eliminar ficha y archivo" : "Quitar del espacio de trabajo"}
+                        title={isPipelineFile(file) ? "Delete derived record and file" : "Remove from workspace"}
                     >
                         {isPipelineFile(file) ? <Trash2 size={11} /> : <X size={11} />}
                     </button>
@@ -933,7 +906,7 @@ function FileItem({
                             setConfirmDelete(false);
                         }}
                         className="p-1 text-white bg-red-500 rounded-md shadow-sm active:scale-95 transition-all animate-in fade-in zoom-in duration-200"
-                        title="Click para confirmar"
+                        title="Click to confirm"
                     >
                         <Check size={10} strokeWidth={4} />
                     </button>

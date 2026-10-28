@@ -5,8 +5,9 @@ import dynamic from 'next/dynamic';
 import { useState, useEffect } from 'react';
 import { Search, ChevronRight, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { resolveWorkspaceSample, physicalMapSize } from '../workspace-display';
 import { toast } from 'sonner';
-import { isDesktop, fetchVaultFiles } from '@/lib/desktop';
+import { isDesktop, fetchVaultFiles, SCIENCE_ENGINE_URL } from '@/lib/desktop';
 import { VaultLibrary } from './vault-library';
 import { HeatmapCanvas } from './heatmap-canvas';
 import { SpectrumInspector } from './spectrum-inspector';
@@ -43,9 +44,40 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
     // Global dimension settings derived from metadata, but can be updated
     const [mapDim, setMapDim] = useState({ w: 0, h: 0 });
     const [stepSize, setStepSize] = useState(1.0); // Default 1.0 micron per spectrum
+    const [physicalSize, setPhysicalSize] = useState<{width: number; height: number} | undefined>();
     const [nSpectra, setNSpectra] = useState(0);
     const [dismissedBanners, setDismissedBanners] = useState<Set<string>>(new Set());
     const [fileSettings, setFileSettings] = useState<Record<string, { w?: number, h?: number, stepSize?: number }>>({});
+
+    useEffect(() => {
+        const file = sessionFiles.find(file => file.h5_relative_path === selectedH5);
+        if (!vaultRoot || !file || file.workspace_metadata_loaded || (file.parameters && Object.keys(file.parameters).length)) return;
+        const controller = new AbortController();
+        let active = true;
+        void fetch(`${SCIENCE_ENGINE_URL}/api/vault-assets/workspace-metadata`, {
+            method: 'POST', headers: {'Content-Type':'application/json'}, signal: controller.signal,
+            body: JSON.stringify({vault_root: vaultRoot, group_id: groupId, paths:[selectedH5]})
+        }).then(async response => {
+            if (!response.ok) throw new Error('Restart the Python engine to read measurement metadata.');
+            const result = await response.json();
+            if (active && result.files?.[0]) setSessionFiles(files => files.map(item => item.h5_relative_path === selectedH5 ? {...item,...result.files[0],workspace_metadata_loaded:true} : item));
+        }).catch(error => {if (active && error.name !== 'AbortError') toast.warning(error.message);});
+        return () => {active = false; controller.abort();};
+    }, [selectedH5, vaultRoot, groupId, sessionFiles]);
+
+    useEffect(() => {
+        const file = sessionFiles.find(file => file.h5_relative_path === selectedH5);
+        if (!file) return;
+        const settings = fileSettings[selectedH5];
+        const w = settings?.w || file.map_width || 0, h = settings?.h || file.map_height || 0;
+        const size = physicalMapSize(file.parameters);
+        const stepX = size && w ? size.width / w : undefined, stepY = size && h ? size.height / h : undefined;
+        const isotropicStep = stepX && stepY && Math.abs(stepX - stepY) < 1e-6 ? stepX : undefined;
+        setMapDim({w, h});
+        setPhysicalSize(settings ? undefined : size);
+        setStepSize(settings?.stepSize ?? isotropicStep ?? 1);
+        setNSpectra(file.n_spectra || 0);
+    }, [selectedH5, sessionFiles, fileSettings]);
 
     // Spectrum integration window
     const [wavenumberRange, setWavenumberRange] = useState<[number, number] | undefined>(undefined);
@@ -137,16 +169,25 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                     }
                 }
 
+                const scannedByPath = new Map(allVaultFiles.map(file => [file.h5_relative_path, file]));
+                filesToImport = filesToImport.map(file => {
+                    const scanned = scannedByPath.get(file.h5_relative_path);
+                    return scanned ? {...scanned, ...file, map_width: scanned.map_width || file.map_width, map_height: scanned.map_height || file.map_height,
+                        n_spectra: scanned.n_spectra || file.n_spectra, parameters: file.parameters || scanned.parameters} : file;
+                });
+
                 // Helper to get all ancestors of a file stem
                 const getAncestors = (file: any, allFiles: any[]): string[] => {
                     const ancestors = [file.h5_relative_path];
                     let current = file;
+                    const visited = new Set([file.h5_relative_path]);
 
                     while (true) {
                         // 1. Try metadata parent_file first
                         if (current.parent_file) {
                             const parent = allFiles.find(f => f.h5_relative_path === current.parent_file);
-                            if (parent) {
+                            if (parent && !visited.has(parent.h5_relative_path)) {
+                                visited.add(parent.h5_relative_path);
                                 ancestors.push(parent.h5_relative_path);
                                 current = parent;
                                 continue;
@@ -161,7 +202,8 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                         if (match && match.index !== undefined && match.index > 0) {
                             const parentStem = currentStem.substring(0, match.index);
                             const parent = allFiles.find(f => f.name.replace(/\.h5$/i, '').toLowerCase() === parentStem.toLowerCase());
-                            if (parent) {
+                            if (parent && !visited.has(parent.h5_relative_path)) {
+                                visited.add(parent.h5_relative_path);
                                 ancestors.push(parent.h5_relative_path);
                                 current = parent;
                                 continue;
@@ -477,18 +519,6 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                     isLoading={isLoadingMetadata}
                     onSelect={(file) => {
                         setSelectedH5(file.h5_relative_path);
-                        const settings = fileSettings[file.h5_relative_path];
-
-                        let w = settings?.w || file.map_width || 0;
-                        let h = settings?.h || file.map_height || 0;
-                        if ((w <= 0 || h <= 0) && file.n_spectra > 0) {
-                            w = Math.ceil(Math.sqrt(file.n_spectra));
-                            h = Math.ceil(file.n_spectra / w);
-                        }
-
-                        setMapDim({ w, h });
-                        setStepSize(settings?.stepSize ?? 1.0);
-                        setNSpectra(file.n_spectra || 0);
                         setSelectedPixelIndex(0);
                         setWavenumberRange(undefined);
                     }}
@@ -520,21 +550,13 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     <h2 className="text-sm font-bold text-slate-900 truncate max-w-[300px]">
                                         {mode === 'compare' ? 'Comparison Mode' : (() => {
                                             const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
-                                            const s = dbSamples.find(s =>
-                                                s.sample_code === f?.sample_name ||
-                                                s.name === f?.sample_name ||
-                                                (f?.name && s.sample_code && f.name.includes(s.sample_code))
-                                            );
+                                            const s = f ? resolveWorkspaceSample(f, dbSamples) : undefined;
                                             return s?.name || f?.sample_name || 'Sample';
                                         })()}
                                     </h2>
                                     {mode !== 'compare' && (() => {
                                         const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
-                                        const s = dbSamples.find(s =>
-                                            s.sample_code === f?.sample_name ||
-                                            s.name === f?.sample_name ||
-                                            (f?.name && s.sample_code && f.name.includes(s.sample_code))
-                                        );
+                                        const s = f ? resolveWorkspaceSample(f, dbSamples) : undefined;
                                         return s?.sample_code ? (
                                             <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-md shrink-0">{s.sample_code}</span>
                                         ) : null;
@@ -544,11 +566,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                         <span className="text-xs font-medium text-slate-500 truncate max-w-[300px]">
                                             {dbLogbooks.find(l => {
                                                 const f = sessionFiles.find(f => f.h5_relative_path === selectedH5);
-                                                const sMatch = dbSamples.find(s =>
-                                                    s.sample_code === f?.sample_name ||
-                                                    s.name === f?.sample_name ||
-                                                    (f?.name && s.sample_code && f.name.includes(s.sample_code))
-                                                );
+                                                const sMatch = f ? resolveWorkspaceSample(f, dbSamples) : undefined;
                                                 return sMatch?.logbook_id === l.id;
                                             })?.name || 'Project'}
                                         </span>
@@ -702,6 +720,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     mapWidth={mapDim.w}
                                     mapHeight={mapDim.h}
                                     stepSize={stepSize}
+                                    physicalSize={physicalSize}
                                     nSpectra={nSpectra}
                                     wavenumberRange={wavenumberRange}
                                     selectedPixelIndex={selectedPixelIndex}
