@@ -289,9 +289,16 @@ class ProjectSession:
             provenance['related_objects'] = details['related_objects']
             raw_params = entry.trace_record.raw_params if entry.trace_record is not None else []
             provenance['raw_acquisition_parameters'] = json_value(raw_params)
-            provenance['attached_image_metadata'] = [dict(id=image_id,
-                path=image_paths[index],name=self.entries[image_id].caption,
-                spatial_geometry=self.describe(self.entries[image_id],0)['spatial_geometry']) for index,image_id in enumerate(attached)]
+            provenance['attached_image_metadata'] = []
+            for index,image_id in enumerate(attached):
+                image_info=self.details(image_id)
+                provenance['attached_image_metadata'].append(dict(id=image_id,
+                    path=image_paths[index],name=self.entries[image_id].caption,
+                    spatial_geometry=image_info['spatial_geometry'],original_metadata=image_info['metadata'],
+                    reviewed_metadata=metadata.get('image_parameters',{}).get(image_id,{}),
+                    history=image_info['history'],references=image_info['references'],
+                    field_sources=image_info['field_sources'],structural_metadata=image_info['structural_metadata'],
+                    related_objects=image_info['related_objects'],raw_acquisition_parameters=image_info['raw_acquisition_parameters']))
             dimensions = info['shape']
             if not target.exists():
                 temporary = target.with_suffix(f'.{uuid.uuid4().hex}.tmp')

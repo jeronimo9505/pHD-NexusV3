@@ -129,4 +129,23 @@ class ReferenceTests(unittest.TestCase):
             image=Image.open(io.BytesIO(base64.b64decode(result['image'])))
             self.assertLessEqual(image.width,640);self.assertLessEqual(image.height,480)
 
+    def test_combined_raman_and_image_provenance(self):
+        measurement=next(o for o in self.inventory['objects'] if o['kind']=='raman' and o['importable'])
+        image=next(o for o in self.inventory['objects'] if o['kind']=='image' and o['importable'])
+        settings={'group_id':'11111111-1111-1111-1111-111111111111','sample_id':'22222222-2222-2222-2222-222222222222',
+            'sample_code':'TEST','sample_name':'Combined','logbook_name':'WIP Validation','technique':'Raman','parameters':{},
+            'image_parameters':{image['id']:{'objective_magnification':'reviewed'}}}
+        with temporary() as vault:
+            result=self.session.extract(measurement['id'],[image['id']],settings,vault)
+            self.assertEqual(len(result['attached_images']),1)
+            attached=result['provenance']['attached_image_metadata'][0]
+            self.assertEqual(attached['original_metadata'],image['metadata'])
+            self.assertEqual(attached['reviewed_metadata'],settings['image_parameters'][image['id']])
+            self.assertIn('structural_metadata',attached)
+            self.assertIn('raw_acquisition_parameters',attached)
+            self.assertEqual(result['provenance']['axis'],measurement['axis'])
+            with h5py.File(Path(vault)/result['h5_relative_path'],'r') as archive:
+                stored=json.loads(archive.attrs['wip_provenance'])
+                self.assertEqual(stored['attached_image_metadata'],result['provenance']['attached_image_metadata'])
+
 if __name__=='__main__':unittest.main(verbosity=2)

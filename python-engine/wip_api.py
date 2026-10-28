@@ -20,6 +20,7 @@ class ObjectRequest(BaseModel):
 
 class Extract(ObjectRequest):
     image_ids: list[str] = Field(default_factory=list,max_length=40)
+    image_parameters: dict[str,dict] = Field(default_factory=dict)
     vault_root: str
     group_id: UUID
     sample_id: UUID
@@ -64,6 +65,7 @@ def extract(request: Extract):
     def run():
         from readers.wip_project import get_session
         metadata = request.model_dump(exclude={'session','object_id','image_ids','vault_root'},mode='json')
+        if not metadata['image_parameters']:metadata.pop('image_parameters')
         session = get_session(request.session)
         metadata['technique'] = 'Optical Image' if session.entry(request.object_id).class_name == 'TDBitmap' else 'Raman'
         return session.extract(request.object_id, request.image_ids, metadata, request.vault_root)

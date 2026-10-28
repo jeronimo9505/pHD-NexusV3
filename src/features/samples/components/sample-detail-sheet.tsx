@@ -537,6 +537,7 @@ export function SampleDetailSheet({
 
                                     {expandedChar!.data.wip_import && <button type="button" className="text-violet-600 border border-violet-200 bg-violet-50 px-3 py-2 rounded-lg text-xs" onClick={()=>setWipMetadata(expandedChar!.data.wip_import)}>WITec Metadata</button>}
                                     {isDesktop&&expandedChar!.data.wip_import?.attached_image_metadata?.map((image:any)=><button key={image.id} type="button" className="text-violet-600 border border-violet-200 px-3 py-2 rounded-lg text-xs mr-2" onClick={()=>setWipImage(image)}>Open calibrated image · {image.name}</button>)}
+                                    {expandedChar!.data.wip_import?.attached_image_metadata?.filter((image:any)=>image.original_metadata).map((image:any)=><button key={`metadata-${image.id}`} type="button" className="text-violet-600 border border-violet-200 px-3 py-2 rounded-lg text-xs mr-2" onClick={()=>setWipMetadata({...image,object_name:image.name})}>Image metadata · {image.name}</button>)}
                                     {/* Raman Spectrum Graph */}
                                     {expandedChar!.data.raman_drive_sync?.status === 'pending' && (
                                         <p role="status" className="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg">

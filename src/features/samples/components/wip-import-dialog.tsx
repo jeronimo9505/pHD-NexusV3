@@ -10,8 +10,9 @@ import type { WipInventory, WipObject, WipSample, WipExtraction } from '../wip-t
 import { WIP_PARAMETERS, initialWipParameters } from '../wip-parameters';
 import { WipSpatialViewer } from './wip-spatial-viewer';
 import { WipSamplePicker } from './wip-sample-picker';
+import { wipImportPlan, type WipAssignment as Assignment } from '../wip-import-plan';
+import { spatialRelation } from '../wip-spatial';
 
-type Assignment = { selected:boolean; sampleId:string; images:string[]; reviewed:Record<string,string>; result?:string; done?:boolean };
 
 function suggestedSample(object: WipObject, samples: WipSample[]) {
     return samples.find(sample=> {
@@ -34,6 +35,8 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
     const [error,setError]=useState('');const [message,setMessage]=useState('');
     const [search,setSearch]=useState('');const [showSupporting,setShowSupporting]=useState(false);
     const [bulkSample,setBulkSample]=useState('');
+    const [allowStandaloneImages,setAllowStandaloneImages]=useState(false);
+    const plan=wipImportPlan(project?.objects||[],rows,allowStandaloneImages);
     const lock=useRef(false);const alive=useRef(true);const request=useRef<AbortController|null>(null);
     const session=useRef<string|undefined>(undefined);
     useEffect(()=>{
@@ -84,27 +87,31 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
     async function importSelected() {
         if(lock.current||!project)return;
         const selected=project.objects.filter(item=>rows[item.id]?.selected&&!rows[item.id]?.done);
+        const importPlan=wipImportPlan(project.objects,rows,allowStandaloneImages);
         if(!selected.length){setError('Select at least one supported measurement or image.');return;}
         if(selected.some(item=>!rows[item.id].sampleId)){setError('Assign a destination sample to every selected item.');return;}
+        if(importPlan.unlinked.length){setError('Some selected images have no matching Raman measurement assigned to the same sample. Select and assign a matching measurement, attach the image explicitly in its review, or enable standalone image records.');return;}
+        const successful=new Set<string>();
         const vault=localStorage.getItem('phdnexus_vault_root');
         if(!vault){setError('Configure your local Data Vault in Settings before importing.');return;}
         lock.current=true;setBusy(true);setError('');let imported=0,existing=0,failed=0;
         try {
-            for(const [index,item] of selected.entries()) {
+            for(const [index,{item,imageIds}] of importPlan.entries.entries()) {
                 if(!alive.current)break;
                 const assignment=rows[item.id],sample=catalog.find(s=>s.id===assignment.sampleId);
                 if(!sample){failed++;update(item.id,{result:'The selected sample is unavailable.'});continue;}
-                setMessage(`Importing ${index+1} of ${selected.length}: ${item.name}`);
+                setMessage(`Importing ${index+1} of ${importPlan.entries.length}: ${item.name}`);
                 try {
-                    const extraction=await wipRequest<WipExtraction>('extract',{session:project.session,object_id:item.id,image_ids:assignment.images,
+                    const extraction=await wipRequest<WipExtraction>('extract',{session:project.session,object_id:item.id,image_ids:imageIds,image_parameters:Object.fromEntries(imageIds.map(id=>[id,rows[id]?.reviewed||{}])),
                         vault_root:vault,group_id:groupId,sample_id:sample.id,sample_code:sample.sample_code||sample.display_id,
                         sample_name:sample.name,logbook_name:sample.logbooks?.name||'Samples',parameters:assignment.reviewed});
                     const result=await saveWipExtraction(groupId,sample,extraction,assignment.reviewed,folderId);
-                    if(result.created)imported++;else existing++;
+                    if(result.created)imported++;else existing++;successful.add(item.id);
                     if(alive.current)update(item.id,{done:true,selected:false,result:result.created?'Imported':'Already imported — no duplicate created'});
                 }catch(err){failed++;if(alive.current)update(item.id,{result:err instanceof Error?err.message:String(err)});}
             }
-            if(alive.current){setMessage(`${imported} imported · ${existing} already present · ${failed} failed. You can assign and import more items from this project.`);router.refresh();}
+            if(alive.current){for(const [imageId,links] of Object.entries(importPlan.imageLinks)){if(links.length&&links.every(id=>successful.has(id)))update(imageId,{done:true,selected:false,result:`Attached to ${links.length} Raman record(s)`});}
+            setMessage(`${imported} imported · ${existing} already present · ${failed} failed. You can assign and import more items from this project.`);router.refresh();}
         }finally{lock.current=false;if(alive.current)setBusy(false);}
     }
 
@@ -130,7 +137,7 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
                     </div>
                     <div className="overflow-auto flex-1 divide-y">{visible.map(item=>{const assignment=rows[item.id];return <div key={item.id} draggable={item.kind==='raman'} onDragStart={event=>event.dataTransfer.setData('application/x-phdnexus-wip-map',item.id)} className={`p-3 flex gap-3 ${active===item.id?'bg-violet-50':''}`}>
                         <input type="checkbox" aria-label={`Select ${item.name}`} disabled={busy||!item.importable||assignment.done} checked={assignment.selected} onChange={e=>update(item.id,{selected:e.target.checked})}/>
-                        <button type="button" className="text-left min-w-0 flex-1" onClick={()=>setActive(item.id)}><p className="text-sm font-medium break-all">{item.name}</p><p className="text-xs text-slate-500">#{item.display_order??item.order+1} · ID {item.id} · {item.kind} · {item.shape?.join(' × ')}</p><p className="text-xs">{assignment.done?assignment.result:catalog.find(s=>s.id===assignment.sampleId)?.sample_code||'Not assigned'}{!assignment.done&&assignment.result&&<span className="text-red-600 block">{assignment.result}</span>}</p></button>
+                        <button type="button" className="text-left min-w-0 flex-1" onClick={()=>setActive(item.id)}><p className="text-sm font-medium break-all">{item.name}</p><p className="text-xs text-slate-500">#{item.display_order??item.order+1} · ID {item.id} · {item.kind} · {item.shape?.join(' × ')}</p><p className="text-xs">{item.kind==='image'&&plan.imageLinks[item.id]?.length>0&&!assignment.done&&<span className="block text-violet-600">Will attach to {plan.imageLinks[item.id].length} Raman record(s)</span>}{assignment.done?assignment.result:catalog.find(s=>s.id===assignment.sampleId)?.sample_code||'Not assigned'}{!assignment.done&&assignment.result&&<span className="text-red-600 block">{assignment.result}</span>}</p></button>
                         <button type="button" aria-label={`Metadata for ${item.name}`} className="self-start text-violet-600" onClick={()=>showMetadata(item)}><Info size={18}/></button>
                     </div>;})}{!project&&<p className="p-8 text-sm text-slate-500">Open a local WITec project to inspect its measurements and images.</p>}</div>
                 </section>
@@ -145,14 +152,15 @@ export function WipImportDialog({groupId,defaultSampleId,folderId,onClose}: {
                     {object.importable&&<><label className="block text-sm font-medium">Destination sample<WipSamplePicker groupId={groupId} value={catalog.find(sample=>sample.id===row.sampleId)||null} disabled={busy||row.done} label="Destination sample" onSelect={sample=>{rememberSample(sample);update(object.id,{sampleId:sample?.id||''});}}/></label>
                         {!row.sampleId&&suggestedSample(object,catalog)&&<button type="button" className="text-xs text-violet-600 underline" onClick={()=>update(object.id,{sampleId:suggestedSample(object,catalog)!.id})}>Use name-based suggestion: {suggestedSample(object,catalog)!.sample_code} (confirm before importing)</button>}
                         <fieldset disabled={busy||row.done}><legend className="font-semibold text-sm mb-2">Review import metadata</legend><p className="text-xs text-slate-500 mb-3">Values come from acquisition records, never the file name. Original values remain available in Metadata.</p><table className="w-full text-sm border rounded-lg"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-2 text-left">#</th><th className="p-2 text-left">Parameter</th><th className="p-2 text-left">Value</th><th className="p-2 text-left">Unit</th></tr></thead><tbody>{WIP_PARAMETERS.filter(field=>object.kind==='raman'||field.key==='objective_magnification').map((field,index)=><tr key={field.key} className="border-t"><td className="p-2 text-xs text-slate-400">{index+1}</td><th className="p-2 text-left font-medium">{field.label}</th><td className="p-2"><input aria-label={field.label} className="border rounded p-2 w-full min-w-0" value={row.reviewed[field.key]||''} placeholder={['analyte','power'].includes(field.key)?'Enter manually':'Not recovered — optional'} onChange={e=>update(object.id,{reviewed:{...row.reviewed,[field.key]:e.target.value}})}/></td><td className="p-2 text-xs">{'units' in field?<select aria-label={`${field.label} unit`} className="border rounded p-2" value={row.reviewed[`unit:${field.key}`]??field.unit} onChange={e=>update(object.id,{reviewed:{...row.reviewed,[`unit:${field.key}`]:e.target.value}})}>{field.units.map(unit=><option key={unit} value={unit}>{unit||'—'}</option>)}</select>:field.unit}</td></tr>)}</tbody></table><p className="text-xs text-slate-500 mt-2">Spots = pixel grid (i×j). Size = physical scan width × height. Analyte and Power are always entered manually.</p></fieldset>
-                        {object.kind==='raman'&&<fieldset disabled={busy||row.done} className="space-y-2"><legend className="font-semibold text-sm">Attached camera images</legend><p className="text-xs text-slate-500">Select images to include with this measurement. Position overlap is a suggestion, not a confirmed association.</p>
-                            {!!object.suggested_images?.length&&<button type="button" className="text-violet-600 text-xs underline" onClick={()=>update(object.id,{images:object.suggested_images||[]})}>Use position-based suggestions ({object.suggested_images.length})</button>}
-                            <div className="max-h-44 overflow-auto">{images.map(image=><label key={image.id} className="flex items-center gap-2 text-xs py-1"><input type="checkbox" checked={row.images.includes(image.id)} onChange={e=>update(object.id,{images:e.target.checked?[...row.images,image.id]:row.images.filter(id=>id!==image.id)})}/><span className="flex-1">{image.name}</span><button type="button" className="underline" onClick={()=>setActive(image.id)}>Preview</button></label>)}</div>
+                        {object.kind==='raman'&&<fieldset disabled={busy||row.done} className="space-y-2"><legend className="font-semibold text-sm">Attached camera images</legend><p className="text-xs text-slate-500">Images are saved inside this Raman record, together with the map and measurement parameters. Selected images assigned to the same sample are attached when their calibrated positions match.</p>
+                            {(()=>{const detected=images.filter(image=>image.spatial_geometry&&object.spatial_geometry&&['inside','overlap'].includes(spatialRelation(image.spatial_geometry,object.spatial_geometry))).map(image=>image.id);return detected.length>0&&<button type="button" className="text-violet-600 text-xs underline" onClick={()=>update(object.id,{images:detected})}>Attach detected images ({detected.length})</button>;})()}
+                            <div className="max-h-44 overflow-auto">{images.map(image=><label key={image.id} className="flex items-center gap-2 text-xs py-1"><input type="checkbox" checked={row.images.includes(image.id)||Boolean(plan.imageLinks[image.id]?.includes(object.id))} onChange={e=>{update(object.id,{images:e.target.checked?[...row.images,image.id]:row.images.filter(id=>id!==image.id)});if(!e.target.checked&&rows[image.id]?.selected)update(image.id,{selected:false});}}/><span className="flex-1">{image.name}</span><button type="button" className="underline" onClick={()=>setActive(image.id)}>Preview</button></label>)}</div>
                         </fieldset>}
                     </>}
                     <p className="text-xs text-slate-500">Structural checks passed. Point-by-point comparison with a WITec export is still pending.</p>
                 </>}</section>
             </div>
+            <div className="px-4 py-2 border-t text-xs space-y-1"><p>{plan.entries.length} records will be created. Matched images are saved within their Raman records.</p><label className="flex gap-2 items-center"><input type="checkbox" disabled={busy} checked={allowStandaloneImages} onChange={event=>setAllowStandaloneImages(event.target.checked)}/>Create standalone image records when no Raman measurement is linked</label>{plan.unlinked.length>0&&<p className="text-amber-700">{plan.unlinked.length} selected image(s) need a linked Raman measurement for the same sample.</p>}</div>
             <footer className="border-t p-4 flex justify-between items-center"><p className="text-sm">{Object.values(rows).filter(item=>item.selected&&!item.done).length} selected · import only the items you reviewed</p><div className="flex gap-3"><button type="button" disabled={busy} onClick={onClose} className="px-3 py-2 border rounded-lg">Close</button><button type="button" disabled={busy||!project} onClick={importSelected} className="px-4 py-2 bg-violet-600 text-white rounded-lg disabled:opacity-50">{busy?'Working…':'Import selected'}</button></div></footer>
         </div>
         {metadata&&<WipMetadataDialog title={metadata.name} metadata={metadata.metadata} history={metadata.history} source={metadata as unknown as Record<string,unknown>} onClose={()=>setMetadata(null)}/>}
