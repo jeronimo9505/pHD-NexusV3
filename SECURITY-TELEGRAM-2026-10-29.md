@@ -17,6 +17,8 @@ Restart the local Next.js/Tauri development process to ensure the local replacem
 - Local environment variants are ignored. `.env.example` documents the two server-only Telegram variables with empty values.
 - `scripts/check-telegram-secrets.mjs` reports only file/line locations, never matching tokens. GitHub Actions scans tracked current files and changed files in new commits, including a token added and removed within one push. This is a focused Telegram guard, not a comprehensive all-provider secret scanner. CI detects an exposure after a push; GitHub push protection and required checks can add enforcement before merging.
 
+The CI checkout encountered the pre-existing unconfigured `scratch/SPECTROview` gitlink. The scan removes that external link only from its ephemeral runner index and clears the checkout credential before scanning. It does not remove local files or change the repository's scientific data or submodule references.
+
 ## Verification
 
 `node scripts/test-telegram-security.mjs` uses synthetic credentials and mocked HTTP/database calls. It checks anonymous/inactive access rejection, attachment ownership lookup, deletion confirmation, private media caching and credential-free error logs. Run the guard, TypeScript and targeted ESLint as well. Never test by placing a real token in a tracked test fixture.
