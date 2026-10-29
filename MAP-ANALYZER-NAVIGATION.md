@@ -26,3 +26,11 @@ Run `node scripts/test-workspace-display.mjs`, `node scripts/test-workspace-rend
 Restart the Python engine after updating. Reopen the analyzer to load updated cloud identity fields. Old workspace entries are enriched when selected; a legacy filename fallback may appear until that local read completes. Full parameter metadata is carried into newly saved workspaces.
 
 Rollback: revert this change's commit and redeploy. There are no data migrations or bulk edits to scientific files. Keep existing Supabase records and the complete synced Data Vault. The previous version is tagged `unified-measurement-assets-2026-10-28`.
+
+## Canvas geometry hotfix — 29 October 2026
+
+RGI2's graphene canvas attempted to allocate an image while width/height were still zero. The classic RGI and graphene canvases shared the same unchecked allocation. All three now use one validated display-grid helper: empty data renders a status, missing dimensions can use a labelled display-only estimate, known undersized grids render a mismatch message, and oversized allocations are rejected. Non-finite values remain neutral and do not contaminate automatic color limits. Inferred geometry is never written to scientific metadata or Supabase.
+
+Older workspace entries with parameters but missing geometry now also read their HDF5 header. Previously the presence of parameters incorrectly suppressed that read. Reviewed cloud parameters and sample identity are retained while actual array geometry is refreshed.
+
+Regression: `node scripts/test-canvas-grid.mjs` executes the actual drawing effects of all three components against a canvas that rejects zero/non-finite dimensions. Cases include empty maps, zero dimensions with 2,500 values, rectangular maps, mismatched grids, numeric-string dimensions, non-finite values and allocation limits. TypeScript and targeted ESLint are also checked. No Python or database schema changes are included in this hotfix. Baseline: `4ffc9f6` / `map-analyzer-metadata-2026-10-28`; revert the hotfix commit to restore that version.

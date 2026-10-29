@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { fetchGrapheneBands, fetchMapHeatmap } from '@/lib/desktop';
 import { Settings, Save, AlertCircle, RefreshCw, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { resolveCanvasGrid } from '../canvas-grid';
 import { toast } from 'sonner';
 import { valToRgb, getCssGradient } from './colormaps';
 
@@ -405,12 +406,14 @@ export function GrapheneCanvasGrid({
 }
 
 // Subcomponent to render isolated canvass efficiently
-function RenderCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize = 1.0, cmap, selectedPixelIndex, onClick, vmin, vmax, colorbarLabel }: any) {
+function RenderCanvas({ title, subtitle, dataArr, w: requestedWidth, h: requestedHeight, nSpectra: requestedCount, stepSize = 1.0, cmap, selectedPixelIndex, onClick, vmin, vmax, colorbarLabel }: any) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const grid = resolveCanvasGrid(requestedWidth, requestedHeight, requestedCount, Array.isArray(dataArr) ? dataArr.length : 0);
+    const w = grid.width, h = grid.height, nSpectra = grid.count;
     
     useEffect(() => {
         const canvas = canvasRef.current;
-        if (!canvas || !dataArr) return;
+        if (!canvas || !dataArr || grid.error) return;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
@@ -426,7 +429,7 @@ function RenderCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize = 1.0
             let sum = 0;
             let count = 0;
             for(let i=0; i<dataArr.length; i++) {
-                if (dataArr[i] > 0) {
+                if (Number.isFinite(dataArr[i]) && dataArr[i] > 0) {
                     sum += dataArr[i];
                     count++;
                 }
@@ -446,7 +449,7 @@ function RenderCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize = 1.0
             // Removed visual Y inversion. Index 0 is Top-Left to match the standard blue Map Viewer exactly.
             const pixelIdx = (y * w + x) * 4;
 
-            if (val <= 0 || isNaN(val)) {
+            if (val <= 0 || !Number.isFinite(val)) {
                 imgData.data[pixelIdx] = 255;
                 imgData.data[pixelIdx + 1] = 255;
                 imgData.data[pixelIdx + 2] = 255;
@@ -471,7 +474,10 @@ function RenderCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize = 1.0
             ctx.strokeRect(px, py, 1, 1);
         }
 
-    }, [dataArr, w, h, nSpectra, selectedPixelIndex, cmap, vmin, vmax]);
+    }, [dataArr, w, h, nSpectra, grid.error, selectedPixelIndex, cmap, vmin, vmax]);
+
+    if (grid.error) return <div role="status" className="flex flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-950 p-4 text-center text-xs text-slate-400"><strong className="mb-2 text-slate-200">{title}</strong>{grid.error}</div>;
+
 
     // Calculate display values
     let displayMax = vmax !== null ? vmax : 1;
@@ -479,7 +485,7 @@ function RenderCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize = 1.0
     if (vmax === null && dataArr) {
         let sum = 0, count = 0;
         for(let i=0; i<dataArr.length; i++) {
-            if (dataArr[i] > 0) { sum += dataArr[i]; count++; }
+            if (Number.isFinite(dataArr[i]) && dataArr[i] > 0) { sum += dataArr[i]; count++; }
         }
         displayMax = (count > 0 ? sum / count : 1) * 1.25;
     }
@@ -490,6 +496,7 @@ function RenderCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize = 1.0
             {/* Title Block (Natural DOM element, reserves space at the top automatically) */}
             <div className="flex-none text-center leading-tight mb-3 w-full mt-2">
                 <div className="text-xl xl:text-2xl font-extrabold text-black tracking-tight">{title}</div>
+                {grid.estimated && <div className="mt-1 text-[9px] text-amber-500">Estimated grid — verify acquisition dimensions</div>}
                 {subtitle && <div className="text-sm xl:text-lg font-bold text-black mt-1">{subtitle}</div>}
             </div>
 

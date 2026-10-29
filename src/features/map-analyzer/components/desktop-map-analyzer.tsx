@@ -51,7 +51,8 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
 
     useEffect(() => {
         const file = sessionFiles.find(file => file.h5_relative_path === selectedH5);
-        if (!vaultRoot || !file || file.workspace_metadata_loaded || (file.parameters && Object.keys(file.parameters).length)) return;
+        const hasGeometry = file && Number.isSafeInteger(file.map_width) && file.map_width > 0 && Number.isSafeInteger(file.map_height) && file.map_height > 0;
+        if (!vaultRoot || !file || file.workspace_metadata_loaded || (hasGeometry && file.parameters && Object.keys(file.parameters).length)) return;
         const controller = new AbortController();
         let active = true;
         void fetch(`${SCIENCE_ENGINE_URL}/api/vault-assets/workspace-metadata`, {
@@ -60,7 +61,10 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
         }).then(async response => {
             if (!response.ok) throw new Error('Restart the Python engine to read measurement metadata.');
             const result = await response.json();
-            if (active && result.files?.[0]) setSessionFiles(files => files.map(item => item.h5_relative_path === selectedH5 ? {...item,...result.files[0],workspace_metadata_loaded:true} : item));
+            if (active && result.files?.[0]) setSessionFiles(files => files.map(item => item.h5_relative_path === selectedH5 ? {...item,...result.files[0],
+                parameters: item.parameters && Object.keys(item.parameters).length ? item.parameters : result.files[0].parameters,
+                sample_id: item.sample_id || result.files[0].sample_id, sample_code: item.sample_code || result.files[0].sample_code,
+                workspace_metadata_loaded:true} : item));
         }).catch(error => {if (active && error.name !== 'AbortError') toast.warning(error.message);});
         return () => {active = false; controller.abort();};
     }, [selectedH5, vaultRoot, groupId, sessionFiles]);

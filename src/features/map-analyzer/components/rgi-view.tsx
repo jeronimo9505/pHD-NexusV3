@@ -9,6 +9,7 @@ import {
     ChevronDown, ChevronUp, Save, Download, Search, Eye
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { resolveCanvasGrid } from '../canvas-grid';
 import { toast } from 'sonner';
 import { FittingPeakTable, FittingPeakConfig, PEAK_COLORS } from './fitting-peak-table';
 import { valToRgb, getCssGradient } from './colormaps';
@@ -2974,12 +2975,14 @@ function RgiGrapheneTab({ result, mapWidth, mapHeight, nSpectra, stepSize }: { r
     );
 }
 
-function RgiGrapheneCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize = 1.0, cmap, vmin, vmax, colorbarLabel }: any) {
+function RgiGrapheneCanvas({ title, subtitle, dataArr, w: requestedWidth, h: requestedHeight, nSpectra: requestedCount, stepSize = 1.0, cmap, vmin, vmax, colorbarLabel }: any) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const grid = resolveCanvasGrid(requestedWidth, requestedHeight, requestedCount, Array.isArray(dataArr) ? dataArr.length : 0);
+    const w = grid.width, h = grid.height, nSpectra = grid.count;
     
     useEffect(() => {
         const canvas = canvasRef.current;
-        if (!canvas || !dataArr) return;
+        if (!canvas || !dataArr || grid.error) return;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
@@ -2996,7 +2999,7 @@ function RgiGrapheneCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize 
             let count = 0;
             for(let i=0; i<dataArr.length; i++) {
                 const val = dataArr[i];
-                if (val !== null && val > 0) {
+                if (Number.isFinite(val) && val > 0) {
                     sum += val;
                     count++;
                 }
@@ -3014,7 +3017,7 @@ function RgiGrapheneCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize 
             const y = Math.floor(i / w);
             const pixelIdx = (y * w + x) * 4;
 
-            if (val === null || val <= 0 || isNaN(val)) {
+            if (val === null || val <= 0 || !Number.isFinite(val)) {
                 // Dark background color for empty/null fits in dark mode
                 imgData.data[pixelIdx] = 11;
                 imgData.data[pixelIdx + 1] = 15;
@@ -3030,7 +3033,10 @@ function RgiGrapheneCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize 
         }
 
         ctx.putImageData(imgData, 0, 0);
-    }, [dataArr, w, h, nSpectra, cmap, vmin, vmax]);
+    }, [dataArr, w, h, nSpectra, grid.error, cmap, vmin, vmax]);
+
+    if (grid.error) return <div role="status" className="flex flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-950 p-4 text-center text-xs text-slate-400"><strong className="mb-2 text-slate-200">{title}</strong>{grid.error}</div>;
+
 
     // Calculate display values
     let displayMax = vmax !== null ? vmax : 1;
@@ -3039,7 +3045,7 @@ function RgiGrapheneCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize 
         let sum = 0, count = 0;
         for(let i=0; i<dataArr.length; i++) {
             const val = dataArr[i];
-            if (val !== null && val > 0) { sum += val; count++; }
+            if (Number.isFinite(val) && val > 0) { sum += val; count++; }
         }
         displayMax = (count > 0 ? sum / count : 1) * 1.25;
     }
@@ -3050,6 +3056,7 @@ function RgiGrapheneCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize 
             {/* Title Block */}
             <div className="flex-none text-center leading-tight mb-2 w-full mt-1">
                 <div className="text-xs font-black text-slate-200 tracking-tight">{title}</div>
+                {grid.estimated && <div className="mt-1 text-[9px] text-amber-500">Estimated grid — verify acquisition dimensions</div>}
                 {subtitle && <div className="text-[9px] font-bold text-slate-500 mt-0.5">{subtitle}</div>}
             </div>
 

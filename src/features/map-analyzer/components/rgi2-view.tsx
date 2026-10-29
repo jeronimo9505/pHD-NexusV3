@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { resolveCanvasGrid } from '../canvas-grid';
 import { FittingPeakConfig, FittingPeakTable, PEAK_COLORS } from './fitting-peak-table';
 import { SCIENCE_ENGINE_URL } from '@/lib/desktop';
 import { valToRgb, getCssGradient } from './colormaps';
@@ -1917,35 +1918,41 @@ function RgiGrapheneTabRgi2({ result, mapWidth, mapHeight, nSpectra, stepSize }:
     );
 }
 
-function Rgi2GrapheneCanvas({ title, subtitle, dataArr, w, h, nSpectra, stepSize = 1, cmap, vmin, vmax, colorbarLabel }: any) {
+function Rgi2GrapheneCanvas({ title, subtitle, dataArr, w: requestedWidth, h: requestedHeight, nSpectra: requestedCount, stepSize = 1, cmap, vmin, vmax, colorbarLabel }: any) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const grid = resolveCanvasGrid(requestedWidth, requestedHeight, requestedCount, Array.isArray(dataArr) ? dataArr.length : 0);
+    const w = grid.width, h = grid.height, nSpectra = grid.count;
     useEffect(() => {
         const canvas = canvasRef.current;
-        if (!canvas || !dataArr) return;
+        if (!canvas || !dataArr || grid.error) return;
         canvas.width = w; canvas.height = h;
         const ctx = canvas.getContext('2d'); if (!ctx) return;
         const img = ctx.createImageData(w, h);
         let min = vmin ?? 0, max = vmax ?? 1;
         if (vmax === null) {
             let sum = 0, cnt = 0;
-            for (let i = 0; i < dataArr.length; i++) { const v = dataArr[i]; if (v !== null && v > 0) { sum += v; cnt++; } }
+            for (let i = 0; i < dataArr.length; i++) { const v = dataArr[i]; if (Number.isFinite(v) && v > 0) { sum += v; cnt++; } }
             max = (cnt > 0 ? sum / cnt : 1) * 1.25;
         }
         for (let i = 0; i < nSpectra; i++) {
             const v = dataArr[i]; const x = i % w, y = Math.floor(i / w); const px = (y * w + x) * 4;
-            if (v === null || v <= 0 || isNaN(v)) { img.data[px] = 11; img.data[px+1] = 15; img.data[px+2] = 25; img.data[px+3] = 255; }
+            if (v === null || v <= 0 || !Number.isFinite(v)) { img.data[px] = 11; img.data[px+1] = 15; img.data[px+2] = 25; img.data[px+3] = 255; }
             else { const [r, g, b] = valToRgb(v, min, max, cmap); img.data[px] = r; img.data[px+1] = g; img.data[px+2] = b; img.data[px+3] = 255; }
         }
         ctx.putImageData(img, 0, 0);
-    }, [dataArr, w, h, nSpectra, cmap, vmin, vmax]);
+    }, [dataArr, w, h, nSpectra, grid.error, cmap, vmin, vmax]);
+
+    if (grid.error) return <div role="status" className="flex flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-950 p-4 text-center text-xs text-slate-400"><strong className="mb-2 text-slate-200">{title}</strong>{grid.error}</div>;
+
 
     let dispMax = vmax ?? 1, dispMin = vmin ?? 0;
-    if (vmax === null && dataArr) { let s = 0, c = 0; for (const v of dataArr) if (v !== null && v > 0) { s += v; c++; } dispMax = (c > 0 ? s / c : 1) * 1.25; }
+    if (vmax === null && dataArr) { let s = 0, c = 0; for (const v of dataArr) if (Number.isFinite(v) && v > 0) { s += v; c++; } dispMax = (c > 0 ? s / c : 1) * 1.25; }
 
     return (
         <div className="flex flex-col w-full h-full bg-[#050910] border border-slate-850 rounded-xl p-2 items-center justify-center select-none hover:border-slate-700 transition-colors">
             <div className="text-center mb-2">
                 <div className="text-xs font-black text-slate-200">{title}</div>
+                {grid.estimated && <div className="mt-1 text-[9px] text-amber-500">Estimated grid — verify acquisition dimensions</div>}
                 {subtitle && <div className="text-[9px] font-bold text-slate-500 mt-0.5">{subtitle}</div>}
             </div>
             <div className="flex-1 min-h-0 flex items-center justify-center w-full my-1">
