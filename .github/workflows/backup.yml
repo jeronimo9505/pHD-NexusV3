@@ -2,36 +2,93 @@ name: Daily Database Backup
 
 on:
   schedule:
-    - cron: '0 3 * * *' # Every day at 03:00 UTC (Early morning in EU/LATAM)
-  workflow_dispatch:   # Allows manual trigger from GitHub UI
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/backup.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-backup
+  cancel-in-progress: false
 
 jobs:
   backup:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PGDATABASE: ${{ secrets.DATABASE_URL }}
+      PGSSLMODE: require
+      PGCONNECT_TIMEOUT: '30'
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Create backup directory
-        run: mkdir -p backups
-
-      - name: Generate Database Dump
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          # The DB URL should be the connection string (Transaction pooler or Session)
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Back up the entire database including table data
+        shell: bash
         run: |
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          # We use npx to run supabase without global installation
-          npx supabase db dump --db-url "$DATABASE_URL" -f "backups/backup_$TIMESTAMP.sql"
+          set -euo pipefail
+          umask 077
+          test -n "$PGDATABASE" || { echo "::error::DATABASE_URL secret is missing"; exit 1; }
+          mkdir -p backups
+          # PGDATABASE accepts a connection URI. Never print it or put it in command arguments.
+          # No schema or table filters: includes public, auth, storage metadata and custom schemas.
+          docker run --rm --network host -e PGDATABASE -e PGSSLMODE -e PGCONNECT_TIMEOUT \
+            -v "$PWD/backups:/backup" postgres:17 \
+            pg_dump --format=custom --file=/backup/database.dump --no-password
+          docker run --rm --network host -e PGDATABASE -e PGSSLMODE -e PGCONNECT_TIMEOUT \
+            -v "$PWD/backups:/backup" postgres:17 \
+            sh -c 'exec pg_dumpall --dbname="$PGDATABASE" --roles-only --no-role-passwords --file=/backup/roles.sql --no-password'
 
-      - name: Gzip Backup (Optional but recommended)
+      - name: Verify archive and actual data
+        shell: bash
         run: |
-          gzip backups/*.sql
+          set -euo pipefail
+          docker run --rm -v "$PWD/backups:/backup" postgres:17 \
+            pg_restore --list /backup/database.dump > backups/contents.txt
+          grep -q ' TABLE DATA public ' backups/contents.txt
+          # Read/decompress every archive entry, not just its header.
+          docker run --rm -v "$PWD/backups:/backup" postgres:17 \
+            pg_restore --file=/dev/null /backup/database.dump
+          # Check for actual COPY records without exposing any records in logs/artifacts.
+          docker run --rm -v "$PWD/backups:/backup" postgres:17 \
+            pg_restore --data-only --file=- /backup/database.dump | python3 -c '
+          import sys, json
+          tables = {}
+          table = None
+          for line in sys.stdin:
+              if line.startswith("COPY "):
+                  table = line.split(" (", 1)[0][5:]
+                  tables[table] = 0
+              elif line.rstrip("\n") == "\\.":
+                  table = None
+              elif table is not None:
+                  tables[table] += 1
+          if not any(n for t, n in tables.items() if t.startswith("public.")):
+              raise SystemExit("No public table records in backup; refusing success")
+          with open("backups/row-counts.json", "w") as f:
+              json.dump(tables, f, indent=2)
+          print("Verified table data and non-empty public records.")
+          '
+          test -s backups/roles.sql
+          cd backups
+          sha256sum database.dump roles.sql contents.txt row-counts.json > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          Database archive verified: schema, table records, sequences, functions, policies,
+          grants and large objects, plus roles without database login passwords.
+          Auth records and Storage metadata are included. Storage file bytes and external
+          services (for example Google Drive) are separate from PostgreSQL.
+          The archive was read in full and public records were verified; this is not a
+          complete restore rehearsal. Retention: 90 days.
+          SUMMARY
 
-      - name: Upload to GitHub Artifacts
+      - name: Upload verified full database backup
         uses: actions/upload-artifact@v4
         with:
-          name: database-backups-${{ github.run_id }}
+          name: full-database-backup-${{ github.run_id }}
           path: backups/
-          retention-days: 90 # Keep backups for 3 months
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
