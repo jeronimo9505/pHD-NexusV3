@@ -31,11 +31,11 @@ jobs:
           umask 077
           test -n "$PGDATABASE" || { echo "::error::DATABASE_URL secret is missing"; exit 1; }
           mkdir -p backups
-          # PGDATABASE accepts a connection URI. Never print it or put it in command arguments.
+          # Pass the URI inside the container; never print credentials.
           # No schema or table filters: includes public, auth, storage metadata and custom schemas.
           docker run --rm --network host -e PGDATABASE -e PGSSLMODE -e PGCONNECT_TIMEOUT \
             -v "$PWD/backups:/backup" postgres:17 \
-            pg_dump --format=custom --file=/backup/database.dump --no-password
+            sh -c 'exec pg_dump --dbname="$PGDATABASE" --format=custom --file=/backup/database.dump --no-password'
           docker run --rm --network host -e PGDATABASE -e PGSSLMODE -e PGCONNECT_TIMEOUT \
             -v "$PWD/backups:/backup" postgres:17 \
             sh -c 'exec pg_dumpall --dbname="$PGDATABASE" --roles-only --no-role-passwords --file=/backup/roles.sql --no-password'
