@@ -24,6 +24,24 @@ jobs:
       PGSSLMODE: require
       PGCONNECT_TIMEOUT: '30'
     steps:
+      - name: Normalize database connection for PostgreSQL tools
+        shell: python
+        run: |
+          import os
+          from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+          uri = urlsplit(os.environ['PGDATABASE'])
+          if uri.scheme not in ('postgres', 'postgresql'):
+              raise SystemExit('DATABASE_URL must be a PostgreSQL connection URI')
+          query = [(k, v) for k, v in parse_qsl(uri.query) if k not in ('pgbouncer', 'connection_limit', 'pool_timeout', 'schema')]
+          authority = uri.netloc
+          # Dumps require a direct or session connection, not the transaction pooler.
+          if uri.hostname and uri.hostname.endswith('.pooler.supabase.com') and uri.port == 6543:
+              authority = authority.rsplit(':', 1)[0] + ':5432'
+          normalized = urlunsplit((uri.scheme, authority, uri.path, urlencode(query), ''))
+          print('::add-mask::' + normalized)
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('PGDATABASE=' + normalized + '\n')
+
       - name: Back up the entire database including table data
         shell: bash
         run: |
