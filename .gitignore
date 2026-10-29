@@ -34,6 +34,8 @@ _archive/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.*
+!.env.example
 
 # Supabase temp files (may contain connection strings)
 supabase/.temp/

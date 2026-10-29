@@ -12,22 +12,28 @@ export async function DELETE(req: Request) {
         if (!id || !groupId) {
             return NextResponse.json({ error: 'Missing ID or GroupID' }, { status: 400 });
         }
+        const { data: membership } = await supabase.from('group_members').select('id')
+            .eq('group_id', groupId).eq('user_id', user.id).eq('status', 'active').maybeSingle();
+        if (!membership) return NextResponse.json({ error: 'Active group membership required' }, { status: 403 });
 
         // 1. Get telegram info before deleting
         const { data: entry } = await (supabase as any)
             .from('logbook_entries')
-            .select('telegram_message_id, telegram_chat_id')
+            .select('id, telegram_message_id, telegram_chat_id')
             .eq('id', id)
+            .eq('group_id', groupId)
             .single();
+        if (!entry) return NextResponse.json({ error: 'Entry not found' }, { status: 404 });
 
         // 2. Delete from DB
-        const { error } = await (supabase as any)
+        const { data: deleted, error } = await (supabase as any)
             .from('logbook_entries')
             .delete()
             .eq('id', id)
-            .eq('group_id', groupId);
+            .eq('group_id', groupId).select('id').maybeSingle();
 
         if (error) throw error;
+        if (!deleted) return NextResponse.json({ error: 'Entry was not deleted' }, { status: 403 });
 
         // 3. Sync deletion to Telegram
         const chatId = entry?.telegram_chat_id || process.env.TELEGRAM_CHAT_ID;
@@ -43,8 +49,8 @@ export async function DELETE(req: Request) {
                             message_id: entry.telegram_message_id
                         })
                     });
-                } catch (tgError) {
-                    console.error("Telegram delete sync error:", tgError);
+                } catch {
+                    console.error("Telegram delete sync failed; credential-bearing request details omitted");
                 }
             }
         }

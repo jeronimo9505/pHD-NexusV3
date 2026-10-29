@@ -1,17 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient, getUser } from '@/lib/supabase/server';
 
 export async function GET(req: NextRequest) {
+    const user = await getUser();
+    if (!user) return new NextResponse('Unauthorized', { status: 401 });
     const { searchParams } = new URL(req.url);
     const fileId = searchParams.get('file_id');
 
     if (!fileId) return new NextResponse('Missing file_id', { status: 400 });
+    const supabase = await createClient();
+    const { data: entry, error: entryError } = await (supabase as any).from('logbook_entries')
+        .select('id,group_id').contains('media_files', [{ telegram_file_id: fileId }]).limit(1).maybeSingle();
+    if (entryError || !entry) return new NextResponse('Media not found', { status: 404 });
+    const { data: membership } = await supabase.from('group_members').select('id')
+        .eq('group_id', entry.group_id).eq('user_id', user.id).eq('status', 'active').maybeSingle();
+    if (!membership) return new NextResponse('Media not found', { status: 404 });
 
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     if (!botToken) return new NextResponse('Missing BOT_TOKEN', { status: 500 });
 
     try {
         // 1. Get file path from Telegram
-        const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+        const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`, { cache: 'no-store' });
         const fileData = await fileRes.json();
         const filePath = fileData.result?.file_path;
 
@@ -24,7 +34,8 @@ export async function GET(req: NextRequest) {
         
         const fetchOptions: RequestInit = {
             method: 'GET',
-            headers: range ? { 'Range': range } : {}
+            headers: range ? { 'Range': range } : {},
+            cache: 'no-store'
         };
 
         const mediaRes = await fetch(telegramUrl, fetchOptions);
@@ -44,7 +55,8 @@ export async function GET(req: NextRequest) {
         // 4. Return with appropriate status and headers for Range support
         const responseHeaders = new Headers({
             'Content-Type': contentType,
-            'Cache-Control': 'public, max-age=86400, immutable',
+            'Cache-Control': 'private, no-store',
+            'Vary': 'Cookie',
             'Accept-Ranges': 'bytes',
         });
 
@@ -59,8 +71,8 @@ export async function GET(req: NextRequest) {
             headers: responseHeaders
         });
 
-    } catch (e) {
-        console.error("Telegram proxy error:", e);
+    } catch {
+        console.error("Telegram media request failed; credential-bearing request details omitted");
         return new NextResponse('Internal error downloading media', { status: 500 });
     }
 }

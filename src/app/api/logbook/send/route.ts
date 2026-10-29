@@ -49,6 +49,9 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = await createClient();
+    const { data: membership, error: membershipError } = await supabase.from('group_members')
+        .select('id').eq('group_id', groupId).eq('user_id', user.id).eq('status', 'active').maybeSingle();
+    if (membershipError || !membership) return NextResponse.json({ error: 'Active group membership required' }, { status: 403 });
 
     // Get user profile
     const { data: profile } = await supabase
@@ -137,6 +140,7 @@ export async function POST(req: NextRequest) {
                     .from("logbook_entries")
                     .select("telegram_message_id")
                     .eq("id", parentId)
+                    .eq("group_id", groupId)
                     .single();
                 
                 if (parent?.telegram_message_id) {
@@ -161,11 +165,10 @@ export async function POST(req: NextRequest) {
                     }];
                 }
             } else {
-                const tgErrText = await tgRes.text();
-                console.error("Telegram sendPhoto failed:", tgErrText);
+                console.error("Telegram sendPhoto failed", { status: tgRes.status });
             }
-        } catch (err) {
-            console.error("Telegram image upload error:", err);
+        } catch {
+            console.error("Telegram image upload failed; credential-bearing request details omitted");
         }
     }
 
@@ -227,6 +230,7 @@ export async function POST(req: NextRequest) {
                     .from("logbook_entries")
                     .select("telegram_message_id")
                     .eq("id", parentId)
+                    .eq("group_id", groupId)
                     .single();
                 
                 if (parent?.telegram_message_id) {
@@ -254,8 +258,8 @@ export async function POST(req: NextRequest) {
                         .eq("id", entry.id);
                 }
             }
-        } catch (err) {
-            console.error("Telegram mirror error (non-fatal):", err);
+        } catch {
+            console.error("Telegram mirror failed; credential-bearing request details omitted");
         }
     }
 
