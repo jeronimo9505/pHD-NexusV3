@@ -56,7 +56,7 @@ export default async function GroupSettingsPage({
                         Group Settings
                     </h1>
                     <p className="text-slate-500 mt-1 ml-[52px]">
-                        {canManage ? 'Manage your group, team, and integrations.' : 'View group information and team members.'}
+                        {canManage ? 'Manage your group, team, and integrations.' : 'View group information, team members, and configure local desktop settings.'}
                     </p>
                 </div>
 
@@ -145,16 +145,20 @@ export default async function GroupSettingsPage({
                     </section>
                 )}
 
-                {/* Google Drive Integration — Admin/Owner/SystemAdmin only */}
-                {(canManage || isSysAdmin) && (
-                    <section className="space-y-4">
-                        <div className="flex items-center gap-2">
-                            <HardDrive size={18} className="text-amber-600" />
-                            <h2 className="text-lg font-semibold text-slate-900">Google Drive Integration</h2>
-                        </div>
-                        <DriveSettingsForm groupId={groupId} initialSettings={driveSettings} />
-                    </section>
-                )}
+                {/* Local Desktop Settings (all users with Settings access) & Google Drive Cloud Settings (Admin/Owner/SystemAdmin) */}
+                <section className="space-y-4">
+                    <div className="flex items-center gap-2">
+                        <HardDrive size={18} className="text-amber-600" />
+                        <h2 className="text-lg font-semibold text-slate-900">
+                            {(canManage || isSysAdmin) ? 'Google Drive Integration' : 'Local Desktop Settings'}
+                        </h2>
+                    </div>
+                    <DriveSettingsForm
+                        groupId={groupId}
+                        canManageCloud={canManage || isSysAdmin}
+                        initialSettings={(canManage || isSysAdmin) ? driveSettings : undefined}
+                    />
+                </section>
             </div>
         </div>
     );

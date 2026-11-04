@@ -12,6 +12,7 @@ import {WipLibrarySettings} from './wip-library-settings';
 
 interface DriveSettingsFormProps {
     groupId: string;
+    canManageCloud?: boolean;
     initialSettings?: {
         clientId?: string;
         apiKey?: string;
@@ -25,7 +26,7 @@ interface DriveSettingsFormProps {
     };
 }
 
-export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFormProps) {
+export function DriveSettingsForm({ groupId, canManageCloud = true, initialSettings }: DriveSettingsFormProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [showHelp, setShowHelp] = useState(false);
 
@@ -115,9 +116,13 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
                     <Shield size={24} />
                 </div>
                 <div>
-                    <h2 className="text-lg font-semibold text-slate-800">Google Drive Integration</h2>
+                    <h2 className="text-lg font-semibold text-slate-800">
+                        {canManageCloud ? 'Google Drive Integration' : 'Local Desktop Settings'}
+                    </h2>
                     <p className="text-slate-500 text-sm mt-1">
-                        Configure your credentials to enable Google Picker and Drive integration for this group.
+                        {canManageCloud
+                            ? 'Configure your credentials to enable Google Picker and Drive integration for this group.'
+                            : 'Configure your local Data Vault and WITec Project Library folders on this computer.'}
                     </p>
                 </div>
             </div>
@@ -156,7 +161,7 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
             )}
 
             {isDesktop&&<div className="px-6 pb-6"><WipLibrarySettings/></div>}
-            <form onSubmit={handleSubmit} className="p-6 space-y-6">
+            {canManageCloud && <form onSubmit={handleSubmit} className="p-6 space-y-6">
                 <div className="space-y-4">
                     <div className="border-b border-slate-100 pb-4 mb-4">
                         <h3 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
@@ -382,9 +387,9 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
                         Save Settings
                     </button>
                 </div>
-            </form>
+            </form>}
 
-            <DriveFileSelectorModal
+            {canManageCloud && <DriveFileSelectorModal
                 isOpen={showFolderModal}
                 onClose={() => setShowFolderModal(false)}
                 onSelect={handleFolderSelect}
@@ -394,7 +399,7 @@ export function DriveSettingsForm({ groupId, initialSettings }: DriveSettingsFor
                     folderId: initialSettings?.folderId // Start at root if not set
                 }}
                 selectionMode="folder"
-            />
+            />}
         </div>
     );
 }

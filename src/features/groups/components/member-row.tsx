@@ -67,7 +67,7 @@ export function MemberRow({
                         {isMe && <span className="text-xs ml-2 bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">You</span>}
                     </p>
                     <p className="text-xs text-slate-500 capitalize flex items-center gap-1">
-                        {member.role}
+                        {member.role === 'labmanager' ? 'Lab Manager' : member.role}
                         {member.status === 'pending' && <span className="text-yellow-600">(Pending)</span>}
                     </p>
                 </div>
@@ -83,6 +83,7 @@ export function MemberRow({
                     >
                         <option value="student">Student</option>
                         <option value="researcher">Researcher</option>
+                        <option value="labmanager">Lab Manager</option>
                         <option value="supervisor">Supervisor</option>
                     </select>
 
@@ -96,7 +97,9 @@ export function MemberRow({
                     </button>
                 </div>
             ) : (
-                <span className="text-xs text-slate-400 px-3 py-1 bg-slate-100 rounded-full">{member.role}</span>
+                <span className="text-xs text-slate-400 px-3 py-1 bg-slate-100 rounded-full capitalize">
+                    {member.role === 'labmanager' ? 'Lab Manager' : member.role}
+                </span>
             )}
         </div>
     );
