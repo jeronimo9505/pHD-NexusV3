@@ -1,5 +1,7 @@
 # Matriz de cobertura funcional
 
+Constructor (04-11-2026): SV21 permite eliminar cualquier pico, renumerar referencias y rechazar dependencias al pico eliminado sin modificar el modelo. Pendientes arrastre, nombres, cambio de perfil seguro y validación visual.
+
 Selección previa (04-11-2026): SV07/24 permiten comparar hasta 32 espectros elegidos por índice con inspección individual y conservación de fallos. Pendiente selección gráfica, ajuste persistente de selección/múltiples mapas y recorrido visual.
 
 Actualización 04-11-2026: SV11/27 añaden mapa de estados por fila y conteos completos (incluidos pendientes/fallos) con selección enlazada. Implementación parcial: faltan máscaras de calidad, filtros, variantes y validación visual.

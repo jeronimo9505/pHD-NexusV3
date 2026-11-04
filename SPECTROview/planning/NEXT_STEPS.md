@@ -49,7 +49,7 @@ Los bloques 7–9 no autorizan omitir funciones pendientes de bloques anteriores
 
 ## Riesgos concretos que deben cerrarse
 
-- El constructor actual solo elimina el último pico; expresiones dependientes pueden quedar inválidas. El servidor las rechaza, pero la interfaz necesita explicación y operación segura.
+- Resuelto 04-11: eliminar cualquier pico renumera referencias supervivientes; si otro parámetro depende del pico eliminado, se rechaza la operación con explicación y sin cambiar el modelo. Pendiente aceptación visual y restantes operaciones del constructor.
 - Cambiar el perfil reinicializa parámetros. Debe mostrar el efecto y conservar los compatibles únicamente con semántica y restricciones válidas.
 - El mapa de parámetros omite fallos y pendientes. Hace falta una capa de estado que permita inspeccionarlos.
 - Las expresiones con dependencias hacia delante están limitadas actualmente; resolver el orden tanto en evaluación como optimización antes de declarar paridad.

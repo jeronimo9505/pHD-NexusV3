@@ -63,3 +63,8 @@ No se han actualizado datos cloud ni distribuido un instalador; los originales p
 ## Comparación de selección — 2026-11-04
 
 5 pruebas API pasan; caso mixto reforzado y vuelto a ejecutar pasa con centros distintos e índice inválido intermedio. Se verifica paridad con filas del mapa, orden, validación estricta y ausencia de escrituras de corrida durante preview. TypeScript y ESLint pasan. Límite de selección previa: 32. Resultados temporales, selección local por adquisición. Recorrido visual pendiente.
+
+## Constructor y escritorio — 2026-11-04
+
+Pruebas frontend de eliminación segura y estado de preview pasan; ESLint pasa. Verificadas referencias P10/P2, borrado intermedio, restricciones preservadas y rechazo sin mutación. Acceso de lectura a Nexus funciona, pero navegación falló al identificar el proceso de la ventana; recuperación no encontró destino único. No se declara aceptación visual de SPECTROview.
+TypeScript sin emisión también pasa para esta entrega.

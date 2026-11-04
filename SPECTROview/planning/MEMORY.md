@@ -123,3 +123,11 @@ Interfaz: SelectionPreview permite lista por índices y añadir el espectro insp
 Pruebas: 5 API pasan (15.609 s); después se reforzó caso mixto con centros distintos 1570/1590 y se repitió ese test, pasa (2.341 s). Verifica orden [8,4,0], fila NaN intermedia, coincidencia selección/mapa, ausencia de artefactos y rechazo de vacíos/duplicados/fuera de rango/fracciones/booleanos/más de 32. TypeScript y ESLint pasan. No se hizo validación visual. Actualizados SETUP, FEATURES y NEXT_STEPS.
 
 Siguiente: recorrido visual, selección gráfica y continuidad de selección en análisis persistente; constructor seguro/plantillas y resto de matriz abiertos. No confundir previews temporales con ajuste persistente de una selección o cierre de paridad completa.
+
+## Publicación y continuación 2026-11-04
+
+Subida autorizada por el usuario. Commit de integración ffe55d7; remoto tenía 4 commits de backups, integrados con merge e6083d5 y push origin main verificado. Backup local/documentación coincidían exactamente con remoto por git hash-object; stash temporal específico eliminado tras verificar igualdad. Quedaron fuera next-env.d.ts, Cargo.toml (cambios previos), Reference/ y captura OAuth.
+
+Revisión de escritorio mediante computer-use: se identificó PhD Nexus y se leyó árbol/captura de Map Analyzer/RGI2. UI muestra aviso de reiniciar motor Python para metadatos. Clic SPECTROview falló con 'foreground window did not report a process id'; recuperación no encontró una ventana Nexus única. No se ejecutó un recorrido visual del módulo ni se atribuye el aviso al nuevo código.
+
+Se continuó bloque constructor: removePeak permite borrar cualquier pico, renumera expresiones con referencias de varios dígitos, preserva restricciones y rechaza dependencias al pico eliminado sin mutar el original. Botón por pico y error contextual. Pruebas test-spectroview-model.mjs y test-spectroview-preview.mjs pasan; ESLint pasa. Próximos pendientes: cambio de perfil seguro, plantillas, selección gráfica/persistente y recorrido visual pendiente.

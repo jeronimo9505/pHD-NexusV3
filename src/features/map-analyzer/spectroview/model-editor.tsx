@@ -1,6 +1,8 @@
 'use client';
 
 import type { Hint, Model } from './client';
+import { useState } from 'react';
+import { removePeak } from './model-operations';
 
 const input = 'w-24 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs';
 
@@ -13,6 +15,11 @@ export function makePeak(shape: string, parameters: string[], center: number): R
 }
 
 export function ModelEditor({ model, registry, center, onChange }: { model: Model; registry: Record<string, string[]>; center: number; onChange: (model: Model) => void }) {
+    const [failure, setFailure] = useState<{ model: Model; message: string } | null>(null);
+    function remove(index: string) {
+        try { onChange(removePeak(model, index)); setFailure(null); }
+        catch (reason) { setFailure({ model, message: reason instanceof Error ? reason.message : 'Could not remove peak' }); }
+    }
     function change(peak: string, name: string, field: keyof Hint, value: number | string | boolean | null) {
         const next = structuredClone(model);
         const shape = Object.keys(next.peak_models[peak])[0];
@@ -35,7 +42,7 @@ export function ModelEditor({ model, registry, center, onChange }: { model: Mode
                     <td className="px-3 py-2">{row === 0 ? <div className="flex items-center gap-2"><span>P{Number(index) + 1}</span><select aria-label={`Profile for peak ${Number(index) + 1}`} className={`${input} w-36`} value={shape} onChange={event => {
                         const profile = event.target.value;
                         onChange({ peak_models: { ...model.peak_models, [index]: { [profile]: makePeak(profile, registry[profile], hints.x0?.value ?? center) } } });
-                    }}>{Object.keys(registry).map(profile => <option key={profile}>{profile}</option>)}</select></div> : null}</td>
+                    }}>{Object.keys(registry).map(profile => <option key={profile}>{profile}</option>)}</select><button type="button" aria-label={`Remove peak ${Number(index) + 1}`} disabled={Object.keys(model.peak_models).length < 2} className="text-rose-600 disabled:opacity-40" onClick={() => remove(index)}>Remove</button></div> : null}</td>
                     <td className="px-3 py-2 font-medium text-slate-700">{name}</td>
                     {(['min', 'value', 'max'] as const).map(field => <td key={field} className="px-3 py-2"><input type="number" step="any" aria-label={`P${Number(index)+1} ${name} ${field}`} className={input} value={hint[field] ?? ''} placeholder={field === 'value' ? '' : 'Unbounded'} onChange={event => change(index, name, field, event.target.value === '' ? (field === 'value' ? 0 : null) : Number(event.target.value))} /></td>)}
                     <td className="px-3 py-2"><input type="checkbox" aria-label={`Fix P${Number(index)+1} ${name}`} checked={hint.vary === false} onChange={event => change(index, name, 'vary', !event.target.checked)} /></td>
@@ -43,8 +50,7 @@ export function ModelEditor({ model, registry, center, onChange }: { model: Mode
                 </tr>);
             })}</tbody>
         </table></div>
-        <div className="flex items-center justify-between gap-4 border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>Changes create a new analysis. Saved results keep their original model.</span><button type="button" disabled={Object.keys(model.peak_models).length < 2} className="shrink-0 text-rose-600 disabled:opacity-40" onClick={() => {
-            const entries = Object.entries(model.peak_models); entries.pop(); onChange({ peak_models: Object.fromEntries(entries) });
-        }}>Remove last peak</button></div>
+        {failure?.model === model ? <p role="alert" className="px-4 py-2 text-xs text-rose-700">{failure.message}</p> : null}
+        <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">Changes create a new analysis. Saved results keep their original model. Removing a peak renumbers the remaining peaks and their expressions.</div>
     </section>;
 }
