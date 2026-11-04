@@ -32,6 +32,8 @@ from wip_api import router as wip_router
 app.include_router(wip_router)
 from vault_assets_api import router as vault_assets_router
 app.include_router(vault_assets_router)
+from spectroview_integration.router import router as spectroview_router
+app.include_router(spectroview_router)
 
 # Essential CORS
 app.add_middleware(

@@ -1,0 +1,130 @@
+path,line,heading,feature_id,status
+spectroview/resources/user_manual/ai_agent.md,1,**AI Chat Agent**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,14,**1. Opening the AI Chat Agent**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,25,**2. Supported Providers**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,43,**3. Configuring a Provider and Model**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,57,**4. Automatic Small-Model Optimization**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,63,**5. Modern Chat Composer & Interface Overview**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,73,**Conversation History Dialog**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,91,🎤 Voice Dictation (Optional),,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,101,**6. What the AI Agent Can Do**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,118,**7. Prompt Examples**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,120,🚀 Complex / Combined Prompts,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,166,🧩 Simple / Single-Action Prompts,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,196,**8. Conversation History**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,214,**9. Tips & Best Practices**,,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,225,"**10. Troubleshooting a ""Connection error.""**",,pending_mapping
+spectroview/resources/user_manual/ai_agent.md,237,**11. Keyboard Shortcuts**,,pending_mapping
+spectroview/resources/user_manual/calculators.md,1,**Quick Calculation Tool**,,pending_mapping
+spectroview/resources/user_manual/calculators.md,7,"**1. Laser Spot Size, Depth of Field, and Laser Power Density**",,pending_mapping
+spectroview/resources/user_manual/calculators.md,13,**2. Penetration Depth**,,pending_mapping
+spectroview/resources/user_manual/calculators.md,18,**3. Unit Converter**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,1,**Workspace: Graphs**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,14,**1. Loading Data**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,29,**2. Add or Update a Plot**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,46,**3. The Shared Graph Toolbar**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,73,**4. Customizing a Plot**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,97,4.1 Axis Tab,,pending_mapping
+spectroview/resources/user_manual/graphs.md,106,Axis Properties,,pending_mapping
+spectroview/resources/user_manual/graphs.md,118,Set Axis Limits,,pending_mapping
+spectroview/resources/user_manual/graphs.md,133,Axis Appearance,,pending_mapping
+spectroview/resources/user_manual/graphs.md,142,Broken Axis (Beta),,pending_mapping
+spectroview/resources/user_manual/graphs.md,153,Inset (Zoom) Axes,,pending_mapping
+spectroview/resources/user_manual/graphs.md,166,Secondary Axes,,pending_mapping
+spectroview/resources/user_manual/graphs.md,172,4.2 Legend / Color Tab,,pending_mapping
+spectroview/resources/user_manual/graphs.md,181,Legend Box,,pending_mapping
+spectroview/resources/user_manual/graphs.md,199,Legend Style & Error Bars,,pending_mapping
+spectroview/resources/user_manual/graphs.md,209,4.3 Annotations Tab,,pending_mapping
+spectroview/resources/user_manual/graphs.md,218,Adding Annotations,,pending_mapping
+spectroview/resources/user_manual/graphs.md,231,Managing Annotations,,pending_mapping
+spectroview/resources/user_manual/graphs.md,244,4.4 More Options Tab,,pending_mapping
+spectroview/resources/user_manual/graphs.md,253,Plot Options (General),,pending_mapping
+spectroview/resources/user_manual/graphs.md,268,Font Sizes (pt),,pending_mapping
+spectroview/resources/user_manual/graphs.md,272,Data Sorting,,pending_mapping
+spectroview/resources/user_manual/graphs.md,283,Trendline Settings,,pending_mapping
+spectroview/resources/user_manual/graphs.md,293,Histogram Settings,,pending_mapping
+spectroview/resources/user_manual/graphs.md,309,**5. Data Filtering**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,328,**6. Statistical Calculations & Fitting Details**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,332,6.1 **Point and Bar Plots**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,339,6.2 **Box Plot**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,347,6.3 **Trendline Estimation**,,pending_mapping
+spectroview/resources/user_manual/graphs.md,359,6.4 **Trendline Confidence Intervals**,,pending_mapping
+spectroview/resources/user_manual/index.md,17,**Documentation**,,pending_mapping
+spectroview/resources/user_manual/index.md,28,**Acknowledgements**,,pending_mapping
+spectroview/resources/user_manual/index.md,34,**Citation**,,pending_mapping
+spectroview/resources/user_manual/installation.md,1,**Installation**,,pending_mapping
+spectroview/resources/user_manual/installation.md,7,**1. Install from PyPI (Recommended)**,,pending_mapping
+spectroview/resources/user_manual/installation.md,25,**2. Install from GitHub (Latest Development Version)**,,pending_mapping
+spectroview/resources/user_manual/installation.md,37,**3. AI Chat Agent & Optional Voice Dictation**,,pending_mapping
+spectroview/resources/user_manual/installation.md,47,**4. Launch **SPECTROview****,,pending_mapping
+spectroview/resources/user_manual/installation.md,59,**5. Update & Version Management**,,pending_mapping
+spectroview/resources/user_manual/installation.md,81,**6. Automatic Update Notifications**,,pending_mapping
+spectroview/resources/user_manual/installation.md,85,How it works,,pending_mapping
+spectroview/resources/user_manual/installation.md,99,Banner actions,,pending_mapping
+spectroview/resources/user_manual/installation.md,114,**7. Troubleshooting**,,pending_mapping
+spectroview/resources/user_manual/menu_bar.md,1,**Menu Bar**,,pending_mapping
+spectroview/resources/user_manual/menu_bar.md,3,**1. Menu Bar Buttons**,,pending_mapping
+spectroview/resources/user_manual/menu_bar.md,24,**2. Settings Panel**,,pending_mapping
+spectroview/resources/user_manual/menu_bar.md,33,**3. Hyperspectral Data Converter Tool**,,pending_mapping
+spectroview/resources/user_manual/menu_bar.md,43,**4. Quick Calculation Tool**,,pending_mapping
+spectroview/resources/user_manual/menu_bar.md,51,**5. Keyboard Shortcuts**,,pending_mapping
+spectroview/resources/user_manual/mva.md,1,**Multivariate Analysis (MVA)**,,pending_mapping
+spectroview/resources/user_manual/mva.md,7,**1. Supported Algorithms**,,pending_mapping
+spectroview/resources/user_manual/mva.md,9,**1.1. Principal Component Analysis (PCA)**,,pending_mapping
+spectroview/resources/user_manual/mva.md,17,**1.2. Non-negative Matrix Factorization (NMF)**,,pending_mapping
+spectroview/resources/user_manual/mva.md,31,**2. User Interface**,,pending_mapping
+spectroview/resources/user_manual/mva.md,35,**2.1. Left Panel - Controls**,,pending_mapping
+spectroview/resources/user_manual/mva.md,41,**2.2. Right Panel - Tabbed Plots**,,pending_mapping
+spectroview/resources/user_manual/mva.md,52,**3. Tips**,,pending_mapping
+spectroview/resources/user_manual/mva.md,62,**4. Citations and References**,,pending_mapping
+spectroview/resources/user_manual/save_load.md,1,**Save & Load Workspace**,,pending_mapping
+spectroview/resources/user_manual/save_load.md,5,**1. Saving Your Work**,,pending_mapping
+spectroview/resources/user_manual/save_load.md,21,**2. Loading Your Work**,,pending_mapping
+spectroview/resources/user_manual/settings.md,1,**Settings & Preferences**,,pending_mapping
+spectroview/resources/user_manual/settings.md,27,**1. SPECTROview Working Folder & Preferences** *(General tab)*,,pending_mapping
+spectroview/resources/user_manual/settings.md,49,**Interface Theme**,,pending_mapping
+spectroview/resources/user_manual/settings.md,52,**Application Updates**,,pending_mapping
+spectroview/resources/user_manual/settings.md,57,**2. Fit Convergence Parameters** *(Fit Settings tab)*,,pending_mapping
+spectroview/resources/user_manual/settings.md,79,**3. Global Peak Limits** *(Fit Settings tab)*,,pending_mapping
+spectroview/resources/user_manual/settings.md,94,**4. AI Settings** *(AI Settings tab)*,,pending_mapping
+spectroview/resources/user_manual/settings.md,98,**API Keys**,,pending_mapping
+spectroview/resources/user_manual/settings.md,119,**Local MCP Server**,,pending_mapping
+spectroview/resources/user_manual/settings.md,135,**5. About & Environment** *(About tab)*,,pending_mapping
+spectroview/resources/user_manual/shortcuts.md,1,**Keyboard Shortcuts & Tips**,,pending_mapping
+spectroview/resources/user_manual/shortcuts.md,3,**1. Tooltips Everywhere**,,pending_mapping
+spectroview/resources/user_manual/shortcuts.md,15,**2. Tips with `SpectraViewer`**,,pending_mapping
+spectroview/resources/user_manual/shortcuts.md,47,**3. Tips with `MapViewer`**,,pending_mapping
+spectroview/resources/user_manual/shortcuts.md,83,**4. Keyboard Shortcuts in the `Graphs` Workspace**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,1,**Workspace: Spectra and Maps**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,12,**1. `MapList` and `MapViewer`**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,48,**2. `SpectraList`**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,64,**2.1. Cross-Workspace Transfer**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,77,**3. `SpectraViewer`**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,81,**3.1. `SpectraViewer` with Interactive Mouse Controls**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,92,**3.2. Toolbar Buttons and View Options**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,107,**3.3. Batch Legend Editor**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,127,**3.4. Heatmap Visualization Mode**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,136,**Key Controls and Parameters**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,148,**3.5. Interactive Spectral Range Selectors & Live Maps (Maps Workspace)**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,157,**Range Selector Controls (Spectra Viewer)**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,172,**Live Maps Tab Visualization & Subpanels**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,190,**Individual Map Controls**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,198,**4. `FitModelBuilder`**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,209,**4.1. `Fitting` Panel**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,237,**4.2. Supported Peak Profiles**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,252,**4.3. `PeakTable` Panel**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,284,**4.4. `FitModelControl` Panel**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,307,**5. Collect and Save Fit Results**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,321,**5.1. Splitting Filename Features**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,324,**5.2. Compute and Add New Columns**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,329,**5.3. Save and Visualize**,,pending_mapping
+spectroview/resources/user_manual/spectra_maps.md,345,**6. `More` Tab**,,pending_mapping
+spectroview/resources/user_manual/supported_data.md,1,**Supported Data Formats**,,pending_mapping
+spectroview/resources/user_manual/supported_data.md,14,**1. `.wdf` (Renishaw) and `.spc` (HORIBA) Formats**,,pending_mapping
+spectroview/resources/user_manual/supported_data.md,23,"**2. Spectroscopic Data (`.txt`, `.csv`)**",,pending_mapping
+spectroview/resources/user_manual/supported_data.md,30,"**3. Hyperspectral Data (`.txt`, `.csv`)**",,pending_mapping
+spectroview/resources/user_manual/supported_data.md,47,**4. Datasheet (Excel or CSV)**,,pending_mapping
+spectroview/resources/user_manual/supported_data.md,51,**5. Native **SPECTROview** Formats**,,pending_mapping
+spectroview/resources/user_manual/ui_overview.md,1,**User Interface Overview**,,pending_mapping
+spectroview/resources/user_manual/ui_overview.md,3,**1. Workspaces**,,pending_mapping
+spectroview/resources/user_manual/ui_overview.md,18,**2. Tooltips**,,pending_mapping

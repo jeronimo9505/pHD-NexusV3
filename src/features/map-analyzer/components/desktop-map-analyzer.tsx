@@ -20,12 +20,13 @@ const DeconvolutionView = dynamic(() => import('./deconvolution-view').then(modu
 const FittingView = dynamic(() => import('./fitting-view').then(module => module.FittingView));
 const RgiView = dynamic(() => import('./rgi-view').then(module => module.RgiView));
 const Rgi2View = dynamic(() => import('./rgi2-view').then(module => module.Rgi2View));
+const SpectroviewWorkspace = dynamic(() => import('../spectroview/workspace').then(module => module.SpectroviewWorkspace));
 import { getLogbooksAction, registerGroupedH5FileAction } from '@/features/samples/actions';
 import { getVaultSamplesAction } from '../actions';
 import { Logbook } from '@/features/samples/types';
 
 export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
-    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics' | 'pipeline' | 'compare' | 'deconvolution' | 'fitting' | 'rgi' | 'rgi2'>('standard');
+    const [mode, setMode] = useState<'standard' | 'graphene' | 'analytics' | 'pipeline' | 'compare' | 'deconvolution' | 'fitting' | 'rgi' | 'rgi2' | 'spectroview'>('standard');
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [selectedH5, setSelectedH5] = useState('');
     const [vaultRoot, setVaultRoot] = useState('');
@@ -599,7 +600,10 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                  </button>
                              )}
 
-                             <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                             <div className="flex max-w-full overflow-x-auto bg-slate-100 p-1 rounded-xl border border-slate-200">
+                                <button onClick={() => setMode('spectroview')} className={cn("shrink-0 px-4 py-1.5 rounded-lg text-xs font-bold transition-all", mode === 'spectroview' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-indigo-600")}>
+                                    SPECTROview
+                                </button>
                                 <button
                                     onClick={() => setMode('standard')}
                                     className={cn(
@@ -796,6 +800,8 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                     nSpectra={nSpectra}
                                     onFileCreated={(file) => handleImport([file])}
                                 />
+                            ) : mode === 'spectroview' ? (
+                                <SpectroviewWorkspace key={`${vaultRoot}:${selectedH5}`} vaultRoot={vaultRoot} h5Path={selectedH5} />
                             ) : mode === 'rgi2' ? (
                                 <Rgi2View
                                     vaultRoot={vaultRoot}
@@ -814,7 +820,7 @@ export function DesktopMapAnalyzer({ groupId }: { groupId: string }) {
                                 />
                             )}
                         </div>
-                        {mode !== 'analytics' && mode !== 'pipeline' && mode !== 'compare' && mode !== 'deconvolution' && mode !== 'fitting' && mode !== 'rgi' && mode !== 'rgi2' && (
+                        {mode !== 'analytics' && mode !== 'pipeline' && mode !== 'compare' && mode !== 'deconvolution' && mode !== 'fitting' && mode !== 'rgi' && mode !== 'rgi2' && mode !== 'spectroview' && (
                             <div className="h-72 shrink-0 bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 overflow-hidden">
                                 <SpectrumInspector
                                     vaultRoot={vaultRoot}
